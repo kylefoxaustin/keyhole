@@ -1,5 +1,5 @@
 {
-    "name": "NXP Edge MPU (Target)",
+    "name": "Edge MPU Target",
     "tops_bf16": 200.0,
     "tops_int8": 400.0,
     "tops_int4": 800.0,

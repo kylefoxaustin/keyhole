@@ -15,10 +15,10 @@ Usage:
     # Projection from saved profile
     python -m src.emulate.npu_emulator project \\
         --profile data/output/profile_report.json \\
-        --target-config configs/nxp_edge_mpu.json
+        --target-config configs/edge_mpu.json
 
     # Live throttled inference
-    python -m src.main process --video test.mp4 --emulate-npu configs/nxp_edge_mpu.json
+    python -m src.main process --video test.mp4 --emulate-npu configs/edge_mpu.json
 """
 
 import json
@@ -108,8 +108,8 @@ RTX_5090 = HardwareSpec(
 )
 
 # Kyle's target edge MPU
-NXP_EDGE_MPU = HardwareSpec(
-    name="NXP Edge MPU (Target)",
+EDGE_MPU_TARGET = HardwareSpec(
+    name="Edge MPU Target",
     tops_bf16=200.0,
     tops_int8=400.0,
     tops_int4=800.0,
@@ -124,8 +124,8 @@ NXP_EDGE_MPU = HardwareSpec(
 )
 
 # Hypothetical smaller variant for comparison
-NXP_EDGE_MPU_LITE = HardwareSpec(
-    name="NXP Edge MPU Lite",
+EDGE_MPU_LITE = HardwareSpec(
+    name="Edge MPU Lite",
     tops_bf16=50.0,
     tops_int8=100.0,
     tops_int4=200.0,
@@ -141,8 +141,8 @@ NXP_EDGE_MPU_LITE = HardwareSpec(
 
 PRESET_TARGETS = {
     "rtx5090": RTX_5090,
-    "nxp_edge": NXP_EDGE_MPU,
-    "nxp_edge_lite": NXP_EDGE_MPU_LITE,
+    "edge_mpu": EDGE_MPU_TARGET,
+    "edge_mpu_lite": EDGE_MPU_LITE,
 }
 
 
@@ -243,7 +243,7 @@ class NPUEmulator:
     def __init__(
         self,
         reference: HardwareSpec = RTX_5090,
-        target: HardwareSpec = NXP_EDGE_MPU,
+        target: HardwareSpec = EDGE_MPU_TARGET,
     ):
         self.reference = reference
         self.target = target
@@ -596,7 +596,7 @@ class WorkloadProfiler:
 @click.command()
 @click.option("--profile", "profile_path", default=None,
               help="Path to profile_report.json")
-@click.option("--target", "target_name", default="nxp_edge",
+@click.option("--target", "target_name", default="edge_mpu",
               type=click.Choice(list(PRESET_TARGETS.keys())),
               help="Target hardware preset")
 @click.option("--target-config", default=None,

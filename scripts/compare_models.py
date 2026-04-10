@@ -120,7 +120,7 @@ def match_detections(ref_boxes, test_boxes, iou_threshold=0.5):
 
 
 def project_to_edge(gpu_kernel_ms: float) -> tuple:
-    """Project GPU kernel time to NXP Edge NPU. Returns (projected_ms, fps)."""
+    """Project GPU kernel time to Edge MPU Target NPU. Returns (projected_ms, fps)."""
     if gpu_kernel_ms <= 0:
         return 0, 0
     compute_frac = 0.023

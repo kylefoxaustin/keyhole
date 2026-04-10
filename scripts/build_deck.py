@@ -313,8 +313,8 @@ def build_roofline_chart(targets: dict, sam3_ref: Optional[dict]):
 
     target_styles = {
         "rtx5090": (MPL_COLORS["blue"], "o", "RTX 5090"),
-        "nxp_edge": (MPL_COLORS["green"], "s", "NXP Edge MPU"),
-        "nxp_edge_lite": (MPL_COLORS["orange"], "^", "NXP Edge Lite"),
+        "edge_mpu": (MPL_COLORS["green"], "s", "Edge MPU Target"),
+        "edge_mpu_lite": (MPL_COLORS["orange"], "^", "Edge MPU Lite"),
     }
 
     ai_range = np.logspace(-1, 3, 200)
@@ -731,15 +731,15 @@ def slide_npu_projections(prs: Presentation, run: dict, targets: dict):
                      headers, rows)
 
     # Key insight callout
-    nxp = next((p for p in projections if p["target_key"] == "nxp_edge"), None)
-    if nxp:
-        bottleneck = nxp["sam3_bottleneck"]
+    edge_mpu = next((p for p in projections if p["target_key"] == "edge_mpu"), None)
+    if edge_mpu:
+        bottleneck = edge_mpu["sam3_bottleneck"]
         insight = (
-            f"NXP Edge MPU: {nxp['combined_ms']:.1f}ms combined "
-            f"({nxp['combined_fps']:.0f} FPS)  |  "
+            f"Edge MPU Target: {edge_mpu['combined_ms']:.1f}ms combined "
+            f"({edge_mpu['combined_fps']:.0f} FPS)  |  "
             f"SAM 3 is {bottleneck}-bound  |  "
-            f"{'FEASIBLE' if nxp['feasible_1fps'] else 'NOT FEASIBLE'} at 1 FPS extraction  |  "
-            f"{'FEASIBLE' if nxp['feasible_5fps'] else 'NOT FEASIBLE'} at 5 FPS extraction"
+            f"{'FEASIBLE' if edge_mpu['feasible_1fps'] else 'NOT FEASIBLE'} at 1 FPS extraction  |  "
+            f"{'FEASIBLE' if edge_mpu['feasible_5fps'] else 'NOT FEASIBLE'} at 5 FPS extraction"
         )
 
         box = slide.shapes.add_shape(
@@ -801,7 +801,7 @@ def slide_bandwidth_wall(prs: Presentation):
         ("  Arithmetic intensity: ~2 FLOPs/byte (ridge point: 117 FLOPs/byte)", C.TEXT_DIM, False),
         ("  Even the 5090's 72 MB L2 cache can't absorb this — activations are too large", C.ACCENT_ORANGE, False),
         ("", C.TEXT_DIM, False),
-        ("EDGE PROJECTION: NXP Edge MPU (200 TOPS, 134.4 GB/s, ~4 MB SRAM)", C.ACCENT_BLUE, True),
+        ("EDGE PROJECTION: Edge MPU Target (200 TOPS, 134.4 GB/s, ~4 MB SRAM)", C.ACCENT_BLUE, True),
         ("  Bandwidth ratio: 1523 / 101 = 15.1x less bandwidth than RTX 5090", C.TEXT_BRIGHT, False),
         ("  Projected: ~2,400ms per frame (0.4 FPS)  |  14x slowdown", C.NOT_FEASIBLE, True),
         ("  200 TOPS is irrelevant — compute is only 2% of total time", C.TEXT_DIM, False),
@@ -839,7 +839,7 @@ def slide_bandwidth_requirements(prs: Presentation):
     # Current hardware reference
     ref_lines = [
         ("Current Hardware Reference:", C.ACCENT_BLUE, True),
-        ("  NXP Edge MPU:  134.4 GB/s  (128-bit LPDDR5X)  →  0.4 FPS", C.NOT_FEASIBLE, False),
+        ("  Edge MPU Target:  134.4 GB/s  (128-bit LPDDR5X)  →  0.4 FPS", C.NOT_FEASIBLE, False),
         ("  RTX 5090:      1,792 GB/s  (512-bit GDDR7)    →  6.0 FPS", C.TEXT_BRIGHT, False),
         ("  NVIDIA H200:   4,800 GB/s  (HBM3e)            →  ~33 FPS (Meta's paper: 30ms)", C.ACCENT_GREEN, False),
         ("", C.TEXT_DIM, False),
@@ -1210,7 +1210,7 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
 
     latest_run = runs[-1] if runs else {}
     projections = project_for_deck(latest_run, targets) if latest_run else []
-    nxp = next((p for p in projections if p["target_key"] == "nxp_edge"), None)
+    edge_mpu = next((p for p in projections if p["target_key"] == "edge_mpu"), None)
 
     findings = []
 
@@ -1231,7 +1231,7 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
         "  98% of GPU time is waiting for memory, not computing",
         "  RTX 5090's 72 MB L2 cache cannot absorb 3.71 GB of activations",
         "",
-        "NXP Edge MPU (200 TOPS / 134.4 GB/s / 25W):",
+        "Edge MPU Target (200 TOPS / 134.4 GB/s / 25W):",
         "  Projected: ~2,400ms per frame (0.4 FPS)  |  14x slower than 5090",
         "  200 TOPS is sufficient — 134.4 GB/s bandwidth is the bottleneck",
         "  Memory: 7.07 GB peak vs 8 GB capacity = no headroom",
@@ -1243,7 +1243,7 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
 
     for i, finding in enumerate(findings):
         color = C.TEXT_WHITE if finding.strip() else C.TEXT_DIM
-        if finding.strip().startswith("NXP"):
+        if finding.strip().startswith("Edge MPU"):
             color = C.ACCENT_GREEN
         elif "FEASIBLE" in finding and "NOT" not in finding:
             color = C.FEASIBLE

@@ -52,7 +52,8 @@ def cli():
 @click.option("--render", is_flag=True, help="Output annotated video with detection overlays")
 @click.option("--single-pass", is_flag=True, help="Use SAM 3 single-pass detection (replaces YOLO+SAM3 sequential)")
 @click.option("--sam3-resolution", default=1008, type=int, help="SAM 3 internal processing resolution (default 1008)")
-def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool, single_pass: bool, sam3_resolution: int):
+@click.option("--hybrid", is_flag=True, help="Use hybrid pipeline (YOLO + MobileSAM + CLIP)")
+def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool, single_pass: bool, sam3_resolution: int, hybrid: bool):
     """Process a video through the detection pipeline."""
 
     from src.ingest.video import extract_frames, probe_video
@@ -127,9 +128,23 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
     store = DetectionStore(settings.database.url)
     video_id = store.register_video(meta)
 
+    # Hybrid mode: YOLO + MobileSAM + CLIP
+    hybrid_detector = None
+    if hybrid:
+        from src.detect.hybrid import HybridDetector
+        console.print(f"  [bold cyan]HYBRID MODE — YOLO + MobileSAM + CLIP[/]")
+        hybrid_detector = HybridDetector(
+            yolo_model=settings.yolo.model,
+            yolo_confidence=settings.yolo.confidence,
+            device=settings.yolo.device,
+            profile=do_profile,
+            retain_masks=render,
+        )
+        hybrid_detector.load_model()
+
     # Single-pass mode: SAM 3 does everything in one forward pass
     sp_detector = None
-    if single_pass:
+    if single_pass and not hybrid:
         from src.detect.sam3_detect import SAM3SinglePassDetector
         console.print(f"  [bold yellow]SINGLE-PASS MODE — SAM 3 handles detection + enrichment[/]")
         sp_detector = SAM3SinglePassDetector(
@@ -145,7 +160,7 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
     # Standard mode: YOLO detection + optional SAM 3 enrichment
     detector = None
     enricher = None
-    if not single_pass:
+    if not single_pass and not hybrid:
         detector = YOLODetector(
             model_name=settings.yolo.model,
             confidence=settings.yolo.confidence,
@@ -190,7 +205,10 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
         task = progress.add_task("Processing", total=estimated_frames)
 
         for frame in extract_frames(video_path, target_fps=extract_fps, max_frames=max_f):
-            if single_pass:
+            if hybrid:
+                # === HYBRID: YOLO + MobileSAM + CLIP ===
+                enriched = hybrid_detector.detect_frame(frame)
+            elif single_pass:
                 # === SINGLE-PASS: SAM 3 does everything ===
                 enriched = sp_detector.detect_frame(frame)
             else:
@@ -229,7 +247,7 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
                     )
 
             # Store results
-            yolo_ms = 0.0 if single_pass else frame_dets.inference_ms
+            yolo_ms = 0.0 if (single_pass or hybrid) else frame_dets.inference_ms
             store.store_enriched_frame(
                 video_id=video_id,
                 enriched=enriched,
@@ -269,7 +287,43 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
         from datetime import datetime, timezone
         run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-        if single_pass:
+        if hybrid:
+            hybrid_metrics = hybrid_detector.get_profile_metrics()
+            console.print("\n[bold]GPU Profile — Hybrid (YOLO + MobileSAM + CLIP)[/]")
+            for k, v in hybrid_metrics.items():
+                if not isinstance(v, dict):
+                    console.print(f"  {k}: {v}")
+
+            profile_data = {
+                "run_id": f"{video_path.stem}_{run_timestamp}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "video": {
+                    "name": video_path.name,
+                    "path": str(video_path),
+                    "width": meta.width,
+                    "height": meta.height,
+                    "source_fps": meta.fps,
+                    "duration_sec": meta.duration,
+                    "extract_fps": extract_fps,
+                },
+                "yolo": {
+                    "model": settings.yolo.model,
+                    "avg_ms": hybrid_metrics.get("avg_yolo_ms", 0),
+                },
+                "sam3": hybrid_metrics,
+                "pipeline": {
+                    "total_frames": total_frames,
+                    "total_detections": total_detections,
+                    "total_seconds": pipeline_sec,
+                    "fps": total_frames / pipeline_sec,
+                    "detect_only": False,
+                    "single_pass": False,
+                    "hybrid": True,
+                    "emulate_npu": emulate_npu or None,
+                },
+            }
+
+        elif single_pass:
             sp_metrics = sp_detector.get_profile_metrics()
             console.print("\n[bold]GPU Profile — SAM 3 Single-Pass[/]")
             for k, v in sp_metrics.items():
@@ -477,7 +531,7 @@ def stats():
 @cli.command(name="emulate")
 @click.option("--profile", "profile_path", default="data/output/profile_report.json",
               help="Path to profile_report.json")
-@click.option("--target", default="nxp_edge", help="Target preset or JSON path")
+@click.option("--target", default="edge_mpu", help="Target preset or JSON path")
 @click.option("--compare-all", is_flag=True, help="Compare all preset targets")
 def emulate_cmd(profile_path, target, compare_all):
     """Project pipeline performance onto edge NPU hardware."""
