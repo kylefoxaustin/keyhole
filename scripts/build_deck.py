@@ -375,13 +375,21 @@ def build_latency_comparison_chart(runs: list[dict], targets: dict):
     sam3_times = []
 
     for run in runs[-8:]:  # Show last 8 runs
-        label = run.get("video", {}).get("name", run.get("run_id", "unknown"))
-        label = label.replace(".mp4", "")
-        if len(label) > 15:
-            label = label[:12] + "..."
+        video = run.get("video", {})
+        height = video.get("height", 0)
+        res = "4K" if height >= 2160 else f"{height}p" if height > 0 else "?"
+        is_sp = run.get("pipeline", {}).get("single_pass", False)
+        mode = "SP" if is_sp else ("Det" if run.get("pipeline", {}).get("detect_only") else "Seq")
+
+        name = video.get("name", "unknown").replace(".mp4", "").replace("embedded_world_clip", "EW")
+        label = f"{name}\n({res}, {mode})"
         run_labels.append(label)
+
         yolo_times.append(run.get("yolo", {}).get("avg_ms", 0))
-        sam3_times.append(run.get("sam3", {}).get("avg_enrichment_ms", 0))
+        # Handle both single-pass and sequential SAM 3 timing
+        sam3_data = run.get("sam3", {})
+        sam3_ms = sam3_data.get("avg_inference_ms") or sam3_data.get("avg_enrichment_ms", 0)
+        sam3_times.append(sam3_ms)
 
     x = np.arange(len(run_labels))
     width = 0.35
@@ -604,9 +612,27 @@ def slide_run_results(prs: Presentation, run: dict, run_index: int):
     video = run.get("video", {})
     video_name = video.get("name", "unknown")
     run_id = run.get("run_id", "unknown")
+    width = video.get("width", 0)
+    height = video.get("height", 0)
 
-    add_title_bar(slide, f"Test Run: {video_name}",
-                  f"Run ID: {run_id}  |  {video.get('width', '?')}x{video.get('height', '?')} @ {video.get('extract_fps', '?')} FPS extraction")
+    # Determine resolution label
+    if height >= 2160:
+        res_label = "4K"
+    elif height >= 1080:
+        res_label = "1080p"
+    elif height >= 720:
+        res_label = "720p"
+    elif height > 0:
+        res_label = f"{height}p"
+    else:
+        res_label = "?"
+
+    # Determine pipeline mode
+    is_single_pass = run.get("pipeline", {}).get("single_pass", False)
+    mode_label = "Single-Pass" if is_single_pass else ("Detect Only" if run.get("pipeline", {}).get("detect_only") else "YOLO+SAM3")
+
+    add_title_bar(slide, f"Test Run: {video_name} ({res_label})",
+                  f"{width}x{height} | {mode_label} | {video.get('extract_fps', '?')} FPS extraction | Run: {run_id}")
 
     yolo = run.get("yolo", {})
     sam3 = run.get("sam3", {})
