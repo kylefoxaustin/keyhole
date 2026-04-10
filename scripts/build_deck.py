@@ -895,6 +895,121 @@ def slide_prompt_scaling(prs: Presentation):
                  font_size=10, color=C.ACCENT_ORANGE, bold=True)
 
 
+def slide_quantization_tested(prs: Presentation):
+    """Slide: Weight-only INT8 quantization results — doesn't help."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide, C.BG_DARK)
+
+    add_title_bar(slide, "Quantization Tested — Weight-Only INT8 Doesn't Help",
+                  "Measured with torchao Int8WeightOnlyConfig on RTX 5090 (9 concepts, 720p)")
+
+    headers = ["Metric", "BF16 (baseline)", "INT8 Weight-Only", "Delta"]
+    rows = [
+        ["Wall clock", "121ms", "121ms", "0% (no change)"],
+        ["GPU kernel time", "102ms", "117ms", "15% SLOWER"],
+        ["Peak VRAM", "7.07 GB", "5.11 GB", "2 GB saved"],
+        ["Edge projection", "1,791ms (0.6 FPS)", "1,731ms (0.6 FPS)", "Negligible"],
+    ]
+    add_styled_table(slide, Inches(0.3), Inches(1.4), Inches(9.4), Inches(1.5),
+                     headers, rows)
+
+    lines = [
+        ("WHY IT DOESN'T HELP:", C.ACCENT_BLUE, True),
+        ("  Weight-only quantization shrinks model params (3.36 GB → 704 MB)", C.TEXT_BRIGHT, False),
+        ("  But activations stay in BF16 — and activations are 98% of bandwidth traffic", C.ACCENT_ORANGE, True),
+        ("  Dequantization overhead (INT8→BF16 per matmul) adds latency", C.TEXT_DIM, False),
+        ("  Lost Meta's fused addmm_act kernel → unfused path is slower", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("WHAT WOULD HELP: Activation quantization (INT8 or FP8 activations)", C.ACCENT_GREEN, True),
+        ("  Would halve the dominant memory traffic between layers", C.TEXT_BRIGHT, False),
+        ("  Edge projection: ~1,700ms → ~850ms (1.2 FPS) — still not real-time", C.ACCENT_ORANGE, False),
+    ]
+
+    for i, (text, color, bold) in enumerate(lines):
+        if text:
+            add_text_box(slide, Inches(0.6), Inches(3.2 + i * 0.30),
+                         Inches(8.8), Inches(0.30),
+                         text, font_size=11, color=color, bold=bold)
+
+
+def slide_activation_quant_challenges(prs: Presentation):
+    """Slide: Why activation quantization is hard for SAM 3."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    add_title_bar(slide, "Activation Quantization — Why It's Hard for SAM 3",
+                  "The one lever that could halve edge latency, but requires research-grade effort")
+
+    headers = ["Challenge", "Impact", "Mitigation"]
+    rows = [
+        ["Attention score clipping",
+         "INT8 clips outlier scores that encode\n'attend strongly to this location'",
+         "FP8 (E4M3) preserves dynamic range"],
+        ["Text-vision cross-attention",
+         "Quant errors → false positives, missed\ndetections, concept misclassification",
+         "Per-layer sensitivity analysis,\nmixed-precision (keep critical layers BF16)"],
+        ["Calibration data dependency",
+         "Scale factors derived from cal data;\nmismatch → degraded accuracy",
+         "Diverse calibration set matching\ndeployment distribution"],
+        ["Flash Attention 3 incompatibility",
+         "No INT8 flash attention kernel;\nfallback to standard attention = slower",
+         "FP8 flash attention (future),\nor accept unfused penalty"],
+        ["Not all layers are equal",
+         "LayerNorm outputs, residuals, first/last\nlayers are quantization-sensitive",
+         "Mixed-precision: INT8 bulk matmuls,\nBF16 for sensitive layers"],
+    ]
+
+    add_styled_table(slide, Inches(0.2), Inches(1.4), Inches(9.6), Inches(3.0),
+                     headers, rows,
+                     col_widths=[Inches(2.5), Inches(3.5), Inches(3.6)])
+
+    # Projection box
+    box = slide.shapes.add_shape(
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        Inches(0.5), Inches(4.7), Inches(9), Inches(2.3),
+    )
+    box.fill.solid()
+    box.fill.fore_color.rgb = RGBColor(0x0D, 0x1A, 0x2B)
+    box.line.color.rgb = C.ACCENT_BLUE
+    box.line.width = Pt(2)
+
+    tf = box.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    p.text = "EVEN WITH PERFECT ACTIVATION QUANTIZATION"
+    p.font.size = Pt(12)
+    p.font.color.rgb = C.ACCENT_BLUE
+    p.font.bold = True
+    p.font.name = "Segoe UI"
+
+    projections = [
+        "INT8 activations → ~2x traffic reduction → edge: ~850ms (1.2 FPS)",
+        "FP8 activations  → ~2x traffic reduction → edge: ~850ms (1.2 FPS)",
+        "INT4 activations  → ~4x traffic reduction → edge: ~425ms (2.4 FPS) — significant accuracy risk",
+        "",
+        "None of these reach 5 FPS (200ms budget) on 134.4 GB/s LPDDR5X.",
+        "",
+        "Viable paths to activation quantization today:",
+        "  • SmoothQuant — shifts quant difficulty from activations to weights (proven on LLMs)",
+        "  • FP8 (E4M3) — RTX 5090 supports natively, best accuracy/speed tradeoff",
+        "  • Wait for Meta — official quantized SAM 3 checkpoint would bypass all issues",
+    ]
+    for line in projections:
+        p2 = tf.add_paragraph()
+        p2.text = line
+        p2.font.size = Pt(10)
+        p2.font.name = "Segoe UI"
+        if "None of these" in line:
+            p2.font.color.rgb = C.NOT_FEASIBLE
+            p2.font.bold = True
+        elif line.startswith("  •"):
+            p2.font.color.rgb = C.ACCENT_GREEN
+        elif "→" in line:
+            p2.font.color.rgb = C.TEXT_BRIGHT
+        else:
+            p2.font.color.rgb = C.TEXT_DIM
+
+
 def slide_resolution_lock(prs: Presentation):
     """Slide: Why reducing input resolution doesn't help."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -946,14 +1061,15 @@ def slide_optimization_roadmap(prs: Presentation):
 
     headers = ["Optimization", "Traffic Reduction", "Est. Edge FPS", "Status"]
     rows = [
-        ["SAM 3 BF16, 1080p, 9 prompts (baseline)", "1x (~147 GB)", "0.4 FPS", "MEASURED"],
+        ["SAM 3 BF16, 9 prompts (baseline)", "1x (~147 GB)", "0.4 FPS", "MEASURED"],
         ["Lower input resolution (720p)", "~1x (no change)", "0.6 FPS", "TESTED — not viable"],
-        ["Reduce internal resolution", "N/A", "N/A", "BLOCKED — RoPE locked to 1008"],
-        ["INT8 quantization", "~2x (74 GB)", "~0.8 FPS", "To test"],
-        ["INT4 quantization", "~4x (37 GB)", "~1.6 FPS", "To test"],
-        ["Fewer prompts (3 vs 9)", "~0.7x decoder cost", "~0.5 FPS", "To test"],
-        ["INT4 + 3 prompts", "~4-5x combined", "~2 FPS", "To test"],
-        ["EfficientSAM / MobileSAM (INT8)", "~50-100x (5-50M params)", "~15-30 FPS", "Different model"],
+        ["Reduce internal resolution", "N/A", "N/A", "BLOCKED — RoPE locked"],
+        ["INT8 weight-only quantization", "Weights only (not traffic)", "0.6 FPS", "TESTED — no speedup"],
+        ["Fewer prompts (1 vs 9)", "~0.6x (decoder only)", "0.9 FPS", "TESTED — helps on desktop"],
+        ["INT8 activation quantization", "~2x (halve act traffic)", "~1.2 FPS", "Research-grade effort"],
+        ["FP8 activation (E4M3)", "~2x (halve act traffic)", "~1.2 FPS", "RTX 5090 native, not in SAM 3"],
+        ["INT4 activation quantization", "~4x", "~2.4 FPS", "Significant accuracy risk"],
+        ["EfficientSAM / MobileSAM", "~50-100x (5-50M params)", "~15-30 FPS", "Different model entirely"],
     ]
 
     add_styled_table(slide, Inches(0.3), Inches(1.4), Inches(9.4), Inches(2.8),
@@ -979,11 +1095,11 @@ def slide_optimization_roadmap(prs: Presentation):
     p.font.name = "Segoe UI"
 
     steps = [
-        "1. Test INT8/INT4 quantization — the most direct traffic reduction lever",
-        "2. Profile with varying prompt counts (1, 3, 9) to measure decoder scaling",
-        "3. Evaluate EfficientSAM / MobileSAM as drop-in replacements (~5-50M params)",
-        "4. Profile vision encoder vs decoder separately to isolate fixed vs variable cost",
-        "5. Consider hybrid: YOLO for detection + lightweight model for enrichment only",
+        "1. Evaluate EfficientSAM / MobileSAM — only viable path to real-time on edge",
+        "2. Investigate FP8 (E4M3) activation quantization on RTX 5090",
+        "3. Test SmoothQuant for activation-safe INT8 on SAM 3 ViT backbone",
+        "4. Consider hybrid: YOLO for detection + lightweight model for enrichment",
+        "5. Monitor Meta for official quantized SAM 3 / SAM 3 Lite release",
     ]
     for step in steps:
         p2 = tf.add_paragraph()
@@ -1126,6 +1242,14 @@ def build_deck(output, runs_dir, data_dir):
     # Bandwidth requirements
     console.print("  Building: Bandwidth requirements")
     slide_bandwidth_requirements(prs)
+
+    # Quantization results
+    console.print("  Building: Quantization tested (weight-only INT8)")
+    slide_quantization_tested(prs)
+
+    # Activation quantization challenges
+    console.print("  Building: Activation quantization challenges")
+    slide_activation_quant_challenges(prs)
 
     # Prompt scaling analysis
     console.print("  Building: Prompt count scaling")
