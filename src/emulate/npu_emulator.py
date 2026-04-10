@@ -172,10 +172,12 @@ class WorkloadProfile:
     is_bandwidth_bound: bool = False   # True for LLM decode, false for vision
 
     # Measured on reference GPU
-    measured_latency_ms: float = 0.0
+    measured_latency_ms: float = 0.0        # Wall clock time
+    measured_gpu_kernel_ms: float = 0.0     # CUDA kernel time (GPU-only, no CPU overhead)
     measured_gpu: str = ""
     measured_gpu_utilization: float = 0.0
     measured_mem_bandwidth_util: float = 0.0
+    measured_peak_vram_bytes: int = 0       # Peak VRAM during forward pass
 
     # For LLM models
     is_autoregressive: bool = False
@@ -309,75 +311,70 @@ class NPUEmulator:
 
         else:
             # --- Vision Model (per-frame) ---
+            #
+            # Transformer models are overwhelmingly memory-bandwidth-bound.
+            # The GPU spends most of its time moving activations through
+            # memory, not doing math. We decompose measured GPU kernel time
+            # into compute-bound and bandwidth-bound portions, then scale
+            # each independently to the target hardware.
+            #
+            # Key insight: SAM 3 on RTX 5090 measures 102ms GPU kernel time
+            # but only 2.4ms of that is pure compute (350 GFLOPs / 146 TOPS).
+            # The remaining ~100ms is memory-bandwidth-bound work that scales
+            # with the bandwidth ratio between reference and target.
 
-            # Theoretical compute floor from FLOP count
-            theoretical_compute_ms = 0.0
-            if workload.gflops_per_inference > 0:
+            # Use GPU kernel time if available, else wall clock
+            gpu_time_ms = workload.measured_gpu_kernel_ms or workload.measured_latency_ms
+            cpu_overhead_ms = max(0, workload.measured_latency_ms - gpu_time_ms)
+
+            # Decompose GPU time into compute vs bandwidth portions
+            if workload.gflops_per_inference > 0 and gpu_time_ms > 0:
                 ref_tops = self.reference.effective_tops_bf16
                 theoretical_compute_ms = (
                     workload.gflops_per_inference / (ref_tops * 1000) * 1000
                 )
-
-            # Software overhead: gap between measured time and theoretical
-            # compute floor on the REFERENCE hardware. This overhead comes
-            # from Python, data transfers, memory allocation, multi-stage
-            # sequential execution, etc. Edge silicon won't magically
-            # eliminate this — in fact it may be worse due to less mature
-            # software stacks.
-            overhead_ms = 0.0
-            if workload.measured_latency_ms > 0 and theoretical_compute_ms > 0:
-                overhead_ms = max(0, workload.measured_latency_ms - theoretical_compute_ms)
-
-            # Project the pure compute portion onto target hardware
-            if workload.gflops_per_inference > 0:
-                effective_tops = self.target.effective_tops_bf16
-                result.compute_limited_ms = (
-                    workload.gflops_per_inference / (effective_tops * 1000) * 1000
-                )
+                # Compute fraction: what % of GPU time is actual ALU work
+                compute_fraction = min(theoretical_compute_ms / gpu_time_ms, 1.0)
+                bw_fraction = 1.0 - compute_fraction
             else:
-                result.compute_limited_ms = (
-                    workload.measured_latency_ms / self.compute_ratio
+                # No FLOP data — assume heavily bandwidth-bound (typical for transformers)
+                compute_fraction = 0.15
+                bw_fraction = 0.85
+
+            # Scale each portion to target hardware
+            result.compute_limited_ms = (
+                gpu_time_ms * compute_fraction * (
+                    self.reference.effective_tops_bf16 / self.target.effective_tops_bf16
                 )
-
-            # Bandwidth time: model weights + activations
-            model_gb = workload.model_size_bytes / 1e9
-            activation_gb = workload.peak_activation_bytes / 1e9
-            # Vision models reuse weights across spatial positions,
-            # so effective transfer is activation-dominated after warmup
-            effective_transfer_gb = activation_gb + (model_gb * 0.05)
-            if effective_transfer_gb > 0:
-                result.bandwidth_limited_ms = (
-                    effective_transfer_gb / self.target.effective_bandwidth_gbs * 1000
-                )
-
-            # Total = max(compute, bandwidth) + overhead
-            # Overhead scales roughly with compute ratio (slower CPU/scheduler
-            # on edge) but doesn't scale with bandwidth. Use conservative
-            # estimate: overhead stays same or scales slightly with compute.
-            projected_overhead_ms = overhead_ms * max(1.0, 1.0 / self.compute_ratio)
-
-            hardware_ms = max(
-                result.compute_limited_ms,
-                result.bandwidth_limited_ms,
             )
-            result.projected_latency_ms = hardware_ms + projected_overhead_ms
+            result.bandwidth_limited_ms = (
+                gpu_time_ms * bw_fraction * (
+                    self.reference.effective_bandwidth_gbs / self.target.effective_bandwidth_gbs
+                )
+            )
+
+            # Total = compute + bandwidth (they're sequential in practice
+            # for bandwidth-bound workloads) + CPU overhead
+            result.projected_latency_ms = (
+                result.compute_limited_ms
+                + result.bandwidth_limited_ms
+                + cpu_overhead_ms
+            )
             result.bottleneck = (
                 "compute" if result.compute_limited_ms > result.bandwidth_limited_ms
                 else "bandwidth"
             )
 
-            # Log the breakdown for transparency
-            if overhead_ms > 0:
-                logger.debug(
-                    "%s projection breakdown: theoretical=%.1fms, "
-                    "overhead=%.1fms (measured=%.1fms), "
-                    "hw_projected=%.1fms, overhead_projected=%.1fms, "
-                    "total=%.1fms",
-                    workload.stage_name, theoretical_compute_ms,
-                    overhead_ms, workload.measured_latency_ms,
-                    hardware_ms, projected_overhead_ms,
-                    result.projected_latency_ms,
-                )
+            logger.debug(
+                "%s: gpu=%.1fms (compute=%.1f%%, bw=%.1f%%), "
+                "cpu_overhead=%.1fms → projected: compute=%.1fms + bw=%.1fms + "
+                "overhead=%.1fms = %.1fms",
+                workload.stage_name, gpu_time_ms,
+                compute_fraction * 100, bw_fraction * 100,
+                cpu_overhead_ms,
+                result.compute_limited_ms, result.bandwidth_limited_ms,
+                cpu_overhead_ms, result.projected_latency_ms,
+            )
 
         # Slowdown vs reference
         if workload.measured_latency_ms > 0:
@@ -648,6 +645,10 @@ def emulate(profile_path, target_name, target_config, compare_all):
         )
         if sam3_avg_ms:
             is_single_pass = sam3_data.get("mode") == "single-pass"
+            # GPU kernel time measured via CUDA events (single-pass 1080p)
+            # 102ms GPU kernel, 107ms wall clock, 5ms CPU overhead
+            # If not measured, estimate GPU kernel as ~95% of wall clock
+            gpu_kernel_ms = sam3_data.get("gpu_kernel_ms", sam3_avg_ms * 0.95)
             sam_wl = WorkloadProfile(
                 stage_name="sam3_single_pass" if is_single_pass else "sam3_enrichment",
                 model_name="sam3_full" + (" (single-pass)" if is_single_pass else ""),
@@ -655,10 +656,12 @@ def emulate(profile_path, target_name, target_config, compare_all):
                 model_size_bytes=int(848e6 * 2),
                 precision="bf16",
                 gflops_per_inference=350.0,
-                arithmetic_intensity=120.0,
+                arithmetic_intensity=2.0,  # Deeply bandwidth-bound
                 measured_latency_ms=sam3_avg_ms,
+                measured_gpu_kernel_ms=gpu_kernel_ms,
                 measured_gpu=RTX_5090.name,
-                peak_activation_bytes=int(1.0e9),
+                peak_activation_bytes=int(3.71e9),  # Measured on 5090
+                measured_peak_vram_bytes=int(7.07e9),  # Measured on 5090
             )
             workloads.append(sam_wl)
     else:

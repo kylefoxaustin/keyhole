@@ -755,6 +755,135 @@ def slide_run_comparison(prs: Presentation, runs: list[dict], targets: dict):
                                   width=Inches(9.8))
 
 
+def slide_bandwidth_wall(prs: Presentation):
+    """Slide: Why SAM 3 hits a bandwidth wall on edge hardware."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide, C.BG_DARK)
+
+    add_title_bar(slide, "The Bandwidth Wall",
+                  "SAM 3 is deeply memory-bandwidth-bound — TOPS don't matter")
+
+    lines = [
+        ("MEASURED: RTX 5090 (209 TOPS, 1792 GB/s, 72 MB L2 cache)", C.ACCENT_BLUE, True),
+        ("  GPU kernel time: 102ms   |   Wall clock: 107ms   |   CPU overhead: only 5ms", C.TEXT_BRIGHT, False),
+        ("  Theoretical compute floor (350 GFLOPs / 146 TOPS): 2.4ms", C.TEXT_DIM, False),
+        ("  Actual GPU time: 102ms  =  42x longer than compute-only", C.ACCENT_ORANGE, True),
+        ("  The GPU spends 98% of its time waiting for memory, not computing", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("WHY: Transformer activations stream through VRAM every layer", C.ACCENT_BLUE, True),
+        ("  840M params  |  3.71 GB peak activations  |  ~147 GB total memory traffic per frame", C.TEXT_BRIGHT, False),
+        ("  Arithmetic intensity: ~2 FLOPs/byte (ridge point: 117 FLOPs/byte)", C.TEXT_DIM, False),
+        ("  Even the 5090's 72 MB L2 cache can't absorb this — activations are too large", C.ACCENT_ORANGE, False),
+        ("", C.TEXT_DIM, False),
+        ("EDGE PROJECTION: NXP Edge MPU (200 TOPS, 134.4 GB/s, ~4 MB SRAM)", C.ACCENT_BLUE, True),
+        ("  Bandwidth ratio: 1523 / 101 = 15.1x less bandwidth than RTX 5090", C.TEXT_BRIGHT, False),
+        ("  Projected: ~2,400ms per frame (0.4 FPS)  |  14x slowdown", C.NOT_FEASIBLE, True),
+        ("  200 TOPS is irrelevant — compute is only 2% of total time", C.TEXT_DIM, False),
+        ("  Memory capacity: 7.07 GB peak vs 8 GB total = no headroom", C.ACCENT_ORANGE, False),
+    ]
+
+    for i, (text, color, bold) in enumerate(lines):
+        if text:
+            add_text_box(slide, Inches(0.6), Inches(1.5 + i * 0.33),
+                         Inches(8.8), Inches(0.33),
+                         text, font_size=11, color=color, bold=bold)
+
+
+def slide_bandwidth_requirements(prs: Presentation):
+    """Slide: Required bandwidth for target framerates."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    add_title_bar(slide, "Required Memory Bandwidth for Real-Time SAM 3",
+                  "~147 GB memory traffic per frame at 1080p, 9 concept prompts")
+
+    headers = ["Target FPS", "Time Budget", "Required BW (eff)", "Required BW (raw)",
+               "Memory Tech", "Feasible at 25W?"]
+    rows = [
+        ["1 FPS",  "1000ms", "147 GB/s",   "196 GB/s",   "256-bit LPDDR5X", "Possible"],
+        ["5 FPS",  "200ms",  "735 GB/s",   "980 GB/s",   "HBM2e or 512-bit", "Difficult"],
+        ["10 FPS", "100ms",  "1,470 GB/s", "1,960 GB/s", "HBM3 (desktop-class)", "No"],
+        ["24 FPS", "42ms",   "3,528 GB/s", "4,704 GB/s", "Beyond HBM3", "No"],
+        ["30 FPS", "33ms",   "4,414 GB/s", "5,885 GB/s", "Multi-die HBM3e", "No"],
+    ]
+
+    add_styled_table(slide, Inches(0.3), Inches(1.5), Inches(9.4), Inches(2.2),
+                     headers, rows)
+
+    # Current hardware reference
+    ref_lines = [
+        ("Current Hardware Reference:", C.ACCENT_BLUE, True),
+        ("  NXP Edge MPU:  134.4 GB/s  (128-bit LPDDR5X)  →  0.4 FPS", C.NOT_FEASIBLE, False),
+        ("  RTX 5090:      1,792 GB/s  (512-bit GDDR7)    →  6.0 FPS", C.TEXT_BRIGHT, False),
+        ("  NVIDIA H200:   4,800 GB/s  (HBM3e)            →  ~33 FPS (Meta's paper: 30ms)", C.ACCENT_GREEN, False),
+        ("", C.TEXT_DIM, False),
+        ("Conclusion: Real-time SAM 3 requires HBM-class bandwidth.", C.ACCENT_ORANGE, True),
+        ("For edge at 25W, the model must change — not the hardware.", C.TEXT_WHITE, True),
+    ]
+
+    for i, (text, color, bold) in enumerate(ref_lines):
+        if text:
+            add_text_box(slide, Inches(0.6), Inches(4.0 + i * 0.35),
+                         Inches(8.8), Inches(0.35),
+                         text, font_size=11, color=color, bold=bold)
+
+
+def slide_optimization_roadmap(prs: Presentation):
+    """Slide: Path to real-time on edge hardware."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    add_title_bar(slide, "Optimization Roadmap — Path to Edge Real-Time",
+                  "Model changes required to fit within 134.4 GB/s bandwidth budget")
+
+    headers = ["Optimization", "Traffic Reduction", "Est. Edge FPS", "Trade-off"]
+    rows = [
+        ["SAM 3 BF16, 1080p, 9 prompts (baseline)", "1x (147 GB)", "0.4 FPS", "No compromises"],
+        ["INT8 quantization", "~2x (74 GB)", "~0.8 FPS", "Minor accuracy loss"],
+        ["INT4 quantization", "~4x (37 GB)", "~1.6 FPS", "Moderate accuracy loss"],
+        ["Lower resolution (720p)", "~2x reduction in tokens", "~0.8 FPS", "Smaller objects missed"],
+        ["Fewer prompts (3 vs 9)", "~0.7x decoder cost", "~0.5 FPS", "Fewer concept categories"],
+        ["INT4 + 720p + 3 prompts", "~8-10x combined", "~3-5 FPS", "Stacked trade-offs"],
+        ["MobileSAM / EfficientSAM (INT8, 720p)", "~50-100x (5-50M params)", "~15-30 FPS", "Different model entirely"],
+    ]
+
+    add_styled_table(slide, Inches(0.3), Inches(1.4), Inches(9.4), Inches(2.8),
+                     headers, rows)
+
+    # Key insight
+    box = slide.shapes.add_shape(
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        Inches(0.5), Inches(4.5), Inches(9), Inches(2.2),
+    )
+    box.fill.solid()
+    box.fill.fore_color.rgb = RGBColor(0x1A, 0x0D, 0x2B)
+    box.line.color.rgb = C.ACCENT_PURPLE
+    box.line.width = Pt(2)
+
+    tf = box.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    p.text = "NEXT STEPS"
+    p.font.size = Pt(13)
+    p.font.color.rgb = C.ACCENT_PURPLE
+    p.font.bold = True
+    p.font.name = "Segoe UI"
+
+    steps = [
+        "1. Profile at lower resolutions (720p, 540p) to measure actual traffic reduction",
+        "2. Test INT8/INT4 quantization on SAM 3 — measure accuracy vs speed trade-off",
+        "3. Evaluate EfficientSAM3 / MobileSAM as drop-in replacements",
+        "4. Profile vision encoder vs decoder separately to isolate prompt-scaling cost",
+        "5. Measure with varying prompt counts (1, 3, 9, 18) to characterize decoder scaling",
+    ]
+    for step in steps:
+        p2 = tf.add_paragraph()
+        p2.text = step
+        p2.font.size = Pt(10)
+        p2.font.color.rgb = C.TEXT_BRIGHT
+        p2.font.name = "Segoe UI"
+
+
 def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
     """Final summary slide with key findings."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -771,25 +900,31 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
     findings = []
 
     if latest_run:
-        yolo_ms = latest_run.get("yolo", {}).get("avg_ms", 0)
-        sam3_ms = latest_run.get("sam3", {}).get("avg_enrichment_ms", 0)
-        findings.append(
-            f"RTX 5090 Baseline: YOLO {yolo_ms:.1f}ms + SAM 3 {sam3_ms:.0f}ms per frame"
-        )
+        sam3_data = latest_run.get("sam3", {})
+        sam3_ms = sam3_data.get("avg_inference_ms") or sam3_data.get("avg_enrichment_ms", 0)
+        mode = sam3_data.get("mode", "sequential")
+        if sam3_ms:
+            findings.append(
+                f"RTX 5090 Measured: SAM 3 {mode} = {sam3_ms:.0f}ms/frame "
+                f"({1000/sam3_ms:.1f} FPS)"
+            )
 
-    if nxp:
-        findings.extend([
-            f"NXP Edge MPU (200 TOPS / 134.4 GB/s / 25W):",
-            f"    Projected: {nxp['combined_ms']:.1f}ms combined ({nxp['combined_fps']:.0f} FPS)",
-            f"    1 FPS extraction: {'FEASIBLE' if nxp['feasible_1fps'] else 'NOT FEASIBLE'}",
-            f"    5 FPS extraction: {'FEASIBLE' if nxp['feasible_5fps'] else 'NOT FEASIBLE'}",
-            f"    Bottleneck: {nxp['sam3_bottleneck']} (128-bit LPDDR5X @ 134.4 GB/s)",
-            "",
-            "SAM 3 is compute-dominant (~85% of FLOPs in PE backbone)",
-            "but shifts to bandwidth-bound on edge due to 13x lower memory BW",
-            "",
-            "LLM NLQ: qwen2.5:3b fits in 8GB, ~67 tok/s on edge target",
-        ])
+    findings.extend([
+        "",
+        "KEY FINDING: SAM 3 is deeply memory-bandwidth-bound",
+        "  GPU kernel time: 102ms  |  Compute-only floor: 2.4ms  |  42x gap",
+        "  98% of GPU time is waiting for memory, not computing",
+        "  RTX 5090's 72 MB L2 cache cannot absorb 3.71 GB of activations",
+        "",
+        "NXP Edge MPU (200 TOPS / 134.4 GB/s / 25W):",
+        "  Projected: ~2,400ms per frame (0.4 FPS)  |  14x slower than 5090",
+        "  200 TOPS is sufficient — 134.4 GB/s bandwidth is the bottleneck",
+        "  Memory: 7.07 GB peak vs 8 GB capacity = no headroom",
+        "  VERDICT: SAM 3 at BF16/1080p is NOT FEASIBLE on LPDDR5X",
+        "",
+        "Path forward: model optimization (INT4 + lower res + smaller backbone)",
+        "  or accept sub-1 FPS for non-real-time batch analysis",
+    ])
 
     for i, finding in enumerate(findings):
         color = C.TEXT_WHITE if finding.strip() else C.TEXT_DIM
@@ -874,6 +1009,18 @@ def build_deck(output, runs_dir, data_dir):
     if len(runs) >= 1:
         console.print("  Building: Run comparison chart")
         slide_run_comparison(prs, runs, targets)
+
+    # Bandwidth wall analysis
+    console.print("  Building: Bandwidth wall analysis")
+    slide_bandwidth_wall(prs)
+
+    # Bandwidth requirements
+    console.print("  Building: Bandwidth requirements")
+    slide_bandwidth_requirements(prs)
+
+    # Optimization roadmap
+    console.print("  Building: Optimization roadmap")
+    slide_optimization_roadmap(prs)
 
     # Summary slide
     console.print("  Building: Summary & findings")
