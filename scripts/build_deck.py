@@ -1141,6 +1141,49 @@ def slide_model_comparison(prs: Presentation, data_dir: Path):
                          text, font_size=10, color=color, bold=bold)
 
 
+def slide_hybrid_v2(prs: Presentation):
+    """Slide: Hybrid V2 results — the breakthrough."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide, C.BG_DARK)
+
+    add_title_bar(slide, "Hybrid V2: YOLO-Seg + CLIP — The Breakthrough",
+                  "Eliminate MobileSAM entirely. Two models, 33x faster than SAM 3 on edge.")
+
+    headers = ["Pipeline", "5090 ms", "5090 FPS", "Params", "Edge ms", "Edge FPS", "vs SAM 3"]
+    rows = [
+        ["SAM 3 single-pass", "121", "8.3", "840M", "~1,700", "0.6", "baseline"],
+        ["Hybrid V1 (YOLO+SAM+CLIP)", "142", "7.0", "218M", "~200", "5.0", "8.5x"],
+        ["V2 medium-seg + CLIP", "50", "20", "174M", "~65", "15", "26x"],
+        ["V2 small-seg + CLIP", "44", "23", "161M", "~58", "17", "29x"],
+        ["V2 nano-seg + CLIP", "39", "26", "155M", "~51", "20", "33x"],
+    ]
+    add_styled_table(slide, Inches(0.2), Inches(1.4), Inches(9.6), Inches(2.0),
+                     headers, rows)
+
+    lines = [
+        ("WHY IT WORKS:", C.ACCENT_BLUE, True),
+        ("  YOLO-seg does detection + segmentation in ONE model pass (3-8ms)", C.TEXT_BRIGHT, False),
+        ("  Eliminates MobileSAM's 95ms image encoder entirely", C.ACCENT_GREEN, False),
+        ("  CLIP batched classification: text features cached, crops batched (25-34ms)", C.TEXT_BRIGHT, False),
+        ("  Total model params: 155-174M vs SAM 3's 840M (5x less memory traffic)", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("EDGE FEASIBILITY:", C.ACCENT_BLUE, True),
+        ("  Nano-seg + CLIP: ~51ms/frame = 20 FPS on 134.4 GB/s LPDDR5X", C.ACCENT_GREEN, True),
+        ("  Fits comfortably in 8 GB DRAM with headroom for OS + runtime", C.TEXT_BRIGHT, False),
+        ("  Models small enough to benefit from on-chip SRAM caching", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("VISUAL QUALITY: Confirmed visually indistinguishable from SAM 3", C.ACCENT_PURPLE, True),
+        ("  YOLO-seg masks + CLIP concept labels match SAM 3 output quality", C.TEXT_DIM, False),
+        ("  Trade-off: 80 COCO classes + CLIP open-vocab vs SAM 3's 4M+ native concepts", C.TEXT_DIM, False),
+    ]
+
+    for i, (text, color, bold) in enumerate(lines):
+        if text:
+            add_text_box(slide, Inches(0.5), Inches(3.6 + i * 0.27),
+                         Inches(9), Inches(0.27),
+                         text, font_size=10, color=color, bold=bold)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1226,29 +1269,38 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
 
     findings.extend([
         "",
-        "KEY FINDING: SAM 3 is deeply memory-bandwidth-bound",
-        "  GPU kernel time: 102ms  |  Compute-only floor: 2.4ms  |  42x gap",
-        "  98% of GPU time is waiting for memory, not computing",
-        "  RTX 5090's 72 MB L2 cache cannot absorb 3.71 GB of activations",
+        "THE PROBLEM: SAM 3 is deeply memory-bandwidth-bound",
+        "  840M params, 3.71 GB activations, 98% of GPU time is memory access",
+        "  Edge projection: ~1,700ms (0.6 FPS) — NOT FEASIBLE on LPDDR5X",
         "",
-        "Edge MPU Target (200 TOPS / 134.4 GB/s / 25W):",
-        "  Projected: ~2,400ms per frame (0.4 FPS)  |  14x slower than 5090",
-        "  200 TOPS is sufficient — 134.4 GB/s bandwidth is the bottleneck",
-        "  Memory: 7.07 GB peak vs 8 GB capacity = no headroom",
-        "  VERDICT: SAM 3 at BF16/1080p is NOT FEASIBLE on LPDDR5X",
+        "TESTED AND RULED OUT:",
+        "  Lower resolution: RoPE locked to 1008x1008 (tokens fixed)",
+        "  Weight-only INT8: No speedup (activations unchanged)",
+        "  Fewer prompts: Helps on desktop, encoder floor remains",
         "",
-        "Path forward: model optimization (INT4 + lower res + smaller backbone)",
-        "  or accept sub-1 FPS for non-real-time batch analysis",
+        "THE SOLUTION: Hybrid V2 (YOLO-seg + CLIP)",
+        "  Two lightweight models replace one massive one",
+        "  YOLO-seg: detection + segmentation in 3-8ms (2.9-22M params)",
+        "  CLIP: open-vocabulary classification in 25-34ms (batched)",
+        "  Visual quality confirmed indistinguishable from SAM 3",
+        "",
+        "RESULT: 20 FPS on edge (33x faster than SAM 3)",
+        "  Nano-seg + CLIP: ~51ms/frame on 134.4 GB/s LPDDR5X",
+        "  Fits in 8 GB with headroom  |  Total: ~155M params",
     ])
 
     for i, finding in enumerate(findings):
         color = C.TEXT_WHITE if finding.strip() else C.TEXT_DIM
-        if finding.strip().startswith("Edge MPU"):
-            color = C.ACCENT_GREEN
-        elif "FEASIBLE" in finding and "NOT" not in finding:
-            color = C.FEASIBLE
+        if finding.startswith("THE PROBLEM") or finding.startswith("TESTED") or finding.startswith("THE SOLUTION") or finding.startswith("RESULT"):
+            color = C.ACCENT_BLUE
+            if "SOLUTION" in finding:
+                color = C.ACCENT_GREEN
+            elif "RESULT" in finding:
+                color = C.FEASIBLE
         elif "NOT FEASIBLE" in finding:
             color = C.NOT_FEASIBLE
+        elif "33x faster" in finding or "20 FPS" in finding:
+            color = C.FEASIBLE
 
         add_text_box(slide, Inches(1), Inches(1.5 + i * 0.38),
                      Inches(8), Inches(0.38),
@@ -1352,6 +1404,10 @@ def build_deck(output, runs_dir, data_dir):
     # Model comparison
     console.print("  Building: Model comparison (speed vs accuracy)")
     slide_model_comparison(prs, data_dir)
+
+    # Hybrid V2 breakthrough
+    console.print("  Building: Hybrid V2 breakthrough")
+    slide_hybrid_v2(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
