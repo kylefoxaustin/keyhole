@@ -1051,6 +1051,70 @@ def slide_resolution_lock(prs: Presentation):
                          text, font_size=11, color=color, bold=bold)
 
 
+def slide_model_comparison(prs: Presentation, data_dir: Path):
+    """Slide: Speed vs accuracy tradeoff across model variants."""
+    comp_path = data_dir / "model_comparison.json"
+    if not comp_path.exists():
+        return
+
+    with open(comp_path) as f:
+        comp = json.load(f)
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    add_title_bar(slide, "Speed vs Accuracy — The Model Tradeoff",
+                  "Same 5 frames (720p embedded world), same hardware (RTX 5090)")
+
+    profiles = comp.get("profiles", {})
+    headers = ["Model", "Params", "5090 ms", "5090 FPS", "VRAM",
+               "Dets/frm", "Recall", "Edge ms", "Edge FPS", "Concepts"]
+    rows = []
+    for key in ["sam3", "fastsam_x", "fastsam_s", "yolo11x"]:
+        if key not in profiles:
+            continue
+        p = profiles[key]
+        rows.append([
+            p["name"],
+            f"{p['param_count_m']:.0f}M",
+            f"{p['avg_inference_ms']:.0f}",
+            f"{1000/p['avg_inference_ms']:.0f}",
+            f"{p['peak_vram_gb']:.1f}GB",
+            f"{p['avg_detections']:.0f}",
+            f"{p['recall_vs_sam3']:.0%}",
+            f"{p['edge_projected_ms']:.0f}",
+            f"{p['edge_fps']:.1f}",
+            p["concept_vocabulary"][:15],
+        ])
+
+    add_styled_table(slide, Inches(0.2), Inches(1.4), Inches(9.6), Inches(1.7),
+                     headers, rows)
+
+    lines = [
+        ("THE TRADEOFF IS NOT SPEED — IT'S CAPABILITY", C.ACCENT_BLUE, True),
+        ("", C.TEXT_DIM, False),
+        ("  SAM 3 (840M): 4M+ concept vocabulary, text-prompted, segmentation masks", C.ACCENT_ORANGE, False),
+        ("    → 'person wearing red jacket carrying backpack near delivery truck'", C.TEXT_DIM, False),
+        ("    → 0.5 FPS on edge (too slow), but irreplaceable concept richness", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("  FastSAM (11-68M): YOLO-based segmentation, 80 COCO classes only", C.ACCENT_GREEN, False),
+        ("    → 'person', 'car', 'dog' — no attributes, no relationships", C.TEXT_DIM, False),
+        ("    → 3-4 FPS on edge, but 0% recall vs SAM 3 (different job entirely)", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("  YOLO 11x (57M): Detection boxes only, no masks, 80 classes", C.TEXT_BRIGHT, False),
+        ("    → 5 FPS on edge, real-time, but no segmentation or concepts", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("CONCLUSION: No smaller model replaces SAM 3's concept understanding.", C.NOT_FEASIBLE, True),
+        ("The real question: how much concept richness do you actually need?", C.ACCENT_PURPLE, True),
+    ]
+
+    for i, (text, color, bold) in enumerate(lines):
+        if text:
+            add_text_box(slide, Inches(0.5), Inches(3.3 + i * 0.27),
+                         Inches(9), Inches(0.27),
+                         text, font_size=10, color=color, bold=bold)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1258,6 +1322,10 @@ def build_deck(output, runs_dir, data_dir):
     # Resolution lock finding
     console.print("  Building: Resolution lock analysis")
     slide_resolution_lock(prs)
+
+    # Model comparison
+    console.print("  Building: Model comparison (speed vs accuracy)")
+    slide_model_comparison(prs, data_dir)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
