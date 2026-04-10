@@ -828,6 +828,73 @@ def slide_bandwidth_requirements(prs: Presentation):
                          text, font_size=11, color=color, bold=bold)
 
 
+def slide_prompt_scaling(prs: Presentation):
+    """Slide: How concept prompt count affects performance."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    add_title_bar(slide, "Prompt Count Scaling — Decoder Cost Is Linear",
+                  "Vision encoder is fixed cost (~70ms); each concept prompt adds ~6ms in decoder")
+
+    # Measured data table
+    headers = ["Concepts", "RTX 5090", "FPS", "Edge Projected", "Edge FPS", "Example Prompts"]
+    rows = [
+        ["1", "72ms", "13.8", "~1,068ms", "0.9", "person"],
+        ["3", "90ms", "11.1", "~1,333ms", "0.7", "person, vehicle, dog"],
+        ["9 (current)", "121ms", "8.3", "~1,791ms", "0.6", "person, vehicle, car, truck, ..."],
+        ["18", "177ms", "5.7", "~2,618ms", "0.4", "full concept set + accessories"],
+    ]
+    add_styled_table(slide, Inches(0.3), Inches(1.4), Inches(9.4), Inches(1.7),
+                     headers, rows)
+
+    # Cost breakdown chart
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3), facecolor=MPL_COLORS["bg_slide"])
+
+    # Left: Latency vs prompt count
+    ax1.set_facecolor(MPL_COLORS["bg_slide"])
+    prompts = [1, 3, 9, 18]
+    latencies = [72, 90, 121, 177]
+    ax1.plot(prompts, latencies, "o-", color=MPL_COLORS["blue"], linewidth=2, markersize=8)
+    ax1.axhline(y=72, color=MPL_COLORS["orange"], linestyle="--", alpha=0.7, label="Vision encoder floor (72ms)")
+    ax1.fill_between(prompts, 72, latencies, alpha=0.2, color=MPL_COLORS["green"], label="Decoder cost")
+    ax1.set_xlabel("Number of Concept Prompts", color=MPL_COLORS["text"], fontsize=10)
+    ax1.set_ylabel("Latency (ms)", color=MPL_COLORS["text"], fontsize=10)
+    ax1.set_title("Latency vs Prompt Count (RTX 5090)", color=MPL_COLORS["text"], fontsize=11, fontweight="bold")
+    ax1.legend(fontsize=8, facecolor=MPL_COLORS["bg"], edgecolor=MPL_COLORS["grid"],
+               labelcolor=MPL_COLORS["text"])
+    ax1.tick_params(colors=MPL_COLORS["dim"], labelsize=9)
+    ax1.spines[:].set_color(MPL_COLORS["grid"])
+    ax1.grid(True, alpha=0.2, color=MPL_COLORS["grid"])
+
+    # Right: Stacked bar showing encoder vs decoder split
+    ax2.set_facecolor(MPL_COLORS["bg_slide"])
+    encoder_ms = [70, 70, 70, 70]
+    decoder_ms = [2, 20, 51, 107]
+    labels = ["1", "3", "9", "18"]
+    x = np.arange(len(labels))
+    ax2.bar(x, encoder_ms, 0.5, label="Vision Encoder (fixed)", color=MPL_COLORS["orange"])
+    ax2.bar(x, decoder_ms, 0.5, bottom=encoder_ms, label="Text + DETR Decoder", color=MPL_COLORS["green"])
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels)
+    ax2.set_xlabel("Prompts", color=MPL_COLORS["text"], fontsize=10)
+    ax2.set_ylabel("Latency (ms)", color=MPL_COLORS["text"], fontsize=10)
+    ax2.set_title("Encoder vs Decoder Split", color=MPL_COLORS["text"], fontsize=11, fontweight="bold")
+    ax2.legend(fontsize=8, facecolor=MPL_COLORS["bg"], edgecolor=MPL_COLORS["grid"],
+               labelcolor=MPL_COLORS["text"])
+    ax2.tick_params(colors=MPL_COLORS["dim"], labelsize=9)
+    ax2.spines[:].set_color(MPL_COLORS["grid"])
+
+    fig.tight_layout(pad=1.5)
+    img_stream = fig_to_image_stream(fig)
+    slide.shapes.add_picture(img_stream, Inches(0.2), Inches(3.3), width=Inches(9.6))
+
+    # Key insight
+    add_text_box(slide, Inches(0.5), Inches(6.5), Inches(9), Inches(0.5),
+                 "Vision encoder (~70ms) is the hard floor. Even 1 prompt → 1,068ms on edge. "
+                 "Prompt tuning helps on desktop (14 FPS) but cannot fix the edge bandwidth gap.",
+                 font_size=10, color=C.ACCENT_ORANGE, bold=True)
+
+
 def slide_resolution_lock(prs: Presentation):
     """Slide: Why reducing input resolution doesn't help."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1059,6 +1126,10 @@ def build_deck(output, runs_dir, data_dir):
     # Bandwidth requirements
     console.print("  Building: Bandwidth requirements")
     slide_bandwidth_requirements(prs)
+
+    # Prompt scaling analysis
+    console.print("  Building: Prompt count scaling")
+    slide_prompt_scaling(prs)
 
     # Resolution lock finding
     console.print("  Building: Resolution lock analysis")
