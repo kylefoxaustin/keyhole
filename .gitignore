@@ -15,6 +15,7 @@ data/videos/*.avi
 data/videos/*.mkv
 data/output/
 weights/
+third_party/
 *.db
 *.db-journal
 .DS_Store

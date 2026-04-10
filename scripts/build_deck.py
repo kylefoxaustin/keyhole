@@ -1,0 +1,893 @@
+"""
+Keyhole — Results Deck Generator
+
+Reads profiling data from data/output/ and generates a PowerPoint
+presentation with architecture diagrams, profiling results, NPU
+projections, and run-over-run comparison.
+
+Usage:
+    python scripts/build_deck.py
+    python scripts/build_deck.py --output my_deck.pptx
+    python scripts/build_deck.py --runs-dir data/output/runs
+"""
+
+import json
+import math
+import io
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import click
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+import numpy as np
+
+from pptx import Presentation
+from pptx.util import Inches, Pt, Emu
+from pptx.dml.color import RGBColor
+from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.shapes import MSO_SHAPE
+
+# ============================================================
+# Color Palette
+# ============================================================
+
+class C:
+    """Consistent color palette across all slides."""
+    BG_DARK = RGBColor(0x1A, 0x1A, 0x2E)
+    BG_SLIDE = RGBColor(0x16, 0x21, 0x3E)
+    ACCENT_BLUE = RGBColor(0x00, 0xD4, 0xFF)
+    ACCENT_GREEN = RGBColor(0x00, 0xFF, 0x88)
+    ACCENT_ORANGE = RGBColor(0xFF, 0x8C, 0x00)
+    ACCENT_RED = RGBColor(0xFF, 0x44, 0x44)
+    ACCENT_PURPLE = RGBColor(0xBB, 0x86, 0xFC)
+    TEXT_WHITE = RGBColor(0xFF, 0xFF, 0xFF)
+    TEXT_DIM = RGBColor(0xAA, 0xAA, 0xCC)
+    TEXT_BRIGHT = RGBColor(0xE0, 0xE0, 0xFF)
+    TABLE_HEADER = RGBColor(0x0D, 0x47, 0xA1)
+    TABLE_ROW_1 = RGBColor(0x1A, 0x23, 0x40)
+    TABLE_ROW_2 = RGBColor(0x22, 0x2B, 0x4A)
+    FEASIBLE = RGBColor(0x00, 0xE6, 0x76)
+    NOT_FEASIBLE = RGBColor(0xFF, 0x44, 0x44)
+
+# Matplotlib equivalents
+MPL_COLORS = {
+    "bg": "#1A1A2E",
+    "bg_slide": "#16213E",
+    "blue": "#00D4FF",
+    "green": "#00FF88",
+    "orange": "#FF8C00",
+    "red": "#FF4444",
+    "purple": "#BB86FC",
+    "text": "#E0E0FF",
+    "dim": "#AAAACC",
+    "grid": "#333355",
+}
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def set_slide_bg(slide, color=C.BG_SLIDE):
+    """Set slide background to a solid color."""
+    bg = slide.background
+    fill = bg.fill
+    fill.solid()
+    fill.fore_color.rgb = color
+
+
+def add_text_box(slide, left, top, width, height, text,
+                 font_size=18, color=C.TEXT_WHITE, bold=False,
+                 alignment=PP_ALIGN.LEFT, font_name="Segoe UI"):
+    """Add a styled text box."""
+    txBox = slide.shapes.add_textbox(left, top, width, height)
+    tf = txBox.text_frame
+    tf.word_wrap = True
+    p = tf.paragraphs[0]
+    p.text = text
+    p.font.size = Pt(font_size)
+    p.font.color.rgb = color
+    p.font.bold = bold
+    p.font.name = font_name
+    p.alignment = alignment
+    return txBox
+
+
+def add_title_bar(slide, title, subtitle=None):
+    """Add a consistent title bar across the top of a slide."""
+    # Title
+    add_text_box(slide, Inches(0.5), Inches(0.3), Inches(9), Inches(0.6),
+                 title, font_size=28, color=C.ACCENT_BLUE, bold=True)
+    # Accent line
+    line = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Inches(0.5), Inches(0.85), Inches(2), Pt(3),
+    )
+    line.fill.solid()
+    line.fill.fore_color.rgb = C.ACCENT_BLUE
+    line.line.fill.background()
+
+    if subtitle:
+        add_text_box(slide, Inches(0.5), Inches(0.95), Inches(9), Inches(0.4),
+                     subtitle, font_size=14, color=C.TEXT_DIM)
+
+
+def add_styled_table(slide, left, top, width, height,
+                     headers, rows, col_widths=None):
+    """Add a table with dark themed styling."""
+    num_rows = len(rows) + 1
+    num_cols = len(headers)
+
+    table_shape = slide.shapes.add_table(
+        num_rows, num_cols, left, top, width, height
+    )
+    table = table_shape.table
+
+    # Set column widths
+    if col_widths:
+        for i, w in enumerate(col_widths):
+            table.columns[i].width = w
+
+    # Style header row
+    for i, header in enumerate(headers):
+        cell = table.cell(0, i)
+        cell.text = header
+        cell.fill.solid()
+        cell.fill.fore_color.rgb = C.TABLE_HEADER
+        for paragraph in cell.text_frame.paragraphs:
+            paragraph.font.size = Pt(11)
+            paragraph.font.color.rgb = C.TEXT_WHITE
+            paragraph.font.bold = True
+            paragraph.font.name = "Segoe UI"
+            paragraph.alignment = PP_ALIGN.CENTER
+
+    # Style data rows
+    for r_idx, row in enumerate(rows):
+        bg = C.TABLE_ROW_1 if r_idx % 2 == 0 else C.TABLE_ROW_2
+        for c_idx, value in enumerate(row):
+            cell = table.cell(r_idx + 1, c_idx)
+            cell.text = str(value)
+            cell.fill.solid()
+            cell.fill.fore_color.rgb = bg
+            for paragraph in cell.text_frame.paragraphs:
+                paragraph.font.size = Pt(10)
+                paragraph.font.color.rgb = C.TEXT_BRIGHT
+                paragraph.font.name = "Segoe UI"
+                paragraph.alignment = PP_ALIGN.CENTER
+
+    return table_shape
+
+
+def fig_to_image_stream(fig) -> io.BytesIO:
+    """Convert a matplotlib figure to a BytesIO PNG stream."""
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=200, bbox_inches="tight",
+                facecolor=fig.get_facecolor(), edgecolor="none")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+# ============================================================
+# Data Loaders
+# ============================================================
+
+def load_runs(runs_dir: Path) -> list[dict]:
+    """Load all run JSON files, sorted by timestamp."""
+    runs = []
+    if runs_dir.exists():
+        for f in sorted(runs_dir.glob("run_*.json")):
+            with open(f) as fh:
+                runs.append(json.load(fh))
+    return runs
+
+
+def load_sam3_reference(output_dir: Path) -> Optional[dict]:
+    """Load SAM 3 reference architecture data."""
+    ref_path = output_dir / "sam3_reference_architecture.json"
+    if ref_path.exists():
+        with open(ref_path) as f:
+            return json.load(f)
+    return None
+
+
+def load_npu_targets() -> list[dict]:
+    """Load NPU hardware target definitions."""
+    from src.emulate.npu_emulator import PRESET_TARGETS
+    return {name: spec.to_dict() for name, spec in PRESET_TARGETS.items()}
+
+
+# ============================================================
+# Chart Builders
+# ============================================================
+
+def build_architecture_diagram():
+    """Build the Keyhole pipeline architecture diagram."""
+    fig, ax = plt.subplots(1, 1, figsize=(10, 3.5), facecolor=MPL_COLORS["bg_slide"])
+    ax.set_facecolor(MPL_COLORS["bg_slide"])
+    ax.set_xlim(-0.5, 10.5)
+    ax.set_ylim(-0.5, 3)
+    ax.axis("off")
+
+    boxes = [
+        (0.2, 1.0, "Ingest\nFFmpeg", MPL_COLORS["blue"]),
+        (2.3, 1.0, "Tier 1\nYOLO 11", MPL_COLORS["green"]),
+        (4.4, 1.0, "Tier 2\nSAM 3", MPL_COLORS["orange"]),
+        (6.5, 1.0, "Store\nSQLite", MPL_COLORS["purple"]),
+        (8.6, 1.0, "Query\nNLQ/LLM", MPL_COLORS["blue"]),
+    ]
+
+    for x, y, label, color in boxes:
+        rect = FancyBboxPatch(
+            (x, y), 1.6, 1.2, boxstyle="round,pad=0.1",
+            facecolor=color + "22", edgecolor=color, linewidth=2,
+        )
+        ax.add_patch(rect)
+        ax.text(x + 0.8, y + 0.6, label, ha="center", va="center",
+                fontsize=11, fontweight="bold", color=color, family="monospace")
+
+    # Arrows
+    for i in range(4):
+        x_start = boxes[i][0] + 1.6
+        x_end = boxes[i + 1][0]
+        y_mid = 1.6
+        ax.annotate("", xy=(x_end, y_mid), xytext=(x_start, y_mid),
+                     arrowprops=dict(arrowstyle="->", color=MPL_COLORS["dim"],
+                                     lw=2, connectionstyle="arc3,rad=0"))
+
+    # Subtitle labels
+    subtitles = [
+        (1.0, 0.65, "Frame\nextraction"),
+        (3.1, 0.65, "Object\ndetection"),
+        (5.2, 0.65, "Concept\nenrichment"),
+        (7.3, 0.65, "Metadata\npersistence"),
+        (9.4, 0.65, "Natural\nlanguage"),
+    ]
+    for x, y, text in subtitles:
+        ax.text(x, y, text, ha="center", va="center",
+                fontsize=7, color=MPL_COLORS["dim"], family="monospace")
+
+    fig.tight_layout(pad=0.5)
+    return fig
+
+
+def build_sam3_flop_breakdown(ref_data: dict):
+    """Build SAM 3 compute distribution pie/bar chart."""
+    categories = ref_data.get("category_summary", {})
+    if not categories:
+        return None
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 3.5),
+                                     facecolor=MPL_COLORS["bg_slide"])
+
+    # Pie chart — FLOP distribution
+    ax1.set_facecolor(MPL_COLORS["bg_slide"])
+    sorted_cats = sorted(categories.items(), key=lambda x: x[1]["flops"], reverse=True)
+    labels = [c[0] for c in sorted_cats]
+    sizes = [c[1]["flops"] for c in sorted_cats]
+    colors = [MPL_COLORS["blue"], MPL_COLORS["green"], MPL_COLORS["orange"],
+              MPL_COLORS["purple"], MPL_COLORS["red"]][:len(labels)]
+
+    wedges, texts, autotexts = ax1.pie(
+        sizes, labels=labels, autopct="%1.1f%%", colors=colors,
+        textprops={"color": MPL_COLORS["text"], "fontsize": 9},
+        pctdistance=0.75, startangle=90,
+    )
+    for at in autotexts:
+        at.set_fontsize(8)
+        at.set_color("white")
+    ax1.set_title("SAM 3 — FLOP Distribution", color=MPL_COLORS["text"],
+                   fontsize=12, fontweight="bold", pad=10)
+
+    # Bar chart — GFLOPs by category
+    ax2.set_facecolor(MPL_COLORS["bg_slide"])
+    gflops = [c[1]["flops"] / 1e9 for c in sorted_cats]
+    bars = ax2.barh(labels[::-1], gflops[::-1], color=colors[::-1], height=0.6)
+    ax2.set_xlabel("GFLOPs", color=MPL_COLORS["text"], fontsize=10)
+    ax2.set_title("SAM 3 — GFLOPs by Op Type", color=MPL_COLORS["text"],
+                   fontsize=12, fontweight="bold", pad=10)
+    ax2.tick_params(colors=MPL_COLORS["dim"], labelsize=9)
+    ax2.spines[:].set_color(MPL_COLORS["grid"])
+    ax2.xaxis.grid(True, color=MPL_COLORS["grid"], alpha=0.3)
+
+    for bar, val in zip(bars, gflops[::-1]):
+        ax2.text(bar.get_width() + 20, bar.get_y() + bar.get_height() / 2,
+                 f"{val:.0f}", va="center", color=MPL_COLORS["text"], fontsize=8)
+
+    fig.tight_layout(pad=1.5)
+    return fig
+
+
+def build_roofline_chart(targets: dict, sam3_ref: Optional[dict]):
+    """Build a roofline model chart for edge hardware targets."""
+    fig, ax = plt.subplots(1, 1, figsize=(10, 4.5), facecolor=MPL_COLORS["bg_slide"])
+    ax.set_facecolor(MPL_COLORS["bg_slide"])
+
+    target_styles = {
+        "rtx5090": (MPL_COLORS["blue"], "o", "RTX 5090"),
+        "nxp_edge": (MPL_COLORS["green"], "s", "NXP Edge MPU"),
+        "nxp_edge_lite": (MPL_COLORS["orange"], "^", "NXP Edge Lite"),
+    }
+
+    ai_range = np.logspace(-1, 3, 200)
+
+    for name, spec in targets.items():
+        color, marker, label = target_styles.get(name, (MPL_COLORS["dim"], "x", name))
+        peak_tops = spec["tops_bf16"] * spec.get("compute_efficiency", 0.65)
+        peak_bw = spec["mem_bandwidth_gbs"] * spec.get("bandwidth_efficiency", 0.8)
+
+        # Roofline: performance = min(peak_tops, AI * peak_bw)
+        # peak_bw is GB/s, AI is FLOPs/byte, so AI * peak_bw = GFLOP/s when AI in FLOP/byte
+        # peak_tops is TOPS = 1000 GFLOP/s
+        perf = np.minimum(peak_tops * 1000, ai_range * peak_bw)
+        ax.loglog(ai_range, perf, color=color, linewidth=2, label=label)
+
+        # Ridge point
+        ridge_ai = (peak_tops * 1000) / peak_bw
+        ax.axvline(x=ridge_ai, color=color, linestyle=":", alpha=0.4)
+
+    # Plot workload points
+    workloads = [
+        ("YOLO 11x", 85.0, 196.0, MPL_COLORS["green"]),
+        ("SAM 3 PE", 120.0, 3500.0, MPL_COLORS["orange"]),
+        ("SAM 3 DETR", 15.0, 200.0, MPL_COLORS["purple"]),
+        ("LLM decode", 1.0, 5.0, MPL_COLORS["red"]),
+    ]
+
+    for wl_name, ai, gflops, color in workloads:
+        ax.plot(ai, gflops, "D", color=color, markersize=10, markeredgecolor="white",
+                markeredgewidth=1.5, zorder=5)
+        ax.annotate(wl_name, (ai, gflops), textcoords="offset points",
+                    xytext=(8, 8), fontsize=9, color=color, fontweight="bold")
+
+    ax.set_xlabel("Arithmetic Intensity (FLOPs/byte)", color=MPL_COLORS["text"], fontsize=11)
+    ax.set_ylabel("Performance (GFLOP/s)", color=MPL_COLORS["text"], fontsize=11)
+    ax.set_title("Roofline Model — Workloads vs Hardware Targets",
+                  color=MPL_COLORS["text"], fontsize=13, fontweight="bold", pad=12)
+    ax.legend(loc="lower right", fontsize=9, facecolor=MPL_COLORS["bg"],
+              edgecolor=MPL_COLORS["grid"], labelcolor=MPL_COLORS["text"])
+    ax.tick_params(colors=MPL_COLORS["dim"], labelsize=9)
+    ax.grid(True, which="both", color=MPL_COLORS["grid"], alpha=0.2)
+    ax.spines[:].set_color(MPL_COLORS["grid"])
+
+    fig.tight_layout(pad=1.0)
+    return fig
+
+
+def build_latency_comparison_chart(runs: list[dict], targets: dict):
+    """Build a bar chart comparing per-frame latency across runs and targets."""
+    if not runs:
+        return None
+
+    fig, ax = plt.subplots(1, 1, figsize=(10, 4), facecolor=MPL_COLORS["bg_slide"])
+    ax.set_facecolor(MPL_COLORS["bg_slide"])
+
+    run_labels = []
+    yolo_times = []
+    sam3_times = []
+
+    for run in runs[-8:]:  # Show last 8 runs
+        label = run.get("video", {}).get("name", run.get("run_id", "unknown"))
+        label = label.replace(".mp4", "")
+        if len(label) > 15:
+            label = label[:12] + "..."
+        run_labels.append(label)
+        yolo_times.append(run.get("yolo", {}).get("avg_ms", 0))
+        sam3_times.append(run.get("sam3", {}).get("avg_enrichment_ms", 0))
+
+    x = np.arange(len(run_labels))
+    width = 0.35
+
+    bars1 = ax.bar(x - width / 2, yolo_times, width, label="YOLO 11x",
+                    color=MPL_COLORS["green"], alpha=0.85)
+    bars2 = ax.bar(x + width / 2, sam3_times, width, label="SAM 3",
+                    color=MPL_COLORS["orange"], alpha=0.85)
+
+    ax.set_ylabel("Latency (ms)", color=MPL_COLORS["text"], fontsize=11)
+    ax.set_title("Per-Frame Inference Latency by Run",
+                  color=MPL_COLORS["text"], fontsize=13, fontweight="bold", pad=12)
+    ax.set_xticks(x)
+    ax.set_xticklabels(run_labels, rotation=30, ha="right")
+    ax.legend(facecolor=MPL_COLORS["bg"], edgecolor=MPL_COLORS["grid"],
+              labelcolor=MPL_COLORS["text"])
+    ax.tick_params(colors=MPL_COLORS["dim"], labelsize=9)
+    ax.spines[:].set_color(MPL_COLORS["grid"])
+    ax.yaxis.grid(True, color=MPL_COLORS["grid"], alpha=0.3)
+
+    # Add value labels on bars
+    for bar in bars1:
+        if bar.get_height() > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                    f"{bar.get_height():.1f}", ha="center", va="bottom",
+                    color=MPL_COLORS["green"], fontsize=8)
+    for bar in bars2:
+        if bar.get_height() > 0:
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.5,
+                    f"{bar.get_height():.0f}", ha="center", va="bottom",
+                    color=MPL_COLORS["orange"], fontsize=8)
+
+    fig.tight_layout(pad=1.0)
+    return fig
+
+
+# ============================================================
+# NPU Projection Engine (mirrors npu_emulator.py logic)
+# ============================================================
+
+def project_for_deck(run: dict, targets: dict) -> list[dict]:
+    """Project a run's workload onto all hardware targets."""
+    from src.emulate.npu_emulator import (
+        NPUEmulator, RTX_5090, HardwareSpec, WorkloadProfile,
+    )
+
+    results = []
+    for name, spec_dict in targets.items():
+        spec = HardwareSpec(**{k: v for k, v in spec_dict.items()
+                              if k in HardwareSpec.__dataclass_fields__})
+        emulator = NPUEmulator(reference=RTX_5090, target=spec)
+
+        yolo_data = run.get("yolo", {})
+        sam3_data = run.get("sam3", {})
+
+        yolo_wl = WorkloadProfile(
+            stage_name="yolo_detection", model_name="yolo11x",
+            param_count=int(yolo_data.get("params_m", 57) * 1e6),
+            model_size_bytes=int(yolo_data.get("params_m", 57) * 1e6 * 2),
+            precision="fp16", gflops_per_inference=196.0,
+            arithmetic_intensity=85.0,
+            measured_latency_ms=yolo_data.get("avg_ms", 10.0),
+            measured_gpu=RTX_5090.name,
+            peak_activation_bytes=int(0.2e9),
+        )
+
+        sam3_wl = WorkloadProfile(
+            stage_name="sam3_enrichment", model_name="sam3_full",
+            param_count=848_000_000,
+            model_size_bytes=int(848e6 * 2),
+            precision="bf16", gflops_per_inference=350.0,
+            arithmetic_intensity=120.0,
+            measured_latency_ms=sam3_data.get("avg_enrichment_ms", 30.0),
+            measured_gpu=RTX_5090.name,
+            peak_activation_bytes=int(1.0e9),
+        )
+
+        yolo_r = emulator.project_workload(yolo_wl)
+        sam3_r = emulator.project_workload(sam3_wl)
+
+        combined_ms = yolo_r.projected_latency_ms + sam3_r.projected_latency_ms
+        combined_fps = 1000.0 / combined_ms if combined_ms > 0 else 0
+
+        results.append({
+            "target": spec.name,
+            "target_key": name,
+            "yolo_projected_ms": yolo_r.projected_latency_ms,
+            "yolo_bottleneck": yolo_r.bottleneck,
+            "sam3_projected_ms": sam3_r.projected_latency_ms,
+            "sam3_bottleneck": sam3_r.bottleneck,
+            "combined_ms": combined_ms,
+            "combined_fps": combined_fps,
+            "feasible_1fps": combined_ms < 1000,
+            "feasible_5fps": combined_ms < 200,
+            "yolo_fits": yolo_r.fits_in_memory,
+            "sam3_fits": sam3_r.fits_in_memory,
+            "tops": spec.tops_bf16,
+            "bw_gbs": spec.mem_bandwidth_gbs,
+            "mem_gb": spec.mem_capacity_gb,
+            "tdp_w": spec.tdp_watts,
+        })
+
+    return results
+
+
+# ============================================================
+# Slide Builders
+# ============================================================
+
+def slide_title(prs: Presentation):
+    """Slide 1: Title slide."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank
+    set_slide_bg(slide, C.BG_DARK)
+
+    add_text_box(slide, Inches(1), Inches(1.5), Inches(8), Inches(1),
+                 "KEYHOLE", font_size=48, color=C.ACCENT_BLUE, bold=True,
+                 alignment=PP_ALIGN.CENTER, font_name="Segoe UI")
+
+    add_text_box(slide, Inches(1), Inches(2.5), Inches(8), Inches(0.6),
+                 "Open-Source AI Key Prototype", font_size=24,
+                 color=C.TEXT_WHITE, alignment=PP_ALIGN.CENTER)
+
+    add_text_box(slide, Inches(1), Inches(3.2), Inches(8), Inches(0.5),
+                 "Edge AI Video Intelligence Pipeline  |  Workload Characterization & NPU Feasibility",
+                 font_size=14, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
+
+    # Accent line
+    line = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE,
+        Inches(3), Inches(3.8), Inches(4), Pt(2),
+    )
+    line.fill.solid()
+    line.fill.fore_color.rgb = C.ACCENT_BLUE
+    line.line.fill.background()
+
+    timestamp = datetime.now().strftime("%B %d, %Y")
+    add_text_box(slide, Inches(1), Inches(4.2), Inches(8), Inches(0.5),
+                 f"Generated {timestamp}  |  github.com/kylefoxaustin/keyhole",
+                 font_size=11, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
+
+
+def slide_architecture(prs: Presentation):
+    """Slide 2: Pipeline architecture diagram."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+    add_title_bar(slide, "Pipeline Architecture",
+                  "5-stage edge AI video intelligence pipeline")
+
+    fig = build_architecture_diagram()
+    img_stream = fig_to_image_stream(fig)
+    slide.shapes.add_picture(img_stream, Inches(0.3), Inches(1.5),
+                              width=Inches(9.4))
+
+    # Key specs box
+    specs = [
+        "Tier 1: YOLO 11x  (56.9M params, ~196 GFLOPs/frame)",
+        "Tier 2: SAM 3 Concept Segmentation  (840.5M params, ~4,175 GFLOPs/frame)",
+        "NLQ: Claude API / Ollama / Skippy  (3B-8B int4 models)",
+        "Store: SQLite + FTS5 + optional vector embeddings",
+    ]
+    for i, spec in enumerate(specs):
+        add_text_box(slide, Inches(0.8), Inches(4.0 + i * 0.35),
+                     Inches(8.5), Inches(0.35),
+                     spec, font_size=10, color=C.TEXT_DIM)
+
+
+def slide_sam3_reference(prs: Presentation, ref_data: dict):
+    """Slide 3: SAM 3 reference architecture breakdown."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    summary = ref_data.get("model_summary", {})
+    total_gflops = summary.get("total_gflops", 0)
+    total_params = summary.get("total_params", 0)
+    num_layers = len(ref_data.get("layers", []))
+
+    add_title_bar(slide, "SAM 3 Reference Architecture",
+                  f"{total_params/1e6:.0f}M params  |  {total_gflops:.0f} GFLOPs  |  {num_layers} layers")
+
+    fig = build_sam3_flop_breakdown(ref_data)
+    if fig:
+        img_stream = fig_to_image_stream(fig)
+        slide.shapes.add_picture(img_stream, Inches(0.2), Inches(1.4),
+                                  width=Inches(9.6))
+
+    # Component table
+    components = ref_data.get("model_summary", {}).get("components", {})
+    if components:
+        headers = ["Component", "Params", "Role"]
+        rows = []
+        for name, info in components.items():
+            rows.append([
+                name.replace("_", " ").title(),
+                f"{info['params_m']}M",
+                info["role"],
+            ])
+        add_styled_table(slide, Inches(0.5), Inches(4.5), Inches(9), Inches(1.2),
+                         headers, rows,
+                         col_widths=[Inches(2), Inches(1), Inches(6)])
+
+
+def slide_roofline(prs: Presentation, targets: dict, sam3_ref: Optional[dict]):
+    """Slide 4: Roofline model."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+    add_title_bar(slide, "Roofline Model — Compute vs Bandwidth",
+                  "Workload placement determines bottleneck on each hardware target")
+
+    fig = build_roofline_chart(targets, sam3_ref)
+    img_stream = fig_to_image_stream(fig)
+    slide.shapes.add_picture(img_stream, Inches(0.1), Inches(1.3),
+                              width=Inches(9.8))
+
+
+def slide_run_results(prs: Presentation, run: dict, run_index: int):
+    """Per-run result slide with profiling data."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    video = run.get("video", {})
+    video_name = video.get("name", "unknown")
+    run_id = run.get("run_id", "unknown")
+
+    add_title_bar(slide, f"Test Run: {video_name}",
+                  f"Run ID: {run_id}  |  {video.get('width', '?')}x{video.get('height', '?')} @ {video.get('extract_fps', '?')} FPS extraction")
+
+    yolo = run.get("yolo", {})
+    sam3 = run.get("sam3", {})
+    pipeline = run.get("pipeline", {})
+
+    # YOLO results
+    add_text_box(slide, Inches(0.5), Inches(1.4), Inches(4), Inches(0.4),
+                 "YOLO 11x Detection", font_size=16, color=C.ACCENT_GREEN, bold=True)
+
+    yolo_rows = [
+        ["Model", yolo.get("model", "yolo11x.pt")],
+        ["Avg Inference", f"{yolo.get('avg_ms', 0):.1f} ms"],
+        ["P95 Latency", f"{yolo.get('p95_ms', 0):.1f} ms"],
+        ["P99 Latency", f"{yolo.get('p99_ms', 0):.1f} ms"],
+        ["Parameters", f"{yolo.get('params_m', 0):.1f}M"],
+    ]
+    add_styled_table(slide, Inches(0.5), Inches(1.9), Inches(4), Inches(1.8),
+                     ["Metric", "Value"], yolo_rows,
+                     col_widths=[Inches(2), Inches(2)])
+
+    # SAM 3 results
+    add_text_box(slide, Inches(5.2), Inches(1.4), Inches(4), Inches(0.4),
+                 "SAM 3 Enrichment", font_size=16, color=C.ACCENT_ORANGE, bold=True)
+
+    sam3_model = sam3.get("model", "not loaded")
+    sam3_rows = [
+        ["Model", sam3_model],
+        ["Avg Enrichment", f"{sam3.get('avg_enrichment_ms', 0):.0f} ms"],
+        ["P95 Latency", f"{sam3.get('p95_enrichment_ms', 0):.0f} ms"],
+        ["Parameters", f"{sam3.get('model_params_m', 0):.1f}M"],
+        ["Frames Profiled", str(sam3.get("total_frames", 0))],
+    ]
+    add_styled_table(slide, Inches(5.2), Inches(1.9), Inches(4.3), Inches(1.8),
+                     ["Metric", "Value"], sam3_rows,
+                     col_widths=[Inches(2.2), Inches(2.1)])
+
+    # Pipeline summary
+    add_text_box(slide, Inches(0.5), Inches(4.0), Inches(9), Inches(0.4),
+                 "Pipeline Summary", font_size=16, color=C.ACCENT_BLUE, bold=True)
+
+    pipe_rows = [
+        ["Total Frames", str(pipeline.get("total_frames", 0))],
+        ["Total Detections", str(pipeline.get("total_detections", 0))],
+        ["Pipeline Time", f"{pipeline.get('total_seconds', 0):.1f}s"],
+        ["Throughput", f"{pipeline.get('fps', 0):.2f} FPS"],
+        ["Detect Only", str(pipeline.get("detect_only", False))],
+    ]
+    add_styled_table(slide, Inches(0.5), Inches(4.5), Inches(9), Inches(1.3),
+                     ["Metric", "Value", "Metric", "Value", "Metric"],
+                     # Flatten to single row table
+                     [],
+    )
+    # Actually use a simpler approach — two-column table
+    slide.shapes[-1]._element.getparent().remove(slide.shapes[-1]._element)
+
+    add_styled_table(slide, Inches(0.5), Inches(4.5), Inches(9), Inches(1.2),
+                     ["Frames", "Detections", "Pipeline Time", "Throughput", "Mode"],
+                     [[
+                         str(pipeline.get("total_frames", 0)),
+                         str(pipeline.get("total_detections", 0)),
+                         f"{pipeline.get('total_seconds', 0):.1f}s",
+                         f"{pipeline.get('fps', 0):.2f} FPS",
+                         "Detect Only" if pipeline.get("detect_only") else "Full (YOLO+SAM3)",
+                     ]])
+
+
+def slide_npu_projections(prs: Presentation, run: dict, targets: dict):
+    """NPU projection slide for a given run."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    video_name = run.get("video", {}).get("name", "unknown")
+    add_title_bar(slide, "Edge NPU Projections",
+                  f"Based on: {video_name}  |  Measured on RTX 5090, projected to edge targets")
+
+    projections = project_for_deck(run, targets)
+
+    headers = ["Target", "TOPS", "BW (GB/s)", "YOLO", "SAM 3",
+               "Combined", "FPS", "1 FPS?", "5 FPS?", "TDP"]
+    rows = []
+    for p in projections:
+        rows.append([
+            p["target"],
+            f"{p['tops']:.0f}",
+            f"{p['bw_gbs']:.0f}",
+            f"{p['yolo_projected_ms']:.1f}ms",
+            f"{p['sam3_projected_ms']:.1f}ms",
+            f"{p['combined_ms']:.1f}ms",
+            f"{p['combined_fps']:.0f}",
+            "YES" if p["feasible_1fps"] else "NO",
+            "YES" if p["feasible_5fps"] else "NO",
+            f"{p['tdp_w']:.0f}W",
+        ])
+
+    add_styled_table(slide, Inches(0.3), Inches(1.5), Inches(9.4), Inches(1.5),
+                     headers, rows)
+
+    # Key insight callout
+    nxp = next((p for p in projections if p["target_key"] == "nxp_edge"), None)
+    if nxp:
+        bottleneck = nxp["sam3_bottleneck"]
+        insight = (
+            f"NXP Edge MPU: {nxp['combined_ms']:.1f}ms combined "
+            f"({nxp['combined_fps']:.0f} FPS)  |  "
+            f"SAM 3 is {bottleneck}-bound  |  "
+            f"{'FEASIBLE' if nxp['feasible_1fps'] else 'NOT FEASIBLE'} at 1 FPS extraction  |  "
+            f"{'FEASIBLE' if nxp['feasible_5fps'] else 'NOT FEASIBLE'} at 5 FPS extraction"
+        )
+
+        box = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(0.5), Inches(3.5), Inches(9), Inches(1.0),
+        )
+        box.fill.solid()
+        box.fill.fore_color.rgb = RGBColor(0x0D, 0x2B, 0x0D)
+        box.line.color.rgb = C.ACCENT_GREEN
+        box.line.width = Pt(2)
+
+        tf = box.text_frame
+        tf.word_wrap = True
+        p = tf.paragraphs[0]
+        p.text = "KEY FINDING"
+        p.font.size = Pt(12)
+        p.font.color.rgb = C.ACCENT_GREEN
+        p.font.bold = True
+        p.font.name = "Segoe UI"
+
+        p2 = tf.add_paragraph()
+        p2.text = insight
+        p2.font.size = Pt(11)
+        p2.font.color.rgb = C.TEXT_BRIGHT
+        p2.font.name = "Segoe UI"
+
+
+def slide_run_comparison(prs: Presentation, runs: list[dict], targets: dict):
+    """Comparison chart across all runs."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+    add_title_bar(slide, "Run Comparison",
+                  f"{len(runs)} test runs  |  Inference latency on RTX 5090")
+
+    fig = build_latency_comparison_chart(runs, targets)
+    if fig:
+        img_stream = fig_to_image_stream(fig)
+        slide.shapes.add_picture(img_stream, Inches(0.1), Inches(1.3),
+                                  width=Inches(9.8))
+
+
+def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
+    """Final summary slide with key findings."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide, C.BG_DARK)
+
+    add_text_box(slide, Inches(0.5), Inches(0.4), Inches(9), Inches(0.6),
+                 "Summary & Key Findings", font_size=28,
+                 color=C.ACCENT_BLUE, bold=True, alignment=PP_ALIGN.CENTER)
+
+    latest_run = runs[-1] if runs else {}
+    projections = project_for_deck(latest_run, targets) if latest_run else []
+    nxp = next((p for p in projections if p["target_key"] == "nxp_edge"), None)
+
+    findings = []
+
+    if latest_run:
+        yolo_ms = latest_run.get("yolo", {}).get("avg_ms", 0)
+        sam3_ms = latest_run.get("sam3", {}).get("avg_enrichment_ms", 0)
+        findings.append(
+            f"RTX 5090 Baseline: YOLO {yolo_ms:.1f}ms + SAM 3 {sam3_ms:.0f}ms per frame"
+        )
+
+    if nxp:
+        findings.extend([
+            f"NXP Edge MPU (200 TOPS / 134.4 GB/s / 25W):",
+            f"    Projected: {nxp['combined_ms']:.1f}ms combined ({nxp['combined_fps']:.0f} FPS)",
+            f"    1 FPS extraction: {'FEASIBLE' if nxp['feasible_1fps'] else 'NOT FEASIBLE'}",
+            f"    5 FPS extraction: {'FEASIBLE' if nxp['feasible_5fps'] else 'NOT FEASIBLE'}",
+            f"    Bottleneck: {nxp['sam3_bottleneck']} (128-bit LPDDR5X @ 134.4 GB/s)",
+            "",
+            "SAM 3 is compute-dominant (~85% of FLOPs in PE backbone)",
+            "but shifts to bandwidth-bound on edge due to 13x lower memory BW",
+            "",
+            "LLM NLQ: qwen2.5:3b fits in 8GB, ~67 tok/s on edge target",
+        ])
+
+    for i, finding in enumerate(findings):
+        color = C.TEXT_WHITE if finding.strip() else C.TEXT_DIM
+        if finding.strip().startswith("NXP"):
+            color = C.ACCENT_GREEN
+        elif "FEASIBLE" in finding and "NOT" not in finding:
+            color = C.FEASIBLE
+        elif "NOT FEASIBLE" in finding:
+            color = C.NOT_FEASIBLE
+
+        add_text_box(slide, Inches(1), Inches(1.5 + i * 0.38),
+                     Inches(8), Inches(0.38),
+                     finding, font_size=13, color=color)
+
+    # Footer
+    add_text_box(slide, Inches(1), Inches(6.5), Inches(8), Inches(0.3),
+                 "Keyhole  |  TTA — Trust the Awesomeness",
+                 font_size=10, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
+
+
+# ============================================================
+# Main Build
+# ============================================================
+
+@click.command()
+@click.option("--output", "-o", default="data/output/keyhole_results.pptx",
+              help="Output PPTX path")
+@click.option("--runs-dir", default="data/output/runs",
+              help="Directory containing run JSON files")
+@click.option("--data-dir", default="data/output",
+              help="Directory containing reference architecture exports")
+def build_deck(output, runs_dir, data_dir):
+    """Generate the Keyhole results PowerPoint deck."""
+    from rich.console import Console
+    console = Console()
+
+    console.print("\n[bold]Keyhole — Building Results Deck[/]\n")
+
+    runs_dir = Path(runs_dir)
+    data_dir = Path(data_dir)
+    output = Path(output)
+
+    # Load data
+    runs = load_runs(runs_dir)
+    sam3_ref = load_sam3_reference(data_dir)
+    targets = load_npu_targets()
+
+    console.print(f"  Runs found:     {len(runs)}")
+    console.print(f"  SAM 3 ref:      {'YES' if sam3_ref else 'NO'}")
+    console.print(f"  NPU targets:    {len(targets)}")
+
+    # Build presentation
+    prs = Presentation()
+    prs.slide_width = Inches(10)
+    prs.slide_height = Inches(7.5)
+
+    # Slide 1: Title
+    console.print("  Building: Title slide")
+    slide_title(prs)
+
+    # Slide 2: Architecture
+    console.print("  Building: Architecture diagram")
+    slide_architecture(prs)
+
+    # Slide 3: SAM 3 Reference
+    if sam3_ref:
+        console.print("  Building: SAM 3 reference breakdown")
+        slide_sam3_reference(prs, sam3_ref)
+
+    # Slide 4: Roofline model
+    console.print("  Building: Roofline model")
+    slide_roofline(prs, targets, sam3_ref)
+
+    # Per-run slides
+    for i, run in enumerate(runs):
+        video_name = run.get("video", {}).get("name", f"Run {i+1}")
+        console.print(f"  Building: Run results — {video_name}")
+        slide_run_results(prs, run, i)
+        slide_npu_projections(prs, run, targets)
+
+    # Comparison slide (if multiple runs)
+    if len(runs) >= 1:
+        console.print("  Building: Run comparison chart")
+        slide_run_comparison(prs, runs, targets)
+
+    # Summary slide
+    console.print("  Building: Summary & findings")
+    slide_summary(prs, runs, targets)
+
+    # Save
+    output.parent.mkdir(parents=True, exist_ok=True)
+    prs.save(str(output))
+
+    total_slides = len(prs.slides)
+    console.print(f"\n  [bold green]Deck generated: {output}[/]")
+    console.print(f"  Total slides: {total_slides}")
+    console.print(f"  Runs included: {len(runs)}\n")
+
+
+if __name__ == "__main__":
+    build_deck()

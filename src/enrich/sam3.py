@@ -32,6 +32,7 @@ class ConceptMatch:
     confidence: float     # SAM 3 presence score
     mask_area_pct: float  # Percentage of crop covered by this concept's mask
     bbox: Optional[tuple[float, float, float, float]] = None  # Relative bbox within crop
+    mask: Optional[np.ndarray] = None  # Binary mask (crop-relative, H x W bool)
 
 
 @dataclass
@@ -152,6 +153,10 @@ class SAM3Enricher:
             self.model = build_sam3_image_model()
             self.processor = Sam3Processor(self.model)
 
+            # SAM 3 expects bf16 autocast (per official examples)
+            self._autocast = torch.autocast("cuda", dtype=torch.bfloat16)
+            self._autocast.__enter__()
+
             # Warm up
             dummy = Image.fromarray(np.zeros((224, 224, 3), dtype=np.uint8))
             state = self.processor.set_image(dummy)
@@ -176,7 +181,8 @@ class SAM3Enricher:
         return concepts
 
     def _enrich_with_sam3(
-        self, crop: np.ndarray, class_name: str
+        self, crop: np.ndarray, class_name: str,
+        retain_masks: bool = False,
     ) -> tuple[list[ConceptMatch], float]:
         """
         Run SAM 3 concept segmentation on a detection crop.
@@ -219,10 +225,13 @@ class SAM3Enricher:
 
                         # Only keep if mask covers meaningful area
                         if mask_area_pct > 0.5:
+                            # Squeeze to 2D bool mask if needed
+                            mask_2d = mask.squeeze().astype(bool) if retain_masks else None
                             matches.append(ConceptMatch(
                                 concept=concept,
                                 confidence=best_score,
                                 mask_area_pct=mask_area_pct,
+                                mask=mask_2d,
                             ))
 
             except Exception as e:
@@ -255,7 +264,9 @@ class SAM3Enricher:
         else:
             return f"{class_name}: {', '.join(concept_strs)}"
 
-    def enrich_frame(self, frame_detections: FrameDetections) -> EnrichedFrame:
+    def enrich_frame(
+        self, frame_detections: FrameDetections, retain_masks: bool = False,
+    ) -> EnrichedFrame:
         """
         Enrich all detections in a frame with SAM 3 concept analysis.
         """
@@ -268,7 +279,7 @@ class SAM3Enricher:
 
             if det.crop is not None and det.crop.size > 0:
                 concepts, enrich_ms = self._enrich_with_sam3(
-                    det.crop, det.class_name
+                    det.crop, det.class_name, retain_masks=retain_masks,
                 )
                 total_ms += enrich_ms
 

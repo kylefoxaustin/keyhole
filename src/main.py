@@ -49,13 +49,15 @@ def cli():
 @click.option("--detect-only", is_flag=True, help="Skip SAM 3 enrichment")
 @click.option("--profile", is_flag=True, help="Enable GPU profiling")
 @click.option("--emulate-npu", default=None, help="Emulate target NPU (preset name or JSON path)")
-def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str):
+@click.option("--render", is_flag=True, help="Output annotated video with detection overlays")
+def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool):
     """Process a video through the detection pipeline."""
 
     from src.ingest.video import extract_frames, probe_video
     from src.detect.yolo import YOLODetector
     from src.enrich.sam3 import SAM3Enricher, EnrichedFrame, EnrichedDetection
     from src.store.db import DetectionStore
+    from src.render.video import VideoRenderer, RenderConfig
 
     video_path = Path(video)
     if not video_path.exists():
@@ -142,6 +144,12 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
         )
         enricher.load_model()
 
+    # --- Video renderer ---
+    renderer = None
+    if render:
+        renderer = VideoRenderer(RenderConfig(output_fps=extract_fps))
+        console.print(f"  [cyan]Render mode enabled — annotated video will be saved[/]")
+
     # --- Process frames ---
     total_detections = 0
     total_frames = 0
@@ -171,7 +179,9 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
 
             # Tier 2: SAM 3 enrichment (if enabled)
             if enricher and frame_dets.count > 0:
-                enriched = enricher.enrich_frame(frame_dets)
+                enriched = enricher.enrich_frame(
+                    frame_dets, retain_masks=render,
+                )
                 # NPU emulation: throttle SAM 3 to target latency
                 if npu_throttle_sam3:
                     npu_throttle_sam3(enriched.total_enrichment_ms)
@@ -200,11 +210,24 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
                 yolo_inference_ms=frame_dets.inference_ms,
             )
 
+            # Render annotated frame
+            if renderer:
+                annotated = renderer.render_frame(frame.image, enriched)
+                renderer.add_frame(annotated)
+
             total_detections += frame_dets.count
             total_frames += 1
             progress.update(task, advance=1)
 
     pipeline_sec = time.perf_counter() - t_pipeline_start
+
+    # --- Write annotated video ---
+    if renderer:
+        output_video = Path("data/output") / f"{video_path.stem}_annotated.mp4"
+        console.print(f"\n[cyan]Writing annotated video...[/]")
+        result_path = renderer.write_video(str(output_video))
+        if result_path:
+            console.print(f"  [bold cyan]Annotated video: {result_path}[/]")
 
     # --- Summary ---
     console.print(f"\n[bold green]Processing Complete[/]")
@@ -231,8 +254,23 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
                 console.print(f"  {k}: {v}")
 
         # Save profile data
+        from datetime import datetime, timezone
+        run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
         profile_data = {
+            "run_id": f"{video_path.stem}_{run_timestamp}",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "video": {
+                "name": video_path.name,
+                "path": str(video_path),
+                "width": meta.width,
+                "height": meta.height,
+                "source_fps": meta.fps,
+                "duration_sec": meta.duration,
+                "extract_fps": extract_fps,
+            },
             "yolo": {
+                "model": settings.yolo.model,
                 "avg_ms": yolo_metrics.avg_inference_ms,
                 "p95_ms": yolo_metrics.p95_inference_ms,
                 "p99_ms": yolo_metrics.p99_inference_ms,
@@ -244,13 +282,26 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
                 "total_detections": total_detections,
                 "total_seconds": pipeline_sec,
                 "fps": total_frames / pipeline_sec,
+                "detect_only": detect_only,
+                "emulate_npu": emulate_npu or None,
             },
         }
+
+        # Save latest profile (overwrite)
         profile_path = Path(settings.profile.output)
         profile_path.parent.mkdir(parents=True, exist_ok=True)
         with open(profile_path, "w") as f:
             json.dump(profile_data, f, indent=2)
+
+        # Save timestamped run to history
+        runs_dir = profile_path.parent / "runs"
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        run_path = runs_dir / f"run_{profile_data['run_id']}.json"
+        with open(run_path, "w") as f:
+            json.dump(profile_data, f, indent=2)
+
         console.print(f"\n  Profile saved: {profile_path}")
+        console.print(f"  Run archived:  {run_path}")
 
 
 @cli.command()
