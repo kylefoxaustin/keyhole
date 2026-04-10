@@ -94,17 +94,32 @@ class VideoRenderer:
         x1: int, y1: int, color: tuple,
     ) -> np.ndarray:
         """Overlay a segmentation mask onto the frame with transparency."""
-        mask_h, mask_w = mask.shape[:2]
-        # Clamp to frame bounds
         fh, fw = frame.shape[:2]
-        x2 = min(x1 + mask_w, fw)
-        y2 = min(y1 + mask_h, fh)
-        mask_crop = mask[:y2 - y1, :x2 - x1]
+        mask_h, mask_w = mask.shape[:2]
 
-        # Create colored overlay
         overlay = frame.copy()
-        region = overlay[y1:y2, x1:x2]
-        region[mask_crop] = color
+
+        # Determine if mask is full-frame or crop-relative
+        # Full-frame: mask covers the entire image
+        # Crop-relative: mask is sized to the detection crop
+        is_full_frame = (mask_h >= fh * 0.5 and mask_w >= fw * 0.5)
+
+        if is_full_frame:
+            # Full-frame mask (from single-pass mode) — resize if needed
+            if mask_h != fh or mask_w != fw:
+                import cv2 as _cv2
+                mask = _cv2.resize(mask.astype(np.uint8), (fw, fh),
+                                   interpolation=_cv2.INTER_NEAREST).astype(bool)
+            overlay[mask] = color
+        else:
+            # Crop-relative mask (from sequential YOLO+SAM3 mode)
+            x2 = min(x1 + mask_w, fw)
+            y2 = min(y1 + mask_h, fh)
+            mask_crop = mask[:y2 - y1, :x2 - x1]
+            if mask_crop.size > 0:
+                region = overlay[y1:y2, x1:x2]
+                region[mask_crop] = color
+
         frame = cv2.addWeighted(overlay, self.config.mask_alpha,
                                 frame, 1 - self.config.mask_alpha, 0)
         return frame

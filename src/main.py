@@ -50,7 +50,8 @@ def cli():
 @click.option("--profile", is_flag=True, help="Enable GPU profiling")
 @click.option("--emulate-npu", default=None, help="Emulate target NPU (preset name or JSON path)")
 @click.option("--render", is_flag=True, help="Output annotated video with detection overlays")
-def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool):
+@click.option("--single-pass", is_flag=True, help="Use SAM 3 single-pass detection (replaces YOLO+SAM3 sequential)")
+def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool, single_pass: bool):
     """Process a video through the detection pipeline."""
 
     from src.ingest.video import extract_frames, probe_video
@@ -125,24 +126,41 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
     store = DetectionStore(settings.database.url)
     video_id = store.register_video(meta)
 
-    detector = YOLODetector(
-        model_name=settings.yolo.model,
-        confidence=settings.yolo.confidence,
-        iou_threshold=settings.yolo.iou_threshold,
-        device=settings.yolo.device,
-        classes=settings.yolo.classes or None,
-        profile=do_profile,
-    )
-
-    enricher = None
-    if not detect_only and settings.sam3.enabled:
-        enricher = SAM3Enricher(
-            device=settings.sam3.device,
+    # Single-pass mode: SAM 3 does everything in one forward pass
+    sp_detector = None
+    if single_pass:
+        from src.detect.sam3_detect import SAM3SinglePassDetector
+        console.print(f"  [bold yellow]SINGLE-PASS MODE — SAM 3 handles detection + enrichment[/]")
+        sp_detector = SAM3SinglePassDetector(
             concepts=settings.sam3.concepts,
-            confidence_threshold=settings.sam3.confidence,
+            detection_threshold=settings.sam3.confidence,
+            device=settings.sam3.device,
+            profile=do_profile,
+            retain_masks=render,
+        )
+        sp_detector.load_model()
+
+    # Standard mode: YOLO detection + optional SAM 3 enrichment
+    detector = None
+    enricher = None
+    if not single_pass:
+        detector = YOLODetector(
+            model_name=settings.yolo.model,
+            confidence=settings.yolo.confidence,
+            iou_threshold=settings.yolo.iou_threshold,
+            device=settings.yolo.device,
+            classes=settings.yolo.classes or None,
             profile=do_profile,
         )
-        enricher.load_model()
+
+        if not detect_only and settings.sam3.enabled:
+            enricher = SAM3Enricher(
+                device=settings.sam3.device,
+                concepts=settings.sam3.concepts,
+                confidence_threshold=settings.sam3.confidence,
+                profile=do_profile,
+            )
+            enricher.load_model()
 
     # --- Video renderer ---
     renderer = None
@@ -170,44 +188,50 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
         task = progress.add_task("Processing", total=estimated_frames)
 
         for frame in extract_frames(video_path, target_fps=extract_fps, max_frames=max_f):
-            # Tier 1: YOLO detection
-            frame_dets = detector.detect_frame(frame)
-
-            # NPU emulation: throttle YOLO to target latency
-            if npu_throttle_yolo:
-                npu_throttle_yolo(frame_dets.inference_ms)
-
-            # Tier 2: SAM 3 enrichment (if enabled)
-            if enricher and frame_dets.count > 0:
-                enriched = enricher.enrich_frame(
-                    frame_dets, retain_masks=render,
-                )
-                # NPU emulation: throttle SAM 3 to target latency
-                if npu_throttle_sam3:
-                    npu_throttle_sam3(enriched.total_enrichment_ms)
+            if single_pass:
+                # === SINGLE-PASS: SAM 3 does everything ===
+                enriched = sp_detector.detect_frame(frame)
             else:
-                # Pass through without enrichment
-                enriched = EnrichedFrame(
-                    frame_number=frame_dets.frame_number,
-                    timestamp_sec=frame_dets.timestamp_sec,
-                    source_video=frame_dets.source_video,
-                    detections=[
-                        EnrichedDetection(
-                            bbox=d.bbox,
-                            class_id=d.class_id,
-                            class_name=d.class_name,
-                            confidence=d.confidence,
-                            description=d.class_name,
-                        )
-                        for d in frame_dets.detections
-                    ],
-                )
+                # === STANDARD: YOLO → optional SAM 3 ===
+                # Tier 1: YOLO detection
+                frame_dets = detector.detect_frame(frame)
+
+                # NPU emulation: throttle YOLO to target latency
+                if npu_throttle_yolo:
+                    npu_throttle_yolo(frame_dets.inference_ms)
+
+                # Tier 2: SAM 3 enrichment (if enabled)
+                if enricher and frame_dets.count > 0:
+                    enriched = enricher.enrich_frame(
+                        frame_dets, retain_masks=render,
+                    )
+                    # NPU emulation: throttle SAM 3 to target latency
+                    if npu_throttle_sam3:
+                        npu_throttle_sam3(enriched.total_enrichment_ms)
+                else:
+                    # Pass through without enrichment
+                    enriched = EnrichedFrame(
+                        frame_number=frame_dets.frame_number,
+                        timestamp_sec=frame_dets.timestamp_sec,
+                        source_video=frame_dets.source_video,
+                        detections=[
+                            EnrichedDetection(
+                                bbox=d.bbox,
+                                class_id=d.class_id,
+                                class_name=d.class_name,
+                                confidence=d.confidence,
+                                description=d.class_name,
+                            )
+                            for d in frame_dets.detections
+                        ],
+                    )
 
             # Store results
+            yolo_ms = 0.0 if single_pass else frame_dets.inference_ms
             store.store_enriched_frame(
                 video_id=video_id,
                 enriched=enriched,
-                yolo_inference_ms=frame_dets.inference_ms,
+                yolo_inference_ms=yolo_ms,
             )
 
             # Render annotated frame
@@ -215,7 +239,7 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
                 annotated = renderer.render_frame(frame.image, enriched)
                 renderer.add_frame(annotated)
 
-            total_detections += frame_dets.count
+            total_detections += len(enriched.detections)
             total_frames += 1
             progress.update(task, advance=1)
 
@@ -240,52 +264,83 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
 
     # --- Profiling report ---
     if do_profile:
-        console.print("\n[bold]GPU Profile — YOLO[/]")
-        yolo_metrics = detector.get_profile_metrics()
-        console.print(f"  Avg inference:  {yolo_metrics.avg_inference_ms:.1f}ms")
-        console.print(f"  P95 inference:  {yolo_metrics.p95_inference_ms:.1f}ms")
-        console.print(f"  P99 inference:  {yolo_metrics.p99_inference_ms:.1f}ms")
-        console.print(f"  Model params:   {yolo_metrics.model_params / 1e6:.1f}M")
-
-        if enricher:
-            console.print("\n[bold]GPU Profile — SAM 3[/]")
-            sam3_metrics = enricher.get_profile_metrics()
-            for k, v in sam3_metrics.items():
-                console.print(f"  {k}: {v}")
-
-        # Save profile data
         from datetime import datetime, timezone
         run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-        profile_data = {
-            "run_id": f"{video_path.stem}_{run_timestamp}",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "video": {
-                "name": video_path.name,
-                "path": str(video_path),
-                "width": meta.width,
-                "height": meta.height,
-                "source_fps": meta.fps,
-                "duration_sec": meta.duration,
-                "extract_fps": extract_fps,
-            },
-            "yolo": {
-                "model": settings.yolo.model,
-                "avg_ms": yolo_metrics.avg_inference_ms,
-                "p95_ms": yolo_metrics.p95_inference_ms,
-                "p99_ms": yolo_metrics.p99_inference_ms,
-                "params_m": yolo_metrics.model_params / 1e6,
-            },
-            "sam3": enricher.get_profile_metrics() if enricher else {},
-            "pipeline": {
-                "total_frames": total_frames,
-                "total_detections": total_detections,
-                "total_seconds": pipeline_sec,
-                "fps": total_frames / pipeline_sec,
-                "detect_only": detect_only,
-                "emulate_npu": emulate_npu or None,
-            },
-        }
+        if single_pass:
+            sp_metrics = sp_detector.get_profile_metrics()
+            console.print("\n[bold]GPU Profile — SAM 3 Single-Pass[/]")
+            for k, v in sp_metrics.items():
+                console.print(f"  {k}: {v}")
+
+            profile_data = {
+                "run_id": f"{video_path.stem}_{run_timestamp}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "video": {
+                    "name": video_path.name,
+                    "path": str(video_path),
+                    "width": meta.width,
+                    "height": meta.height,
+                    "source_fps": meta.fps,
+                    "duration_sec": meta.duration,
+                    "extract_fps": extract_fps,
+                },
+                "yolo": {},
+                "sam3": sp_metrics,
+                "pipeline": {
+                    "total_frames": total_frames,
+                    "total_detections": total_detections,
+                    "total_seconds": pipeline_sec,
+                    "fps": total_frames / pipeline_sec,
+                    "detect_only": False,
+                    "single_pass": True,
+                    "emulate_npu": emulate_npu or None,
+                },
+            }
+        else:
+            console.print("\n[bold]GPU Profile — YOLO[/]")
+            yolo_metrics = detector.get_profile_metrics()
+            console.print(f"  Avg inference:  {yolo_metrics.avg_inference_ms:.1f}ms")
+            console.print(f"  P95 inference:  {yolo_metrics.p95_inference_ms:.1f}ms")
+            console.print(f"  P99 inference:  {yolo_metrics.p99_inference_ms:.1f}ms")
+            console.print(f"  Model params:   {yolo_metrics.model_params / 1e6:.1f}M")
+
+            if enricher:
+                console.print("\n[bold]GPU Profile — SAM 3[/]")
+                sam3_metrics = enricher.get_profile_metrics()
+                for k, v in sam3_metrics.items():
+                    console.print(f"  {k}: {v}")
+
+            profile_data = {
+                "run_id": f"{video_path.stem}_{run_timestamp}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "video": {
+                    "name": video_path.name,
+                    "path": str(video_path),
+                    "width": meta.width,
+                    "height": meta.height,
+                    "source_fps": meta.fps,
+                    "duration_sec": meta.duration,
+                    "extract_fps": extract_fps,
+                },
+                "yolo": {
+                    "model": settings.yolo.model,
+                    "avg_ms": yolo_metrics.avg_inference_ms,
+                    "p95_ms": yolo_metrics.p95_inference_ms,
+                    "p99_ms": yolo_metrics.p99_inference_ms,
+                    "params_m": yolo_metrics.model_params / 1e6,
+                },
+                "sam3": enricher.get_profile_metrics() if enricher else {},
+                "pipeline": {
+                    "total_frames": total_frames,
+                    "total_detections": total_detections,
+                    "total_seconds": pipeline_sec,
+                    "fps": total_frames / pipeline_sec,
+                    "detect_only": detect_only,
+                    "single_pass": False,
+                    "emulate_npu": emulate_npu or None,
+                },
+            }
 
         # Save latest profile (overwrite)
         profile_path = Path(settings.profile.output)
