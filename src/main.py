@@ -53,7 +53,8 @@ def cli():
 @click.option("--single-pass", is_flag=True, help="Use SAM 3 single-pass detection (replaces YOLO+SAM3 sequential)")
 @click.option("--sam3-resolution", default=1008, type=int, help="SAM 3 internal processing resolution (default 1008)")
 @click.option("--hybrid", is_flag=True, help="Use hybrid pipeline (YOLO + MobileSAM + CLIP)")
-def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool, single_pass: bool, sam3_resolution: int, hybrid: bool):
+@click.option("--hybrid-v2", default=None, type=str, help="YOLO-seg + CLIP pipeline (pass seg model name, e.g. yolo11s-seg.pt)")
+def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool, single_pass: bool, sam3_resolution: int, hybrid: bool, hybrid_v2: str):
     """Process a video through the detection pipeline."""
 
     from src.ingest.video import extract_frames, probe_video
@@ -128,9 +129,23 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
     store = DetectionStore(settings.database.url)
     video_id = store.register_video(meta)
 
+    # Hybrid V2 mode: YOLO-seg + CLIP (two models, no MobileSAM)
+    hybrid_v2_detector = None
+    if hybrid_v2:
+        from src.detect.hybrid_v2 import HybridV2Detector
+        console.print(f"  [bold magenta]HYBRID V2 — YOLO-seg ({hybrid_v2}) + CLIP[/]")
+        hybrid_v2_detector = HybridV2Detector(
+            yolo_seg_model=hybrid_v2,
+            yolo_confidence=settings.yolo.confidence,
+            device=settings.yolo.device,
+            profile=do_profile,
+            retain_masks=render,
+        )
+        hybrid_v2_detector.load_model()
+
     # Hybrid mode: YOLO + MobileSAM + CLIP
     hybrid_detector = None
-    if hybrid:
+    if hybrid and not hybrid_v2:
         from src.detect.hybrid import HybridDetector
         console.print(f"  [bold cyan]HYBRID MODE — YOLO + MobileSAM + CLIP[/]")
         hybrid_detector = HybridDetector(
@@ -205,7 +220,10 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
         task = progress.add_task("Processing", total=estimated_frames)
 
         for frame in extract_frames(video_path, target_fps=extract_fps, max_frames=max_f):
-            if hybrid:
+            if hybrid_v2:
+                # === HYBRID V2: YOLO-seg + CLIP ===
+                enriched = hybrid_v2_detector.detect_frame(frame)
+            elif hybrid:
                 # === HYBRID: YOLO + MobileSAM + CLIP ===
                 enriched = hybrid_detector.detect_frame(frame)
             elif single_pass:
@@ -247,7 +265,7 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
                     )
 
             # Store results
-            yolo_ms = 0.0 if (single_pass or hybrid) else frame_dets.inference_ms
+            yolo_ms = 0.0 if (single_pass or hybrid or hybrid_v2) else frame_dets.inference_ms
             store.store_enriched_frame(
                 video_id=video_id,
                 enriched=enriched,
@@ -287,7 +305,33 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
         from datetime import datetime, timezone
         run_timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-        if hybrid:
+        if hybrid_v2:
+            hv2_metrics = hybrid_v2_detector.get_profile_metrics()
+            console.print("\n[bold]GPU Profile — Hybrid V2 (YOLO-seg + CLIP)[/]")
+            for k, v in hv2_metrics.items():
+                if not isinstance(v, dict):
+                    console.print(f"  {k}: {v}")
+
+            profile_data = {
+                "run_id": f"{video_path.stem}_{run_timestamp}",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "video": {
+                    "name": video_path.name, "path": str(video_path),
+                    "width": meta.width, "height": meta.height,
+                    "source_fps": meta.fps, "duration_sec": meta.duration,
+                    "extract_fps": extract_fps,
+                },
+                "yolo": {"model": hybrid_v2, "avg_ms": hv2_metrics.get("avg_yolo_seg_ms", 0)},
+                "sam3": hv2_metrics,
+                "pipeline": {
+                    "total_frames": total_frames, "total_detections": total_detections,
+                    "total_seconds": pipeline_sec, "fps": total_frames / pipeline_sec,
+                    "detect_only": False, "single_pass": False, "hybrid": False,
+                    "hybrid_v2": hybrid_v2, "emulate_npu": emulate_npu or None,
+                },
+            }
+
+        elif hybrid:
             hybrid_metrics = hybrid_detector.get_profile_metrics()
             console.print("\n[bold]GPU Profile — Hybrid (YOLO + MobileSAM + CLIP)[/]")
             for k, v in hybrid_metrics.items():
