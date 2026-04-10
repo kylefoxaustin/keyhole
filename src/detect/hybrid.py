@@ -141,34 +141,73 @@ class HybridDetector:
             return VEHICLE_ATTRIBUTES
         return GENERAL_ATTRIBUTES
 
-    def _classify_crop(self, crop_pil: Image.Image, class_name: str) -> list[tuple[str, float]]:
-        """Run CLIP zero-shot classification on a detection crop."""
-        prompts = self._get_clip_prompts(class_name)
-        if not prompts:
+    def _classify_crops_batched(
+        self, crops_pil: list[Optional[Image.Image]], class_names: list[str],
+    ) -> list[list[tuple[str, float]]]:
+        """
+        Batch CLIP classification across all crops in a frame.
+
+        Text features are cached per class (same prompts for all "person" crops).
+        Image features are batched into a single encode_image call.
+        """
+        if not crops_pil:
             return []
 
-        image_input = self.clip_preprocess(crop_pil).unsqueeze(0).to(self.device)
-        text_tokens = self.clip_tokenizer(prompts).to(self.device)
+        # Cache text features per class
+        if not hasattr(self, "_text_cache"):
+            self._text_cache = {}
+
+        # Pre-encode text for each unique class
+        for cls in set(class_names):
+            if cls not in self._text_cache:
+                prompts = self._get_clip_prompts(cls)
+                if prompts:
+                    text_tokens = self.clip_tokenizer(prompts).to(self.device)
+                    with torch.no_grad():
+                        text_features = self.clip_model.encode_text(text_tokens)
+                        text_features /= text_features.norm(dim=-1, keepdim=True)
+                    self._text_cache[cls] = (prompts, text_features)
+
+        # Batch all valid crops into one image tensor
+        valid_indices = []
+        batch_tensors = []
+        for i, crop in enumerate(crops_pil):
+            if crop is not None:
+                batch_tensors.append(self.clip_preprocess(crop))
+                valid_indices.append(i)
+
+        if not batch_tensors:
+            return [[] for _ in crops_pil]
+
+        image_batch = torch.stack(batch_tensors).to(self.device)
 
         with torch.no_grad():
-            image_features = self.clip_model.encode_image(image_input)
-            text_features = self.clip_model.encode_text(text_tokens)
-
+            image_features = self.clip_model.encode_image(image_batch)
             image_features /= image_features.norm(dim=-1, keepdim=True)
-            text_features /= text_features.norm(dim=-1, keepdim=True)
 
-            similarity = (image_features @ text_features.T).squeeze(0)
+        # Match each crop's features against its class text features
+        all_results = [[] for _ in crops_pil]
+
+        for batch_idx, orig_idx in enumerate(valid_indices):
+            cls = class_names[orig_idx]
+            if cls not in self._text_cache:
+                continue
+
+            prompts, text_features = self._text_cache[cls]
+            img_feat = image_features[batch_idx:batch_idx + 1]
+
+            similarity = (img_feat @ text_features.T).squeeze(0)
             probs = similarity.softmax(dim=-1)
 
-        # Return top-k matches
-        top_k = min(self.clip_top_k, len(prompts))
-        top_probs, top_indices = probs.topk(top_k)
+            top_k = min(self.clip_top_k, len(prompts))
+            top_probs, top_indices = probs.topk(top_k)
 
-        results = []
-        for prob, idx in zip(top_probs, top_indices):
-            results.append((prompts[idx], float(prob)))
+            results = []
+            for prob, idx in zip(top_probs, top_indices):
+                results.append((prompts[idx], float(prob)))
+            all_results[orig_idx] = results
 
-        return results
+        return all_results
 
     def detect_frame(self, frame: ExtractedFrame) -> EnrichedFrame:
         """Run the full hybrid pipeline on one frame."""
@@ -247,18 +286,12 @@ class HybridDetector:
             torch.cuda.synchronize()
         sam_ms = (time.perf_counter() - t_sam) * 1000
 
-        # === Stage 3: CLIP Classification ===
+        # === Stage 3: CLIP Classification (batched) ===
         if torch.cuda.is_available():
             torch.cuda.synchronize()
         t_clip = time.perf_counter()
 
-        clip_results = []
-        for crop_pil, cls_name in zip(crops_pil, class_names):
-            if crop_pil is not None:
-                attrs = self._classify_crop(crop_pil, cls_name)
-                clip_results.append(attrs)
-            else:
-                clip_results.append([])
+        clip_results = self._classify_crops_batched(crops_pil, class_names)
 
         if torch.cuda.is_available():
             torch.cuda.synchronize()
