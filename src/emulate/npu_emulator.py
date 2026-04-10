@@ -309,14 +309,32 @@ class NPUEmulator:
 
         else:
             # --- Vision Model (per-frame) ---
+
+            # Theoretical compute floor from FLOP count
+            theoretical_compute_ms = 0.0
             if workload.gflops_per_inference > 0:
-                # Compute time from FLOP count
+                ref_tops = self.reference.effective_tops_bf16
+                theoretical_compute_ms = (
+                    workload.gflops_per_inference / (ref_tops * 1000) * 1000
+                )
+
+            # Software overhead: gap between measured time and theoretical
+            # compute floor on the REFERENCE hardware. This overhead comes
+            # from Python, data transfers, memory allocation, multi-stage
+            # sequential execution, etc. Edge silicon won't magically
+            # eliminate this — in fact it may be worse due to less mature
+            # software stacks.
+            overhead_ms = 0.0
+            if workload.measured_latency_ms > 0 and theoretical_compute_ms > 0:
+                overhead_ms = max(0, workload.measured_latency_ms - theoretical_compute_ms)
+
+            # Project the pure compute portion onto target hardware
+            if workload.gflops_per_inference > 0:
                 effective_tops = self.target.effective_tops_bf16
-                compute_seconds = workload.gflops_per_inference / (effective_tops * 1000)
-                result.compute_limited_ms = compute_seconds * 1000
+                result.compute_limited_ms = (
+                    workload.gflops_per_inference / (effective_tops * 1000) * 1000
+                )
             else:
-                # Scale from measured latency using compute ratio
-                # This assumes the reference measurement was compute-bound
                 result.compute_limited_ms = (
                     workload.measured_latency_ms / self.compute_ratio
                 )
@@ -332,15 +350,34 @@ class NPUEmulator:
                     effective_transfer_gb / self.target.effective_bandwidth_gbs * 1000
                 )
 
-            # Bottleneck is whichever takes longer
-            result.projected_latency_ms = max(
+            # Total = max(compute, bandwidth) + overhead
+            # Overhead scales roughly with compute ratio (slower CPU/scheduler
+            # on edge) but doesn't scale with bandwidth. Use conservative
+            # estimate: overhead stays same or scales slightly with compute.
+            projected_overhead_ms = overhead_ms * max(1.0, 1.0 / self.compute_ratio)
+
+            hardware_ms = max(
                 result.compute_limited_ms,
                 result.bandwidth_limited_ms,
             )
+            result.projected_latency_ms = hardware_ms + projected_overhead_ms
             result.bottleneck = (
                 "compute" if result.compute_limited_ms > result.bandwidth_limited_ms
                 else "bandwidth"
             )
+
+            # Log the breakdown for transparency
+            if overhead_ms > 0:
+                logger.debug(
+                    "%s projection breakdown: theoretical=%.1fms, "
+                    "overhead=%.1fms (measured=%.1fms), "
+                    "hw_projected=%.1fms, overhead_projected=%.1fms, "
+                    "total=%.1fms",
+                    workload.stage_name, theoretical_compute_ms,
+                    overhead_ms, workload.measured_latency_ms,
+                    hardware_ms, projected_overhead_ms,
+                    result.projected_latency_ms,
+                )
 
         # Slowdown vs reference
         if workload.measured_latency_ms > 0:
