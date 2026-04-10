@@ -1,0 +1,56 @@
+# Keyhole — Docker Compose
+# Requires: NVIDIA Container Toolkit
+
+services:
+  sentinel:
+    build: .
+    container_name: keyhole
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    env_file:
+      - .env
+    ports:
+      - "${API_PORT:-8777}:8777"
+    volumes:
+      # Mount video input directory
+      - ./data/videos:/app/data/videos:ro
+      # Persist output/database
+      - ./data/output:/app/data/output
+      # Persist model weights
+      - ./weights:/app/weights
+      # Mount SAM 3 repo if installed locally
+      - ./third_party:/app/third_party:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    # Default: API server. Override for processing:
+    #   docker compose run sentinel python -m src.main process --video data/videos/test.mp4
+    command: python -m src.api.server
+
+  # Optional: Ollama for local LLM inference
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sentinel-ollama
+    runtime: nvidia
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    profiles:
+      - ollama  # Only starts with: docker compose --profile ollama up
+
+volumes:
+  ollama_data:

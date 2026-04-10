@@ -1,0 +1,14 @@
+{
+    "name": "NXP Edge MPU (Target)",
+    "tops_bf16": 200.0,
+    "tops_int8": 400.0,
+    "tops_int4": 800.0,
+    "mem_bandwidth_gbs": 134.4,
+    "mem_capacity_gb": 8.0,
+    "mem_bus_width_bits": 128,
+    "mem_type": "LPDDR5X",
+    "mem_data_rate_gtps": 8.4,
+    "compute_efficiency": 0.60,
+    "bandwidth_efficiency": 0.75,
+    "tdp_watts": 25.0
+}
