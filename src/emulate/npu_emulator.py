@@ -604,16 +604,22 @@ def emulate(profile_path, target_name, target_config, compare_all):
             )
             workloads.append(yolo_wl)
 
-        if data.get("sam3", {}).get("avg_enrichment_ms"):
+        sam3_data = data.get("sam3", {})
+        sam3_avg_ms = (
+            sam3_data.get("avg_inference_ms")        # single-pass mode
+            or sam3_data.get("avg_enrichment_ms")    # sequential mode
+        )
+        if sam3_avg_ms:
+            is_single_pass = sam3_data.get("mode") == "single-pass"
             sam_wl = WorkloadProfile(
-                stage_name="sam3_enrichment",
-                model_name="sam3_full",
+                stage_name="sam3_single_pass" if is_single_pass else "sam3_enrichment",
+                model_name="sam3_full" + (" (single-pass)" if is_single_pass else ""),
                 param_count=848_000_000,
                 model_size_bytes=int(848e6 * 2),
                 precision="bf16",
                 gflops_per_inference=350.0,
                 arithmetic_intensity=120.0,
-                measured_latency_ms=data["sam3"]["avg_enrichment_ms"],
+                measured_latency_ms=sam3_avg_ms,
                 measured_gpu=RTX_5090.name,
                 peak_activation_bytes=int(1.0e9),
             )
