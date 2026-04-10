@@ -828,6 +828,47 @@ def slide_bandwidth_requirements(prs: Presentation):
                          text, font_size=11, color=color, bold=bold)
 
 
+def slide_resolution_lock(prs: Presentation):
+    """Slide: Why reducing input resolution doesn't help."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide, C.BG_DARK)
+
+    add_title_bar(slide, "Resolution Is Locked — Input Size Doesn't Matter",
+                  "SAM 3 internally processes 1008x1008 regardless of input resolution")
+
+    # Resolution comparison table
+    headers = ["Input Resolution", "Internal Resolution", "ViT Tokens", "Avg Latency (5090)", "Detections/frame"]
+    rows = [
+        ["4K (3840x2160)", "1008x1008", "3,969", "196ms", "37.2"],
+        ["1080p (1920x1080)", "1008x1008", "3,969", "139ms", "35.0"],
+        ["720p (1280x720)", "1008x1008", "3,969", "117ms", "32.1"],
+    ]
+    add_styled_table(slide, Inches(0.3), Inches(1.5), Inches(9.4), Inches(1.3),
+                     headers, rows)
+
+    lines = [
+        ("WHY: Rotary Position Embeddings (RoPE) are resolution-locked", C.ACCENT_BLUE, True),
+        ("  The ViT uses 2D RoPE pre-computed for a 63x63 token grid (1008/16 = 63)", C.TEXT_BRIGHT, False),
+        ("  Feeding a different resolution → shape mismatch → assertion failure", C.TEXT_DIM, False),
+        ("  The model has rope_interp support but it requires rebuild + retraining", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("WHAT THIS MEANS:", C.ACCENT_BLUE, True),
+        ("  The 16ms savings from 4K→720p is just pre/post processing overhead", C.TEXT_BRIGHT, False),
+        ("  Model compute + memory traffic is IDENTICAL at every input resolution", C.ACCENT_ORANGE, True),
+        ("  Token count (3,969), FLOP count, and activation memory are all fixed", C.TEXT_DIM, False),
+        ("  Only detection accuracy changes (fewer small objects at 720p)", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("IMPLICATION FOR EDGE: Resolution reduction is NOT a viable optimization lever.", C.NOT_FEASIBLE, True),
+        ("  The remaining options are: quantization, fewer params, or a different model.", C.TEXT_WHITE, False),
+    ]
+
+    for i, (text, color, bold) in enumerate(lines):
+        if text:
+            add_text_box(slide, Inches(0.6), Inches(3.1 + i * 0.30),
+                         Inches(8.8), Inches(0.30),
+                         text, font_size=11, color=color, bold=bold)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -836,15 +877,16 @@ def slide_optimization_roadmap(prs: Presentation):
     add_title_bar(slide, "Optimization Roadmap — Path to Edge Real-Time",
                   "Model changes required to fit within 134.4 GB/s bandwidth budget")
 
-    headers = ["Optimization", "Traffic Reduction", "Est. Edge FPS", "Trade-off"]
+    headers = ["Optimization", "Traffic Reduction", "Est. Edge FPS", "Status"]
     rows = [
-        ["SAM 3 BF16, 1080p, 9 prompts (baseline)", "1x (147 GB)", "0.4 FPS", "No compromises"],
-        ["INT8 quantization", "~2x (74 GB)", "~0.8 FPS", "Minor accuracy loss"],
-        ["INT4 quantization", "~4x (37 GB)", "~1.6 FPS", "Moderate accuracy loss"],
-        ["Lower resolution (720p)", "~2x reduction in tokens", "~0.8 FPS", "Smaller objects missed"],
-        ["Fewer prompts (3 vs 9)", "~0.7x decoder cost", "~0.5 FPS", "Fewer concept categories"],
-        ["INT4 + 720p + 3 prompts", "~8-10x combined", "~3-5 FPS", "Stacked trade-offs"],
-        ["MobileSAM / EfficientSAM (INT8, 720p)", "~50-100x (5-50M params)", "~15-30 FPS", "Different model entirely"],
+        ["SAM 3 BF16, 1080p, 9 prompts (baseline)", "1x (~147 GB)", "0.4 FPS", "MEASURED"],
+        ["Lower input resolution (720p)", "~1x (no change)", "0.6 FPS", "TESTED — not viable"],
+        ["Reduce internal resolution", "N/A", "N/A", "BLOCKED — RoPE locked to 1008"],
+        ["INT8 quantization", "~2x (74 GB)", "~0.8 FPS", "To test"],
+        ["INT4 quantization", "~4x (37 GB)", "~1.6 FPS", "To test"],
+        ["Fewer prompts (3 vs 9)", "~0.7x decoder cost", "~0.5 FPS", "To test"],
+        ["INT4 + 3 prompts", "~4-5x combined", "~2 FPS", "To test"],
+        ["EfficientSAM / MobileSAM (INT8)", "~50-100x (5-50M params)", "~15-30 FPS", "Different model"],
     ]
 
     add_styled_table(slide, Inches(0.3), Inches(1.4), Inches(9.4), Inches(2.8),
@@ -863,18 +905,18 @@ def slide_optimization_roadmap(prs: Presentation):
     tf = box.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    p.text = "NEXT STEPS"
+    p.text = "NEXT STEPS (UPDATED)"
     p.font.size = Pt(13)
     p.font.color.rgb = C.ACCENT_PURPLE
     p.font.bold = True
     p.font.name = "Segoe UI"
 
     steps = [
-        "1. Profile at lower resolutions (720p, 540p) to measure actual traffic reduction",
-        "2. Test INT8/INT4 quantization on SAM 3 — measure accuracy vs speed trade-off",
-        "3. Evaluate EfficientSAM3 / MobileSAM as drop-in replacements",
-        "4. Profile vision encoder vs decoder separately to isolate prompt-scaling cost",
-        "5. Measure with varying prompt counts (1, 3, 9, 18) to characterize decoder scaling",
+        "1. Test INT8/INT4 quantization — the most direct traffic reduction lever",
+        "2. Profile with varying prompt counts (1, 3, 9) to measure decoder scaling",
+        "3. Evaluate EfficientSAM / MobileSAM as drop-in replacements (~5-50M params)",
+        "4. Profile vision encoder vs decoder separately to isolate fixed vs variable cost",
+        "5. Consider hybrid: YOLO for detection + lightweight model for enrichment only",
     ]
     for step in steps:
         p2 = tf.add_paragraph()
@@ -1017,6 +1059,10 @@ def build_deck(output, runs_dir, data_dir):
     # Bandwidth requirements
     console.print("  Building: Bandwidth requirements")
     slide_bandwidth_requirements(prs)
+
+    # Resolution lock finding
+    console.print("  Building: Resolution lock analysis")
+    slide_resolution_lock(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")

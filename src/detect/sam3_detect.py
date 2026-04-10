@@ -60,6 +60,7 @@ class SAM3SinglePassDetector:
         device: str = "cuda:0",
         profile: bool = False,
         retain_masks: bool = False,
+        internal_resolution: int = 1008,  # Fixed at 1008 — RoPE embeddings are resolution-locked
     ):
         self.concepts = concepts or [
             "person", "vehicle", "car", "truck", "bus", "motorcycle", "bicycle",
@@ -71,6 +72,7 @@ class SAM3SinglePassDetector:
         self.device = device
         self.profile = profile
         self.retain_masks = retain_masks
+        self.internal_resolution = internal_resolution
         self._latencies: list[float] = []
         self._det_counts: list[int] = []
 
@@ -98,8 +100,15 @@ class SAM3SinglePassDetector:
 
         self.model = build_sam3_image_model()
 
+        res = self.internal_resolution
+        tokens = (res // 16) ** 2
+        logger.info(
+            "SAM 3 internal resolution: %dx%d (%d tokens, default 1008x1008 = 3969 tokens)",
+            res, res, tokens,
+        )
+
         self.transform = ComposeAPI(transforms=[
-            RandomResizeAPI(sizes=1008, max_size=1008, square=True, consistent_transform=False),
+            RandomResizeAPI(sizes=res, max_size=res, square=True, consistent_transform=False),
             ToTensorAPI(),
             NormalizeAPI(mean=[0.5, 0.5, 0.5], std=[0.5, 0.5, 0.5]),
         ])
@@ -364,6 +373,8 @@ class SAM3SinglePassDetector:
             "model_params_m": params / 1e6,
             "avg_detections_per_frame": float(np.mean(self._det_counts)),
             "num_concepts": len(self.concepts),
+            "internal_resolution": self.internal_resolution,
+            "internal_tokens": (self.internal_resolution // 16) ** 2,
             "mode": "single-pass",
             "model": "SAM 3 (single-pass batched)",
         }

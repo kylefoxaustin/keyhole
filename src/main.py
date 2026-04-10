@@ -51,7 +51,8 @@ def cli():
 @click.option("--emulate-npu", default=None, help="Emulate target NPU (preset name or JSON path)")
 @click.option("--render", is_flag=True, help="Output annotated video with detection overlays")
 @click.option("--single-pass", is_flag=True, help="Use SAM 3 single-pass detection (replaces YOLO+SAM3 sequential)")
-def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool, single_pass: bool):
+@click.option("--sam3-resolution", default=1008, type=int, help="SAM 3 internal processing resolution (default 1008)")
+def process(video: str, fps: float, max_frames: int, detect_only: bool, profile: bool, emulate_npu: str, render: bool, single_pass: bool, sam3_resolution: int):
     """Process a video through the detection pipeline."""
 
     from src.ingest.video import extract_frames, probe_video
@@ -137,6 +138,7 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
             device=settings.sam3.device,
             profile=do_profile,
             retain_masks=render,
+            internal_resolution=sam3_resolution,
         )
         sp_detector.load_model()
 
