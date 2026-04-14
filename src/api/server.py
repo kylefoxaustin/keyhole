@@ -18,7 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 import uvicorn
 
-from sqlalchemy import func
+from sqlalchemy import func, or_, String, cast
 
 from config.settings import settings
 from src.store.db import DetectionStore
@@ -285,18 +285,22 @@ async def query_events(
             query = query.filter(DetectionEvent.class_name.ilike(f"%{class_name}%"))
 
         if q:
-            # Text search across description and concept tags
-            query = query.filter(
-                (DetectionEvent.description.ilike(f"%{q}%")) |
-                (DetectionEvent.concept_tags.cast(str).ilike(f"%{q}%"))
-            )
+            # Text search across description, class name, and concept tags.
+            # SQLite stores JSON as text, so cast via SQLAlchemy String type
+            # to get a LIKE-able representation.
+            pattern = f"%{q}%"
+            query = query.filter(or_(
+                DetectionEvent.description.ilike(pattern),
+                DetectionEvent.class_name.ilike(pattern),
+                cast(DetectionEvent.concept_tags, String).ilike(pattern),
+            ))
 
         if tags:
             for tag in tags.split(","):
                 tag = tag.strip()
                 if tag:
                     query = query.filter(
-                        DetectionEvent.concept_tags.cast(str).ilike(f"%{tag}%")
+                        cast(DetectionEvent.concept_tags, String).ilike(f"%{tag}%")
                     )
 
         if start is not None:
