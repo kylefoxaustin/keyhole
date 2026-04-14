@@ -242,6 +242,10 @@ See `config/settings.py` and `.env.example`. Key settings:
 | `LLM_BACKEND` | `anthropic` | NLQ backend: anthropic, ollama, skippy |
 | `PROFILE_GPU` | `false` | Enable GPU profiling |
 
+## Maintainer
+
+**Kyle Fox** ([@kylefoxaustin](https://github.com/kylefoxaustin))
+
 ## License
 
 MIT License — see LICENSE file.
