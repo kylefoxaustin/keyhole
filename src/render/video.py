@@ -71,6 +71,11 @@ class RenderConfig:
     codec: str = "libx264"
     crf: int = 20
 
+    # GIF generation (for PowerPoint-friendly outputs)
+    generate_gif: bool = True      # Auto-generate optimized GIF alongside MP4
+    gif_width: int = 800           # Max width for GIF (keeps aspect ratio)
+    gif_fps: float = 0.0           # 0 = use output_fps, else override
+
 
 class VideoRenderer:
     """
@@ -278,7 +283,48 @@ class VideoRenderer:
 
         logger.info("Rendered video: %s (%d frames, %.1f FPS)",
                      output_path, len(self._frames), fps)
+
+        # Optionally generate a GIF alongside the MP4 for PowerPoint compatibility
+        if self.config.generate_gif:
+            gif_path = output_path.with_suffix(".gif")
+            self.mp4_to_gif(str(output_path), str(gif_path))
+
         return str(output_path)
+
+    def mp4_to_gif(self, mp4_path: str, gif_path: str) -> Optional[str]:
+        """
+        Convert an MP4 to an optimized animated GIF using a two-pass
+        palette approach for good quality at reasonable file size.
+
+        PowerPoint embeds GIFs reliably (unlike video, which often fails
+        to play on different machines due to codec issues).
+        """
+        gif_fps = self.config.gif_fps if self.config.gif_fps > 0 else self.config.output_fps
+        gif_width = self.config.gif_width
+
+        try:
+            subprocess.run([
+                "ffmpeg", "-y",
+                "-i", mp4_path,
+                "-vf", (
+                    f"fps={gif_fps},"
+                    f"scale={gif_width}:-1:flags=lanczos,"
+                    "split[s0][s1];"
+                    "[s0]palettegen=max_colors=128:stats_mode=diff[p];"
+                    "[s1][p]paletteuse=dither=bayer:bayer_scale=4"
+                ),
+                "-loop", "0",
+                gif_path,
+            ], check=True, capture_output=True)
+
+            gif_size_mb = Path(gif_path).stat().st_size / 1e6
+            logger.info("Rendered GIF: %s (%.1f MB, %.0fpx wide, %.1f FPS)",
+                        gif_path, gif_size_mb, gif_width, gif_fps)
+            return gif_path
+
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            logger.warning("GIF generation failed: %s", e)
+            return None
 
     def _write_with_ffmpeg(self, output_path: str, w: int, h: int, fps: float) -> str:
         """Write frames directly to FFmpeg via pipe."""
