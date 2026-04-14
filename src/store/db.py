@@ -12,13 +12,30 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from src.store.models import (
-    VideoSource, ProcessedFrame, DetectionEvent,
+    VideoSource, ProcessedFrame, DetectionEvent, DetectionEmbedding,
     ProcessingRun, create_db,
 )
 from src.ingest.video import VideoMeta
 from src.enrich.sam3 import EnrichedFrame, EnrichedDetection
 
 logger = logging.getLogger(__name__)
+
+# Lazy-loaded embedding engine shared across ingest calls.
+# Loading the model is expensive (~1s), so we cache it at module level.
+_embed_engine = None
+
+
+def _get_embed_engine():
+    global _embed_engine
+    if _embed_engine is None:
+        try:
+            from src.store.embeddings import EmbeddingEngine
+            _embed_engine = EmbeddingEngine(device="cpu")
+            _embed_engine.load()
+        except Exception as e:
+            logger.warning("Embedding engine unavailable, skipping ingest embeddings: %s", e)
+            _embed_engine = False  # Sentinel — don't retry
+    return _embed_engine if _embed_engine else None
 
 
 class DetectionStore:
@@ -63,7 +80,11 @@ class DetectionStore:
         enriched: EnrichedFrame,
         yolo_inference_ms: float = 0.0,
     ):
-        """Store all enriched detections from a single frame."""
+        """
+        Store all enriched detections from a single frame, and compute
+        semantic embeddings for each (so semantic search just works on
+        freshly ingested data without a separate backfill).
+        """
         with self.get_session() as session:
             frame = ProcessedFrame(
                 video_id=video_id,
@@ -76,6 +97,7 @@ class DetectionStore:
             session.add(frame)
             session.flush()  # Get frame.id
 
+            events_added = []
             for det in enriched.detections:
                 event = DetectionEvent(
                     frame_id=frame.id,
@@ -93,6 +115,30 @@ class DetectionStore:
                     source_video=enriched.source_video,
                 )
                 session.add(event)
+                events_added.append((event, det))
+
+            session.flush()  # Get event IDs
+
+            # Embed the batch in one model call (fast) then persist
+            engine = _get_embed_engine()
+            if engine is not None and events_added:
+                from src.store.embeddings import text_for_detection
+                texts = [
+                    text_for_detection(
+                        class_name=det.class_name,
+                        description=det.description or "",
+                        concept_tags=det.concept_tags or [],
+                    )
+                    for _, det in events_added
+                ]
+                vecs = engine.encode(texts)
+                for (event, _), vec in zip(events_added, vecs):
+                    session.add(DetectionEmbedding(
+                        detection_id=event.id,
+                        embedding=vec.tobytes(),
+                        dim=vec.shape[0],
+                        model="all-MiniLM-L6-v2",
+                    ))
 
             session.commit()
 

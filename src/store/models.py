@@ -8,7 +8,7 @@ for natural language querying.
 import datetime
 from sqlalchemy import (
     Column, Integer, Float, String, Text, DateTime,
-    ForeignKey, Index, create_engine, JSON,
+    ForeignKey, Index, create_engine, JSON, LargeBinary,
 )
 from sqlalchemy.orm import (
     DeclarativeBase, relationship, Session, sessionmaker,
@@ -94,6 +94,28 @@ class DetectionEvent(Base):
         Index("idx_detection_class_time", "class_name", "timestamp_sec"),
         Index("idx_detection_description", "description"),  # For LIKE queries
     )
+
+
+class DetectionEmbedding(Base):
+    """
+    Semantic embedding for a detection event.
+
+    One row per DetectionEvent. The embedding is a 384-dim float32 vector
+    from sentence-transformers/all-MiniLM-L6-v2, stored as raw bytes.
+    Queried in memory via numpy cosine similarity — no vector extension
+    required; portable across SQLite/Postgres without config.
+    """
+    __tablename__ = "detection_embeddings"
+
+    detection_id = Column(
+        Integer,
+        ForeignKey("detection_events.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    embedding = Column(LargeBinary, nullable=False)  # numpy float32 bytes
+    dim = Column(Integer, nullable=False, default=384)
+    model = Column(String(128), nullable=False, default="all-MiniLM-L6-v2")
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
 
 class ProcessingRun(Base):

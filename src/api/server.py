@@ -24,7 +24,9 @@ from config.settings import settings
 from src.store.db import DetectionStore
 from src.store.models import (
     VideoSource, ProcessedFrame, DetectionEvent, ProcessingRun,
+    DetectionEmbedding,
 )
+from src.store.embeddings import EmbeddingEngine
 
 logger = logging.getLogger(__name__)
 
@@ -46,13 +48,37 @@ app.add_middleware(
 )
 
 store: Optional[DetectionStore] = None
+embed_engine: Optional[EmbeddingEngine] = None
+
+# Classes known to YOLO — we'll fast-path single-token exact matches to
+# literal ILIKE instead of semantic rerank. Refreshed at startup.
+_KNOWN_CLASS_NAMES: set[str] = set()
 
 
 @app.on_event("startup")
 async def startup():
-    global store
+    global store, embed_engine, _KNOWN_CLASS_NAMES
     store = DetectionStore(settings.database.url)
-    logger.info("Keyhole API started at %s:%d", settings.api.host, settings.api.port)
+
+    # Load embedding model + warm the in-memory matrix from existing rows
+    embed_engine = EmbeddingEngine(device="cpu")
+    embed_engine.load()
+    with store.get_session() as session:
+        rows = session.query(
+            DetectionEmbedding.detection_id,
+            DetectionEmbedding.embedding,
+        ).all()
+        embed_engine.populate_cache([(rid, blob) for rid, blob in rows])
+
+        # Cache known class names for the hybrid fast path
+        class_rows = session.query(DetectionEvent.class_name).distinct().all()
+        _KNOWN_CLASS_NAMES = {c[0].lower() for c in class_rows if c[0]}
+
+    logger.info(
+        "Keyhole API started at %s:%d — %d embeddings cached, %d known classes",
+        settings.api.host, settings.api.port,
+        embed_engine.count, len(_KNOWN_CLASS_NAMES),
+    )
 
 
 # ============================================================
@@ -226,7 +252,9 @@ async def delete_video(video_id: int):
 # Events (Detections)
 # ============================================================
 
-def _event_to_dict(event: DetectionEvent, session) -> dict:
+def _event_to_dict(
+    event: DetectionEvent, session, similarity: Optional[float] = None,
+) -> dict:
     """Serialize a DetectionEvent row with joined frame/video info."""
     frame = event.frame
     video = frame.video if frame else None
@@ -254,7 +282,22 @@ def _event_to_dict(event: DetectionEvent, session) -> dict:
         "concept_tags": tags,
         "concepts": concepts,
         "thumbnail_url": f"/api/events/{event.id}/frame",
+        # Semantic similarity score (0-1) when q was resolved via embeddings.
+        # null for literal / no-query results.
+        "similarity": similarity,
     }
+
+
+def _is_literal_query(q: str) -> bool:
+    """
+    Heuristic: single-token query matching a known YOLO class exactly
+    goes through literal ILIKE, not semantic rerank. Users typing
+    "person" or "bag" want class-level filtering, not embedding noise.
+    """
+    q_clean = q.strip().lower()
+    if not q_clean or " " in q_clean:
+        return False
+    return q_clean in _KNOWN_CLASS_NAMES
 
 
 @app.get("/api/events")
@@ -266,34 +309,30 @@ async def query_events(
     start: Optional[float] = Query(None, description="Start timestamp (seconds)"),
     end: Optional[float] = Query(None, description="End timestamp (seconds)"),
     min_confidence: float = Query(0.0, description="Minimum detection confidence"),
+    min_similarity: float = Query(0.2, description="Min cosine similarity for semantic queries"),
     limit: int = Query(50, le=500, description="Max results"),
     offset: int = Query(0, description="Pagination offset"),
 ):
     """
     Query events with flexible filters.
 
-    Supports natural language (`q`), structured filters (tags, class, time range),
-    and pagination.
+    Natural-language q resolves via semantic search over detection embeddings
+    (cosine similarity, top-K by relevance). Single-token queries matching a
+    known YOLO class go through a literal ILIKE fast path. Structured filters
+    (tags, class, time range, video_id) compose with either path.
     """
+    # Route to semantic or literal path
+    use_semantic = bool(q) and not _is_literal_query(q)
+
     with store.get_session() as session:
         query = session.query(DetectionEvent).join(ProcessedFrame)
 
+        # Structured filters always apply regardless of search strategy
         if video_id is not None:
             query = query.filter(ProcessedFrame.video_id == video_id)
 
         if class_name:
             query = query.filter(DetectionEvent.class_name.ilike(f"%{class_name}%"))
-
-        if q:
-            # Text search across description, class name, and concept tags.
-            # SQLite stores JSON as text, so cast via SQLAlchemy String type
-            # to get a LIKE-able representation.
-            pattern = f"%{q}%"
-            query = query.filter(or_(
-                DetectionEvent.description.ilike(pattern),
-                DetectionEvent.class_name.ilike(pattern),
-                cast(DetectionEvent.concept_tags, String).ilike(pattern),
-            ))
 
         if tags:
             for tag in tags.split(","):
@@ -311,6 +350,55 @@ async def query_events(
         if min_confidence > 0:
             query = query.filter(DetectionEvent.confidence >= min_confidence)
 
+        # === Semantic path ===
+        if use_semantic and embed_engine is not None and embed_engine.count > 0:
+            # Pull top-K semantic matches, then intersect with structured filters
+            hits = embed_engine.search(
+                q, top_k=limit + offset + 200, min_similarity=min_similarity,
+            )
+            if not hits:
+                return {
+                    "query": q,
+                    "search_mode": "semantic",
+                    "result_count": 0,
+                    "total": 0,
+                    "offset": offset,
+                    "results": [],
+                }
+
+            sim_by_id = {did: score for did, score in hits}
+            candidate_ids = list(sim_by_id.keys())
+
+            # Apply structured filters to the candidate set
+            filtered = (
+                query.filter(DetectionEvent.id.in_(candidate_ids)).all()
+            )
+            # Reorder by semantic score (DB returned rows in arbitrary order)
+            filtered.sort(key=lambda e: -sim_by_id[e.id])
+
+            total = len(filtered)
+            page = filtered[offset : offset + limit]
+            return {
+                "query": q,
+                "search_mode": "semantic",
+                "result_count": len(page),
+                "total": total,
+                "offset": offset,
+                "results": [
+                    _event_to_dict(e, session, similarity=sim_by_id[e.id])
+                    for e in page
+                ],
+            }
+
+        # === Literal / no-query path ===
+        if q:  # Literal ILIKE across description, class_name, tags
+            pattern = f"%{q}%"
+            query = query.filter(or_(
+                DetectionEvent.description.ilike(pattern),
+                DetectionEvent.class_name.ilike(pattern),
+                cast(DetectionEvent.concept_tags, String).ilike(pattern),
+            ))
+
         total = query.count()
         events = (
             query.order_by(DetectionEvent.timestamp_sec.desc())
@@ -318,9 +406,9 @@ async def query_events(
             .limit(limit)
             .all()
         )
-
         return {
             "query": q,
+            "search_mode": "literal" if q else "recent",
             "result_count": len(events),
             "total": total,
             "offset": offset,
