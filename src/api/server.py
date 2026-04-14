@@ -7,13 +7,20 @@ typically exposed via Cloudflare Tunnel from the GPU-backed desktop to a
 public URL the Vercel-deployed frontend can reach.
 """
 
+import asyncio
 import io
 import logging
+import subprocess
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import (
+    FastAPI, File, Form, HTTPException, Query, Request,
+    UploadFile, WebSocket, WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, Response
 import uvicorn
@@ -54,10 +61,18 @@ embed_engine: Optional[EmbeddingEngine] = None
 # literal ILIKE instead of semantic rerank. Refreshed at startup.
 _KNOWN_CLASS_NAMES: set[str] = set()
 
+# Background processing state: video_id -> {popen, pipeline, fps, started_at,
+# last_frames, stderr_path}. Populated by POST /api/videos, drained by the
+# watcher task, observed by _video_to_dict for status and by the WS endpoint
+# for broadcasts.
+_active_processing: dict[int, dict] = {}
+_ws_clients: set[WebSocket] = set()
+_watcher_task: Optional[asyncio.Task] = None
+
 
 @app.on_event("startup")
 async def startup():
-    global store, embed_engine, _KNOWN_CLASS_NAMES
+    global store, embed_engine, _KNOWN_CLASS_NAMES, _watcher_task
     store = DetectionStore(settings.database.url)
 
     # Load embedding model + warm the in-memory matrix from existing rows
@@ -74,11 +89,23 @@ async def startup():
         class_rows = session.query(DetectionEvent.class_name).distinct().all()
         _KNOWN_CLASS_NAMES = {c[0].lower() for c in class_rows if c[0]}
 
+    _watcher_task = asyncio.create_task(_processing_watcher())
+
     logger.info(
         "Keyhole API started at %s:%d — %d embeddings cached, %d known classes",
         settings.api.host, settings.api.port,
         embed_engine.count, len(_KNOWN_CLASS_NAMES),
     )
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    if _watcher_task is not None:
+        _watcher_task.cancel()
+        try:
+            await _watcher_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 # ============================================================
@@ -112,6 +139,19 @@ async def health():
 # Videos
 # ============================================================
 
+def _video_status(video: VideoSource, frame_count: int) -> str:
+    """Resolve current status from in-process state + on-disk evidence."""
+    info = _active_processing.get(video.id)
+    if info is not None:
+        rc = info["popen"].poll()
+        if rc is None:
+            return "processing"
+        # Subprocess has exited — watcher will remove the entry shortly.
+        # Return terminal status immediately so the current request is accurate.
+        return "processed" if rc == 0 else "failed"
+    return "processed" if frame_count > 0 else "queued"
+
+
 def _video_to_dict(video: VideoSource, session) -> dict:
     """Serialize a VideoSource row + computed fields."""
     detection_count = (
@@ -143,7 +183,7 @@ def _video_to_dict(video: VideoSource, session) -> dict:
         "duration_sec": video.duration_sec,
         "total_frames": video.total_frames,
         "registered_at": video.processed_at.isoformat() if video.processed_at else None,
-        "status": "processed" if frame_count > 0 else "queued",
+        "status": _video_status(video, frame_count),
         "detection_count": detection_count,
         "frame_count": frame_count,
         "thumbnail_url": f"/api/videos/{video.id}/thumbnail",
@@ -246,6 +286,101 @@ async def delete_video(video_id: int):
         session.delete(video)
         session.commit()
         return {"deleted": video_id}
+
+
+# Map the API's pipeline tokens to the CLI flags that `src.main process` expects.
+_PIPELINE_ARGS = {
+    "hybrid_v2": ["--hybrid-v2", "yolo11s-seg.pt", "--render"],
+    "hybrid": ["--hybrid", "--render"],
+    "single_pass": ["--single-pass", "--render"],
+    "sequential": ["--render"],  # default YOLO + SAM3
+}
+
+
+@app.post("/api/videos")
+async def upload_video(
+    file: UploadFile = File(...),
+    pipeline: str = Form("hybrid_v2"),
+    fps: float = Form(5.0),
+):
+    """
+    Accept a video upload, persist it to data/videos/, register it in the DB,
+    and spawn a background processing subprocess. Returns the video_id
+    immediately so the UI can subscribe to the WS for progress.
+    """
+    from src.ingest.video import probe_video
+
+    if pipeline not in _PIPELINE_ARGS:
+        raise HTTPException(400, f"Unknown pipeline '{pipeline}'. "
+                                  f"Valid: {list(_PIPELINE_ARGS)}")
+
+    videos_dir = Path("data/videos")
+    videos_dir.mkdir(parents=True, exist_ok=True)
+
+    # Preserve the client-provided basename; prefix with timestamp on collision
+    # so we never silently overwrite existing footage.
+    safe_name = Path(file.filename or "upload.mp4").name
+    dest = videos_dir / safe_name
+    if dest.exists():
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        dest = videos_dir / f"{ts}_{safe_name}"
+
+    # Stream-write so we don't buffer large files entirely in memory
+    with open(dest, "wb") as out:
+        while chunk := await file.read(1024 * 1024):
+            out.write(chunk)
+
+    try:
+        meta = probe_video(dest)
+    except Exception as exc:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, f"Failed to probe video: {exc}") from exc
+
+    video_id = store.register_video(meta)
+
+    log_dir = Path("data/processing")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stderr_path = log_dir / f"video_{video_id}.stderr.log"
+    stdout_path = log_dir / f"video_{video_id}.stdout.log"
+
+    cmd = [
+        sys.executable, "-m", "src.main", "process",
+        "--video", str(dest),
+        "--fps", str(fps),
+        *_PIPELINE_ARGS[pipeline],
+    ]
+    # Unbuffered so the log files update live rather than in 4KB chunks
+    popen = subprocess.Popen(
+        cmd,
+        stdout=open(stdout_path, "wb"),
+        stderr=open(stderr_path, "wb"),
+        cwd=str(Path(__file__).resolve().parents[2]),
+    )
+
+    estimated_frames = int(meta.duration * fps) if meta.duration else 0
+    _active_processing[video_id] = {
+        "popen": popen,
+        "pipeline": pipeline,
+        "fps": fps,
+        "started_at": time.time(),
+        "last_frames": 0,
+        "stderr_path": stderr_path,
+        "estimated_frames": estimated_frames,
+    }
+
+    await _broadcast({
+        "type": "status",
+        "video_id": video_id,
+        "status": "processing",
+        "progress": {
+            "frames_done": 0,
+            "frames_total": estimated_frames,
+            "current_fps": 0.0,
+            "eta_seconds": None,
+        },
+    })
+
+    return {"video_id": video_id, "status": "processing"}
 
 
 # ============================================================
@@ -486,6 +621,72 @@ async def get_event_frame(event_id: int):
         return Response(content=img_bytes, media_type="image/jpeg")
 
 
+@app.get("/api/events/{event_id}/clip")
+async def get_event_clip(
+    event_id: int,
+    before: float = Query(5.0, ge=0, le=60, description="Seconds before event"),
+    after: float = Query(5.0, ge=0, le=60, description="Seconds after event"),
+    fmt: str = Query("mp4", alias="format", pattern="^(mp4|gif)$"),
+):
+    """
+    Return a short clip (default ±5s) around the event's timestamp.
+
+    Prefers the annotated video when available so masks and boxes are visible.
+    Re-encodes on the fly via ffmpeg and streams the bytes back — no tempfiles.
+    """
+    import subprocess
+
+    with store.get_session() as session:
+        event = session.query(DetectionEvent).filter_by(id=event_id).first()
+        if not event:
+            raise HTTPException(404, f"Event {event_id} not found")
+
+        video = event.frame.video if event.frame else None
+        if not video:
+            raise HTTPException(404, "Event has no associated video")
+
+        video_stem = Path(video.path).stem
+        output_dir = Path(video.path).parent.parent / "output"
+        annotated = next(iter(output_dir.glob(f"{video_stem}*annotated*.mp4")), None)
+        source = Path(annotated) if annotated else Path(video.path)
+
+        if not source.exists():
+            raise HTTPException(404, "Video file not on disk")
+
+        start = max(0.0, event.timestamp_sec - before)
+        duration = before + after
+
+        if fmt == "gif":
+            # Two-pass palette for decent quality; downscale for size
+            cmd = [
+                "ffmpeg", "-ss", f"{start:.3f}", "-i", str(source),
+                "-t", f"{duration:.3f}",
+                "-vf", "fps=12,scale=640:-1:flags=lanczos,"
+                       "split[a][b];[a]palettegen[p];[b][p]paletteuse",
+                "-f", "gif", "-",
+            ]
+            media_type = "image/gif"
+        else:
+            # Fragmented MP4 so it streams cleanly over a pipe
+            cmd = [
+                "ffmpeg", "-ss", f"{start:.3f}", "-i", str(source),
+                "-t", f"{duration:.3f}",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23",
+                "-pix_fmt", "yuv420p",
+                "-movflags", "frag_keyframe+empty_moov+faststart",
+                "-an",  # strip audio — pipelines don't produce it and it's faster
+                "-f", "mp4", "-",
+            ]
+            media_type = "video/mp4"
+
+        result = subprocess.run(cmd, capture_output=True, check=False)
+        if result.returncode != 0 or not result.stdout:
+            logger.warning("ffmpeg clip failed: %s", result.stderr[-500:].decode(errors="replace"))
+            raise HTTPException(500, "Clip extraction failed")
+
+        return Response(content=result.stdout, media_type=media_type)
+
+
 # ============================================================
 # Concepts / Autocomplete
 # ============================================================
@@ -531,6 +732,151 @@ async def list_classes():
         return {
             "classes": [{"name": name, "count": count} for name, count in rows],
         }
+
+
+# ============================================================
+# Processing Status (WebSocket + watcher)
+# ============================================================
+
+async def _broadcast(message: dict) -> None:
+    """Send a JSON message to every connected WS client. Drops dead ones."""
+    dead: list[WebSocket] = []
+    for ws in list(_ws_clients):
+        try:
+            await ws.send_json(message)
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _ws_clients.discard(ws)
+
+
+async def _processing_watcher():
+    """
+    Poll each active processing subprocess every second:
+      - If still running, compute frames_done from the DB and broadcast a
+        status update when it changes.
+      - On exit, broadcast a 'complete' or 'error' message and drop the entry.
+    """
+    while True:
+        try:
+            await asyncio.sleep(1.0)
+            if not _active_processing:
+                continue
+
+            for video_id, info in list(_active_processing.items()):
+                popen = info["popen"]
+                rc = popen.poll()
+
+                # Count frames in the DB to estimate progress
+                with store.get_session() as session:
+                    frames_done = (
+                        session.query(func.count(ProcessedFrame.id))
+                        .filter(ProcessedFrame.video_id == video_id)
+                        .scalar()
+                    ) or 0
+
+                if rc is None:
+                    # Still running — broadcast a status frame if progress changed
+                    if frames_done != info["last_frames"]:
+                        elapsed = time.time() - info["started_at"]
+                        current_fps = frames_done / elapsed if elapsed > 0 else 0.0
+                        eta = None
+                        total = info["estimated_frames"] or 0
+                        if current_fps > 0 and total > frames_done:
+                            eta = int((total - frames_done) / current_fps)
+                        await _broadcast({
+                            "type": "status",
+                            "video_id": video_id,
+                            "status": "processing",
+                            "progress": {
+                                "frames_done": frames_done,
+                                "frames_total": total,
+                                "current_fps": round(current_fps, 2),
+                                "eta_seconds": eta,
+                            },
+                        })
+                        info["last_frames"] = frames_done
+                    continue
+
+                # Subprocess has exited — emit terminal message and clean up
+                elapsed = time.time() - info["started_at"]
+                if rc == 0:
+                    with store.get_session() as session:
+                        detection_count = (
+                            session.query(func.count(DetectionEvent.id))
+                            .join(ProcessedFrame)
+                            .filter(ProcessedFrame.video_id == video_id)
+                            .scalar()
+                        ) or 0
+                    await _broadcast({
+                        "type": "complete",
+                        "video_id": video_id,
+                        "detection_count": detection_count,
+                        "total_time_sec": round(elapsed, 1),
+                    })
+                else:
+                    # Grab the tail of stderr so the UI can show a real reason
+                    tail = ""
+                    try:
+                        tail = Path(info["stderr_path"]).read_text(errors="replace")[-500:]
+                    except Exception:
+                        pass
+                    await _broadcast({
+                        "type": "error",
+                        "video_id": video_id,
+                        "message": f"Processing exited with code {rc}",
+                        "details": tail,
+                    })
+
+                _active_processing.pop(video_id, None)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("processing watcher loop error")
+
+
+@app.websocket("/api/ws/processing")
+async def ws_processing(websocket: WebSocket):
+    """
+    Push processing status updates to the UI. On connect, sends a snapshot of
+    every active job so a late-joining client doesn't have to wait for the
+    next tick to see what's in flight.
+    """
+    await websocket.accept()
+    _ws_clients.add(websocket)
+    try:
+        # Snapshot for late joiners
+        for video_id, info in list(_active_processing.items()):
+            if info["popen"].poll() is not None:
+                continue
+            with store.get_session() as session:
+                frames_done = (
+                    session.query(func.count(ProcessedFrame.id))
+                    .filter(ProcessedFrame.video_id == video_id)
+                    .scalar()
+                ) or 0
+            await websocket.send_json({
+                "type": "status",
+                "video_id": video_id,
+                "status": "processing",
+                "progress": {
+                    "frames_done": frames_done,
+                    "frames_total": info["estimated_frames"] or 0,
+                    "current_fps": 0.0,
+                    "eta_seconds": None,
+                },
+            })
+
+        # Keep-alive: await client messages (we don't consume them, but this
+        # keeps the connection open until the client disconnects).
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("websocket handler error")
+    finally:
+        _ws_clients.discard(websocket)
 
 
 # ============================================================
