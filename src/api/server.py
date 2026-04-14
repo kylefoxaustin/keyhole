@@ -1,377 +1,459 @@
 """
-API Server — FastAPI endpoints + embedded web UI.
+Keyhole API Server — FastAPI endpoints for UI clients.
 
-Provides REST endpoints for querying detections and a simple
-web interface for natural language search.
+Implements the HTTP/WebSocket contract documented in API.md at the repo root.
+Designed to be consumed by the separate keyhole-UI Next.js frontend over HTTP,
+typically exposed via Cloudflare Tunnel from the GPU-backed desktop to a
+public URL the Vercel-deployed frontend can reach.
 """
 
+import io
 import logging
+from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
-from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse, Response
 import uvicorn
+
+from sqlalchemy import func
 
 from config.settings import settings
 from src.store.db import DetectionStore
-from src.query.nlq import NLQueryEngine
+from src.store.models import (
+    VideoSource, ProcessedFrame, DetectionEvent, ProcessingRun,
+)
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(
-    title="Keyhole",
-    description="Edge AI Video Intelligence — Natural Language Query Interface",
-    version="0.1.0",
+    title="Keyhole API",
+    description="Edge AI Video Intelligence — backend for keyhole-UI",
+    version="0.2.0",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
 )
 
-# Initialize store and query engine at startup
-store: DetectionStore = None
-nlq: NLQueryEngine = None
+# Allow the UI frontend (Next.js dev server or Vercel deployment) to call us
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Tighten to specific origins in production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+store: Optional[DetectionStore] = None
 
 
 @app.on_event("startup")
 async def startup():
-    global store, nlq
+    global store
     store = DetectionStore(settings.database.url)
-    nlq = NLQueryEngine(
-        store=store,
-        backend=settings.llm.backend,
-        api_key=settings.llm.anthropic_api_key,
-        ollama_host=settings.llm.ollama_host,
-        ollama_model=settings.llm.ollama_model,
-        skippy_host=settings.llm.skippy_host,
-        skippy_model=settings.llm.skippy_model,
-    )
+    logger.info("Keyhole API started at %s:%d", settings.api.host, settings.api.port)
 
 
-@app.get("/", response_class=HTMLResponse)
-async def home():
-    """Serve the embedded web UI."""
-    return QUERY_UI_HTML
+# ============================================================
+# System
+# ============================================================
+
+@app.get("/api/health")
+async def health():
+    """Health check + backend info. Used by UI to verify connectivity."""
+    import torch
+    gpu_info = {"available": False}
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(0)
+        free, total = torch.cuda.mem_get_info()
+        gpu_info = {
+            "available": True,
+            "device": props.name,
+            "memory_free_gb": round(free / 1e9, 2),
+            "memory_total_gb": round(total / 1e9, 2),
+        }
+
+    return {
+        "status": "ok",
+        "version": "0.2.0",
+        "gpu": gpu_info,
+        "pipelines_available": ["sequential", "single_pass", "hybrid", "hybrid_v2"],
+    }
 
 
-@app.post("/api/query")
-async def query_detections(request: Request):
-    """Execute a natural language query."""
-    body = await request.json()
-    user_query = body.get("query", "")
+# ============================================================
+# Videos
+# ============================================================
 
-    if not user_query.strip():
-        return JSONResponse(
-            {"error": "Empty query"}, status_code=400
+def _video_to_dict(video: VideoSource, session) -> dict:
+    """Serialize a VideoSource row + computed fields."""
+    detection_count = (
+        session.query(func.count(DetectionEvent.id))
+        .join(ProcessedFrame)
+        .filter(ProcessedFrame.video_id == video.id)
+        .scalar()
+    ) or 0
+
+    frame_count = (
+        session.query(func.count(ProcessedFrame.id))
+        .filter(ProcessedFrame.video_id == video.id)
+        .scalar()
+    ) or 0
+
+    # Check if an annotated version exists on disk
+    video_stem = Path(video.path).stem
+    output_dir = Path(video.path).parent.parent / "output"
+    annotated_candidates = list(output_dir.glob(f"{video_stem}*annotated*.mp4"))
+    annotated_available = len(annotated_candidates) > 0
+
+    return {
+        "id": video.id,
+        "name": Path(video.path).name,
+        "path": video.path,
+        "width": video.width,
+        "height": video.height,
+        "source_fps": video.fps,
+        "duration_sec": video.duration_sec,
+        "total_frames": video.total_frames,
+        "registered_at": video.processed_at.isoformat() if video.processed_at else None,
+        "status": "processed" if frame_count > 0 else "queued",
+        "detection_count": detection_count,
+        "frame_count": frame_count,
+        "thumbnail_url": f"/api/videos/{video.id}/thumbnail",
+        "annotated_available": annotated_available,
+    }
+
+
+@app.get("/api/videos")
+async def list_videos():
+    """List all videos in the library."""
+    with store.get_session() as session:
+        videos = session.query(VideoSource).order_by(
+            VideoSource.processed_at.desc()
+        ).all()
+        return {"videos": [_video_to_dict(v, session) for v in videos]}
+
+
+@app.get("/api/videos/{video_id}")
+async def get_video(video_id: int):
+    """Video metadata + current processing status."""
+    with store.get_session() as session:
+        video = session.query(VideoSource).filter_by(id=video_id).first()
+        if not video:
+            raise HTTPException(404, f"Video {video_id} not found")
+        return _video_to_dict(video, session)
+
+
+@app.get("/api/videos/{video_id}/thumbnail")
+async def get_video_thumbnail(video_id: int):
+    """
+    Returns a thumbnail image for the video.
+
+    Uses the first annotated frame if available, otherwise extracts
+    the first frame from the source video with FFmpeg.
+    """
+    with store.get_session() as session:
+        video = session.query(VideoSource).filter_by(id=video_id).first()
+        if not video:
+            raise HTTPException(404, f"Video {video_id} not found")
+
+        # Try to find an annotated output to grab a thumbnail from
+        video_stem = Path(video.path).stem
+        output_dir = Path(video.path).parent.parent / "output"
+        annotated = next(iter(output_dir.glob(f"{video_stem}*annotated*.mp4")), None)
+        source = Path(annotated) if annotated else Path(video.path)
+
+        if not source.exists():
+            raise HTTPException(404, "Video file not on disk")
+
+        # Extract frame with FFmpeg into memory
+        import subprocess
+        result = subprocess.run(
+            ["ffmpeg", "-i", str(source), "-ss", "00:00:00.5",
+             "-vframes", "1", "-f", "image2pipe",
+             "-vcodec", "mjpeg", "-"],
+            capture_output=True, check=False,
+        )
+        if result.returncode != 0 or not result.stdout:
+            raise HTTPException(500, "Thumbnail extraction failed")
+
+        return Response(content=result.stdout, media_type="image/jpeg")
+
+
+@app.get("/api/videos/{video_id}/stream")
+async def stream_video(video_id: int):
+    """Serve the original video file."""
+    with store.get_session() as session:
+        video = session.query(VideoSource).filter_by(id=video_id).first()
+        if not video:
+            raise HTTPException(404, f"Video {video_id} not found")
+        path = Path(video.path)
+        if not path.exists():
+            raise HTTPException(404, "Video file not on disk")
+        return FileResponse(str(path), media_type="video/mp4")
+
+
+@app.get("/api/videos/{video_id}/annotated")
+async def stream_annotated(video_id: int):
+    """Serve the annotated (masks + boxes rendered) video file."""
+    with store.get_session() as session:
+        video = session.query(VideoSource).filter_by(id=video_id).first()
+        if not video:
+            raise HTTPException(404, f"Video {video_id} not found")
+
+        video_stem = Path(video.path).stem
+        output_dir = Path(video.path).parent.parent / "output"
+        annotated = next(iter(output_dir.glob(f"{video_stem}*annotated*.mp4")), None)
+        if not annotated:
+            raise HTTPException(404, "No annotated version available for this video")
+        return FileResponse(str(annotated), media_type="video/mp4")
+
+
+@app.delete("/api/videos/{video_id}")
+async def delete_video(video_id: int):
+    """Remove a video and all its associated events."""
+    with store.get_session() as session:
+        video = session.query(VideoSource).filter_by(id=video_id).first()
+        if not video:
+            raise HTTPException(404, f"Video {video_id} not found")
+        session.delete(video)
+        session.commit()
+        return {"deleted": video_id}
+
+
+# ============================================================
+# Events (Detections)
+# ============================================================
+
+def _event_to_dict(event: DetectionEvent, session) -> dict:
+    """Serialize a DetectionEvent row with joined frame/video info."""
+    frame = event.frame
+    video = frame.video if frame else None
+
+    # Reconstruct concepts list from parallel tags/scores arrays
+    concepts = []
+    tags = event.concept_tags or []
+    scores = event.concept_scores or []
+    for i, tag in enumerate(tags):
+        score = scores[i] if i < len(scores) else 0.0
+        concepts.append({"concept": tag, "confidence": float(score)})
+
+    return {
+        "id": event.id,
+        "video_id": video.id if video else None,
+        "video_name": Path(video.path).name if video else None,
+        "frame_number": frame.frame_number if frame else None,
+        "timestamp_sec": event.timestamp_sec,
+        "wall_time": None,  # Not yet tracked per-event
+        "class_name": event.class_name,
+        "class_id": event.class_id,
+        "confidence": event.confidence,
+        "bbox": [event.bbox_x1, event.bbox_y1, event.bbox_x2, event.bbox_y2],
+        "description": event.description,
+        "concept_tags": tags,
+        "concepts": concepts,
+        "thumbnail_url": f"/api/events/{event.id}/frame",
+    }
+
+
+@app.get("/api/events")
+async def query_events(
+    q: Optional[str] = Query(None, description="Natural language or text query"),
+    video_id: Optional[int] = Query(None, description="Filter to specific video"),
+    tags: Optional[str] = Query(None, description="Comma-separated concept tags"),
+    class_name: Optional[str] = Query(None, alias="class", description="YOLO class filter"),
+    start: Optional[float] = Query(None, description="Start timestamp (seconds)"),
+    end: Optional[float] = Query(None, description="End timestamp (seconds)"),
+    min_confidence: float = Query(0.0, description="Minimum detection confidence"),
+    limit: int = Query(50, le=500, description="Max results"),
+    offset: int = Query(0, description="Pagination offset"),
+):
+    """
+    Query events with flexible filters.
+
+    Supports natural language (`q`), structured filters (tags, class, time range),
+    and pagination.
+    """
+    with store.get_session() as session:
+        query = session.query(DetectionEvent).join(ProcessedFrame)
+
+        if video_id is not None:
+            query = query.filter(ProcessedFrame.video_id == video_id)
+
+        if class_name:
+            query = query.filter(DetectionEvent.class_name.ilike(f"%{class_name}%"))
+
+        if q:
+            # Text search across description and concept tags
+            query = query.filter(
+                (DetectionEvent.description.ilike(f"%{q}%")) |
+                (DetectionEvent.concept_tags.cast(str).ilike(f"%{q}%"))
+            )
+
+        if tags:
+            for tag in tags.split(","):
+                tag = tag.strip()
+                if tag:
+                    query = query.filter(
+                        DetectionEvent.concept_tags.cast(str).ilike(f"%{tag}%")
+                    )
+
+        if start is not None:
+            query = query.filter(DetectionEvent.timestamp_sec >= start)
+        if end is not None:
+            query = query.filter(DetectionEvent.timestamp_sec <= end)
+
+        if min_confidence > 0:
+            query = query.filter(DetectionEvent.confidence >= min_confidence)
+
+        total = query.count()
+        events = (
+            query.order_by(DetectionEvent.timestamp_sec.desc())
+            .offset(offset)
+            .limit(limit)
+            .all()
         )
 
-    result = await nlq.query(user_query)
-    return result
+        return {
+            "query": q,
+            "result_count": len(events),
+            "total": total,
+            "offset": offset,
+            "results": [_event_to_dict(e, session) for e in events],
+        }
 
+
+@app.get("/api/events/{event_id}")
+async def get_event(event_id: int):
+    """Single event with full details."""
+    with store.get_session() as session:
+        event = session.query(DetectionEvent).filter_by(id=event_id).first()
+        if not event:
+            raise HTTPException(404, f"Event {event_id} not found")
+        return _event_to_dict(event, session)
+
+
+@app.get("/api/events/{event_id}/frame")
+async def get_event_frame(event_id: int):
+    """
+    Return an annotated frame image showing the bounding box for this event.
+
+    Extracts the specific frame from the annotated video if available,
+    otherwise from the source video, then draws the event's bbox on it.
+    """
+    import subprocess
+    import cv2
+    import numpy as np
+
+    with store.get_session() as session:
+        event = session.query(DetectionEvent).filter_by(id=event_id).first()
+        if not event:
+            raise HTTPException(404, f"Event {event_id} not found")
+
+        frame = event.frame
+        video = frame.video if frame else None
+        if not video:
+            raise HTTPException(404, "Event has no associated video")
+
+        # Prefer annotated video for nicer output
+        video_stem = Path(video.path).stem
+        output_dir = Path(video.path).parent.parent / "output"
+        annotated = next(iter(output_dir.glob(f"{video_stem}*annotated*.mp4")), None)
+        source = Path(annotated) if annotated else Path(video.path)
+
+        if not source.exists():
+            raise HTTPException(404, "Video file not on disk")
+
+        # Seek to the event's timestamp and grab one frame as JPEG
+        result = subprocess.run(
+            ["ffmpeg", "-ss", f"{event.timestamp_sec:.3f}",
+             "-i", str(source), "-vframes", "1",
+             "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+            capture_output=True, check=False,
+        )
+        if result.returncode != 0 or not result.stdout:
+            raise HTTPException(500, "Frame extraction failed")
+
+        img_bytes = result.stdout
+
+        # If we used the source (un-annotated), draw the bbox ourselves
+        if not annotated:
+            arr = np.frombuffer(img_bytes, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            x1, y1, x2, y2 = map(int, [
+                event.bbox_x1, event.bbox_y1, event.bbox_x2, event.bbox_y2,
+            ])
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 212, 255), 3)
+            label = f"{event.class_name} {event.confidence:.0%}"
+            cv2.putText(img, label, (x1, max(y1 - 10, 20)),
+                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 212, 255), 2)
+            _, encoded = cv2.imencode(".jpg", img)
+            img_bytes = encoded.tobytes()
+
+        return Response(content=img_bytes, media_type="image/jpeg")
+
+
+# ============================================================
+# Concepts / Autocomplete
+# ============================================================
+
+@app.get("/api/concepts")
+async def list_concepts():
+    """
+    Return the concept vocabulary present in the user's corpus.
+
+    Powers autocomplete and filter pill UI. Aggregates across all
+    detection events' concept_tags JSON arrays.
+    """
+    with store.get_session() as session:
+        # Fetch all concept_tags arrays and count occurrences in Python
+        # (SQLite JSON functions vary; this is portable and fast enough for <10k events)
+        events = session.query(DetectionEvent.concept_tags).all()
+        counts: dict[str, int] = {}
+        for (tags,) in events:
+            if not tags:
+                continue
+            for tag in tags:
+                counts[tag] = counts.get(tag, 0) + 1
+
+        concepts = [
+            {"name": name, "event_count": count}
+            for name, count in sorted(counts.items(), key=lambda x: -x[1])
+        ]
+        return {"concepts": concepts}
+
+
+@app.get("/api/classes")
+async def list_classes():
+    """Return YOLO class names present in the corpus with counts."""
+    with store.get_session() as session:
+        rows = (
+            session.query(
+                DetectionEvent.class_name, func.count(DetectionEvent.id)
+            )
+            .group_by(DetectionEvent.class_name)
+            .order_by(func.count(DetectionEvent.id).desc())
+            .all()
+        )
+        return {
+            "classes": [{"name": name, "count": count} for name, count in rows],
+        }
+
+
+# ============================================================
+# Stats (legacy — keep for existing CLI)
+# ============================================================
 
 @app.get("/api/stats")
 async def get_stats():
-    """Get database statistics."""
+    """Database statistics."""
     return store.get_stats()
 
 
-@app.get("/api/detections")
-async def list_detections(
-    class_name: str = None,
-    limit: int = 50,
-    min_confidence: float = 0.0,
-):
-    """List detections with optional filters."""
-    return store.search_detections(
-        class_name=class_name,
-        min_confidence=min_confidence,
-        limit=limit,
-    )
-
-
-# --- Embedded Web UI ---
-QUERY_UI_HTML = """
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Keyhole — Query</title>
-    <style>
-        :root {
-            --bg: #0f1117;
-            --surface: #1a1d27;
-            --border: #2a2d3a;
-            --text: #e4e4e7;
-            --dim: #71717a;
-            --accent: #3b82f6;
-            --accent-hover: #2563eb;
-            --green: #22c55e;
-            --orange: #f59e0b;
-        }
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 2rem 1rem;
-        }
-        h1 {
-            font-size: 1.5rem;
-            font-weight: 600;
-            margin-bottom: 0.25rem;
-        }
-        .subtitle {
-            color: var(--dim);
-            font-size: 0.875rem;
-            margin-bottom: 2rem;
-        }
-        .search-box {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
-        }
-        .search-box input {
-            flex: 1;
-            padding: 0.75rem 1rem;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            background: var(--surface);
-            color: var(--text);
-            font-size: 1rem;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        .search-box input:focus {
-            border-color: var(--accent);
-        }
-        .search-box input::placeholder {
-            color: var(--dim);
-        }
-        .search-box button {
-            padding: 0.75rem 1.5rem;
-            border: none;
-            border-radius: 8px;
-            background: var(--accent);
-            color: white;
-            font-size: 1rem;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .search-box button:hover {
-            background: var(--accent-hover);
-        }
-        .search-box button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-        .stats {
-            display: flex;
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-            flex-wrap: wrap;
-        }
-        .stat-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 0.75rem 1rem;
-            min-width: 120px;
-        }
-        .stat-card .label { color: var(--dim); font-size: 0.75rem; }
-        .stat-card .value { font-size: 1.25rem; font-weight: 600; }
-        .results-header {
-            color: var(--dim);
-            font-size: 0.875rem;
-            margin-bottom: 0.75rem;
-        }
-        .result-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 0.5rem;
-        }
-        .result-card .class-badge {
-            display: inline-block;
-            padding: 0.125rem 0.5rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            background: var(--accent);
-            color: white;
-            margin-right: 0.5rem;
-        }
-        .result-card .confidence {
-            color: var(--green);
-            font-size: 0.75rem;
-        }
-        .result-card .description {
-            margin-top: 0.5rem;
-            font-size: 0.9rem;
-        }
-        .result-card .tags {
-            margin-top: 0.5rem;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.25rem;
-        }
-        .result-card .tag {
-            display: inline-block;
-            padding: 0.125rem 0.375rem;
-            border-radius: 3px;
-            font-size: 0.7rem;
-            background: #2a2d3a;
-            color: var(--orange);
-        }
-        .result-card .timestamp {
-            color: var(--dim);
-            font-size: 0.75rem;
-            margin-top: 0.5rem;
-        }
-        .loading { text-align: center; color: var(--dim); padding: 2rem; }
-        .empty { text-align: center; color: var(--dim); padding: 2rem; }
-        .examples {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem;
-            margin-bottom: 1.5rem;
-        }
-        .example-btn {
-            padding: 0.375rem 0.75rem;
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            background: var(--surface);
-            color: var(--dim);
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .example-btn:hover {
-            border-color: var(--accent);
-            color: var(--text);
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Keyhole</h1>
-        <p class="subtitle">Natural Language Video Intelligence Query</p>
-
-        <div class="stats" id="stats"></div>
-
-        <div class="search-box">
-            <input type="text" id="query" placeholder="Find me any person wearing a red hat..."
-                   onkeydown="if(event.key==='Enter') search()">
-            <button onclick="search()" id="searchBtn">Search</button>
-        </div>
-
-        <div class="examples">
-            <button class="example-btn" onclick="setQuery('show all people')">All people</button>
-            <button class="example-btn" onclick="setQuery('person with a backpack')">With backpack</button>
-            <button class="example-btn" onclick="setQuery('any vehicles detected')">Vehicles</button>
-            <button class="example-btn" onclick="setQuery('person wearing a hat')">Wearing hat</button>
-            <button class="example-btn" onclick="setQuery('dogs or cats')">Animals</button>
-        </div>
-
-        <div id="results"></div>
-    </div>
-
-    <script>
-        async function loadStats() {
-            try {
-                const res = await fetch('/api/stats');
-                const data = await res.json();
-                document.getElementById('stats').innerHTML = `
-                    <div class="stat-card">
-                        <div class="label">Total Events</div>
-                        <div class="value">${data.total_events.toLocaleString()}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="label">Frames</div>
-                        <div class="value">${data.total_frames.toLocaleString()}</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="label">Videos</div>
-                        <div class="value">${data.total_videos}</div>
-                    </div>
-                `;
-            } catch (e) {
-                console.error('Failed to load stats:', e);
-            }
-        }
-
-        function setQuery(q) {
-            document.getElementById('query').value = q;
-            search();
-        }
-
-        async function search() {
-            const query = document.getElementById('query').value.trim();
-            if (!query) return;
-
-            const btn = document.getElementById('searchBtn');
-            const resultsDiv = document.getElementById('results');
-
-            btn.disabled = true;
-            btn.textContent = '...';
-            resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
-
-            try {
-                const res = await fetch('/api/query', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ query }),
-                });
-                const data = await res.json();
-
-                if (data.results && data.results.length > 0) {
-                    resultsDiv.innerHTML = `
-                        <div class="results-header">${data.result_count} results found</div>
-                        ${data.results.map(r => `
-                            <div class="result-card">
-                                <span class="class-badge">${r.class_name}</span>
-                                <span class="confidence">${(r.confidence * 100).toFixed(0)}%</span>
-                                <div class="description">${r.description || r.class_name}</div>
-                                <div class="tags">
-                                    ${(r.concept_tags || []).map(t =>
-                                        `<span class="tag">${t}</span>`
-                                    ).join('')}
-                                </div>
-                                <div class="timestamp">
-                                    ${formatTimestamp(r.timestamp_sec)}
-                                    &mdash; ${r.source_video?.split('/').pop() || ''}
-                                </div>
-                            </div>
-                        `).join('')}
-                    `;
-                } else {
-                    resultsDiv.innerHTML = '<div class="empty">No detections match your query.</div>';
-                }
-            } catch (e) {
-                resultsDiv.innerHTML = `<div class="empty">Error: ${e.message}</div>`;
-            }
-
-            btn.disabled = false;
-            btn.textContent = 'Search';
-        }
-
-        function formatTimestamp(sec) {
-            if (sec == null) return '';
-            const m = Math.floor(sec / 60);
-            const s = Math.floor(sec % 60);
-            return `${m}:${s.toString().padStart(2, '0')}`;
-        }
-
-        loadStats();
-    </script>
-</body>
-</html>
-"""
-
+# ============================================================
+# Runner
+# ============================================================
 
 def run_server():
     """Run the API server."""
