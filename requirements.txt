@@ -35,6 +35,17 @@ jinja2>=3.1.0
 anthropic>=0.40.0
 httpx>=0.27.0
 
+# Semantic search (embeddings over detection descriptions)
+sentence-transformers>=5.0.0
+# Optional: GPU-native quantization (used only by experimental INT8 path)
+torchao>=0.17.0
+
+# Lightweight SAM variants for the Hybrid pipelines
+# (installed from git, not pip — see README)
+# mobile_sam  @ git+https://github.com/ChaoningZhang/MobileSAM.git
+# efficient_sam @ git+https://github.com/yformer/EfficientSAM.git
+open-clip-torch>=3.0.0
+
 # GPU Profiling
 nvidia-ml-py>=12.0.0
 psutil>=5.9.0
