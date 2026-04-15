@@ -140,16 +140,18 @@ async def health():
 # ============================================================
 
 def _video_status(video: VideoSource, frame_count: int) -> str:
-    """Resolve current status from in-process state + on-disk evidence."""
+    """
+    Read persisted lifecycle status from the DB, but if a subprocess is
+    still in _active_processing we narrow the answer to the live poll so
+    the response reflects the current tick rather than a stale row.
+    """
     info = _active_processing.get(video.id)
     if info is not None:
         rc = info["popen"].poll()
         if rc is None:
             return "processing"
-        # Subprocess has exited — watcher will remove the entry shortly.
-        # Return terminal status immediately so the current request is accurate.
         return "processed" if rc == 0 else "failed"
-    return "processed" if frame_count > 0 else "queued"
+    return video.status or ("processed" if frame_count > 0 else "queued")
 
 
 def _video_to_dict(video: VideoSource, session) -> dict:
@@ -337,6 +339,7 @@ async def upload_video(
         raise HTTPException(400, f"Failed to probe video: {exc}") from exc
 
     video_id = store.register_video(meta)
+    store.set_video_status(video_id, "processing")
 
     log_dir = Path("data/processing")
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -798,9 +801,11 @@ async def _processing_watcher():
                         info["last_frames"] = frames_done
                     continue
 
-                # Subprocess has exited — emit terminal message and clean up
+                # Subprocess has exited — persist terminal state, emit
+                # the WS message, and clean up the in-memory entry.
                 elapsed = time.time() - info["started_at"]
                 if rc == 0:
+                    store.set_video_status(video_id, "processed")
                     with store.get_session() as session:
                         detection_count = (
                             session.query(func.count(DetectionEvent.id))
@@ -815,6 +820,7 @@ async def _processing_watcher():
                         "total_time_sec": round(elapsed, 1),
                     })
                 else:
+                    store.set_video_status(video_id, "failed")
                     # Grab the tail of stderr so the UI can show a real reason
                     tail = ""
                     try:

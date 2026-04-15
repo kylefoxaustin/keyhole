@@ -48,7 +48,44 @@ class DetectionStore:
 
     def __init__(self, database_url: str):
         self.SessionFactory = create_db(database_url)
+        self._migrate_video_status()
         logger.info("Database initialized: %s", database_url)
+
+    def _migrate_video_status(self) -> None:
+        """
+        Idempotent migration: add video_sources.status if missing, then
+        backfill existing rows (processed if they have frames, failed if
+        they don't — any pre-existing row without frames is a failed run
+        from before the status column existed).
+        """
+        from sqlalchemy import text
+        with self.SessionFactory() as session:
+            cols = session.execute(text("PRAGMA table_info(video_sources)")).all()
+            names = {row[1] for row in cols}
+            if "status" in names:
+                return
+            session.execute(text(
+                "ALTER TABLE video_sources ADD COLUMN status VARCHAR(16) "
+                "NOT NULL DEFAULT 'queued'"
+            ))
+            session.execute(text("""
+                UPDATE video_sources SET status = CASE
+                    WHEN id IN (SELECT DISTINCT video_id FROM processed_frames)
+                        THEN 'processed'
+                    ELSE 'failed'
+                END
+            """))
+            session.commit()
+            logger.info("Migrated video_sources: added status column + backfilled")
+
+    def set_video_status(self, video_id: int, status: str) -> None:
+        """Persist a lifecycle transition for a video."""
+        with self.get_session() as session:
+            video = session.query(VideoSource).filter_by(id=video_id).first()
+            if video is None:
+                return
+            video.status = status
+            session.commit()
 
     def get_session(self) -> Session:
         return self.SessionFactory()

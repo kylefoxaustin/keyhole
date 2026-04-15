@@ -31,6 +31,10 @@ class VideoSource(Base):
     duration_sec = Column(Float)
     total_frames = Column(Integer)
     processed_at = Column(DateTime, default=datetime.datetime.utcnow)
+    # Lifecycle: queued → processing → processed | failed. Written by the
+    # API upload handler and the processing watcher; reads in _video_to_dict
+    # trust this as the source of truth (no more inferring from frame_count).
+    status = Column(String(16), nullable=False, default="queued")
 
     # Relationships
     frames = relationship("ProcessedFrame", back_populates="video", cascade="all, delete-orphan")
