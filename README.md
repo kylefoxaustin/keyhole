@@ -137,6 +137,9 @@ python scripts/compare_models.py --video data/videos/clip.mp4 --max-frames 10
 
 # Generate results deck (PowerPoint)
 python scripts/build_deck.py
+
+# Start the HTTP API server (for the keyhole-UI frontend or any HTTP client)
+python -m src.main serve
 ```
 
 ### Rendering
@@ -194,6 +197,36 @@ Edge projection (134.4 GB/s LPDDR5X):
 - 33x faster than SAM 3 on the same hardware
 
 Visual output quality is indistinguishable from SAM 3 for typical surveillance scenes.
+
+## HTTP API
+
+Keyhole exposes a FastAPI server (default `http://localhost:8777`) consumed by the
+[keyhole-UI](https://github.com/kylefoxaustin/keyhole-UI) Next.js frontend but usable
+by any HTTP client. Start it with `python -m src.main serve`.
+
+Key endpoints (full contract in [`API.md`](./API.md)):
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/health` | Server + GPU status |
+| `GET /api/videos` | List videos with per-item status (`queued`/`processing`/`processed`/`failed`) |
+| `POST /api/videos` | Upload a video; enqueues it behind a serialized processing worker |
+| `GET /api/videos/{id}/thumbnail` | First-frame JPEG |
+| `GET /api/videos/{id}/annotated` | Annotated MP4 stream |
+| `GET /api/videos/{id}/density?buckets=N` | Timeline heatmap buckets |
+| `DELETE /api/videos/{id}` | Remove a video and its events |
+| `GET /api/events?q=...` | Hybrid semantic + literal search with structured filters |
+| `GET /api/events/{id}/frame` | Annotated frame JPEG |
+| `GET /api/events/{id}/clip?before=5&after=5&format=mp4\|gif` | Short clip around an event |
+| `GET /api/concepts`, `GET /api/classes` | Autocomplete vocabularies |
+| `WS /api/ws/processing` | Live `status`/`complete`/`error` frames from the processing worker |
+
+OpenAPI schema: `/api/openapi.json` — the UI regenerates TypeScript types from this.
+
+Uploads are processed by a single async worker (one subprocess at a time) so concurrent
+uploads don't fight over GPU VRAM. The WS emits `queue_position` in every `status` frame
+so clients can show "N ahead". Failures carry the real Python exception class + message
+parsed from the subprocess stderr, plus a `details` tail for deep debugging.
 
 ## Project Structure
 
