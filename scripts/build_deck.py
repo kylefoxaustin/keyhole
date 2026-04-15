@@ -1184,6 +1184,132 @@ def slide_hybrid_v2(prs: Presentation):
                          text, font_size=10, color=color, bold=bold)
 
 
+def _load_bakeoff_data():
+    """Load bake-off results and edge projections, if present."""
+    base = Path("data/output/bakeoff")
+    clips = {
+        "720p":  "720p_EW_clip",
+        "1080p": "embedded_world_clip_1080p",
+        "4K":    "embedded_world_clip",
+    }
+    contestants = ["mobilesam", "efficientsam_tiny", "efficientsam_small", "yolo_seg"]
+
+    per_clip: dict[str, dict[str, dict]] = {}
+    for res, stem in clips.items():
+        summary_path = base / stem / "summary.json"
+        if not summary_path.exists():
+            return None, None  # bake-off not yet run
+        per_clip[res] = json.loads(summary_path.read_text())["contestants"]
+
+    # Compute per-frame FPS on 5090 from the detailed result files
+    per_frame_fps: dict[str, dict[str, float]] = {res: {} for res in clips}
+    for res, stem in clips.items():
+        for name in contestants:
+            data = json.loads((base / stem / "results" / f"{name}.json").read_text())
+            frame_ms = [fr["latency_ms"] for fr in data["frames"] if fr["n_boxes"] > 0]
+            per_frame_fps[res][name] = 1000.0 / np.mean(frame_ms) if frame_ms else 0.0
+
+    edge_path = base / "edge_projection.json"
+    edge = json.loads(edge_path.read_text()) if edge_path.exists() else None
+
+    return {"per_clip": per_clip, "per_frame_fps": per_frame_fps,
+            "contestants": contestants, "clips": list(clips.keys())}, edge
+
+
+def slide_bakeoff_summary(prs: Presentation):
+    """Slide: mask-model bake-off — headline numbers."""
+    data, edge = _load_bakeoff_data()
+    if data is None:
+        return
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide, C.BG_DARK)
+
+    add_title_bar(slide, "Mask Model Bake-Off — Headline Numbers",
+                  "MobileSAM vs EfficientSAM-Tiny/Small vs YOLO-seg, scored against SAM 3 references")
+
+    # Table 1: params, VRAM, IoU (one row per contestant)
+    headers = ["Model", "Params", "VRAM@1080p", "IoU @720p", "IoU @1080p", "IoU @4K"]
+    display_name = {
+        "mobilesam": "MobileSAM (vit_t)",
+        "efficientsam_tiny": "EfficientSAM-Tiny",
+        "efficientsam_small": "EfficientSAM-Small",
+        "yolo_seg": "YOLO-seg (yolo11s-seg)",
+    }
+    rows = []
+    for name in data["contestants"]:
+        c720 = data["per_clip"]["720p"][name]
+        c1080 = data["per_clip"]["1080p"][name]
+        c4k = data["per_clip"]["4K"][name]
+        rows.append([
+            display_name[name],
+            f"{c720['params_m']:.1f}M",
+            f"{c1080['peak_vram_mb']:.0f} MB",
+            f"{c720['mean_iou']:.3f}",
+            f"{c1080['mean_iou']:.3f}",
+            f"{c4k['mean_iou']:.3f}",
+        ])
+    add_styled_table(slide, Inches(0.2), Inches(1.3), Inches(9.6), Inches(1.5),
+                     headers, rows)
+
+    # Table 2: FPS (5090 measured + edge projection)
+    add_text_box(slide, Inches(0.3), Inches(2.95), Inches(9), Inches(0.3),
+                 "Full-frame FPS (~13 boxes/frame average)", font_size=11,
+                 color=C.ACCENT_PURPLE, bold=True)
+    headers2 = ["Model", "5090 @720p", "5090 @1080p", "5090 @4K", "Edge @720p", "Edge @1080p", "Edge @4K"]
+    rows2 = []
+    for name in data["contestants"]:
+        edge_720 = edge["projections"]["720p"][name]["projected_fps_edge"] if edge else 0
+        edge_1080 = edge["projections"]["1080p"][name]["projected_fps_edge"] if edge else 0
+        edge_4k = edge["projections"]["4K"][name]["projected_fps_edge"] if edge else 0
+        rows2.append([
+            display_name[name],
+            f"{data['per_frame_fps']['720p'][name]:.0f}",
+            f"{data['per_frame_fps']['1080p'][name]:.0f}",
+            f"{data['per_frame_fps']['4K'][name]:.0f}",
+            f"{edge_720:.1f}",
+            f"{edge_1080:.1f}",
+            f"{edge_4k:.1f}",
+        ])
+    add_styled_table(slide, Inches(0.2), Inches(3.3), Inches(9.6), Inches(1.5),
+                     headers2, rows2)
+
+    lines = [
+        ("KEY FINDINGS:", C.ACCENT_BLUE, True),
+        ("  EfficientSAM-Tiny dominates MobileSAM — same params, ~2-8x faster, slightly higher IoU", C.ACCENT_GREEN, False),
+        ("  EfficientSAM-Small leads quality: 0.91 IoU vs 0.86 for both Tiny and MobileSAM", C.TEXT_BRIGHT, False),
+        ("  YOLO-seg is 3-5x faster than any SAM variant; trades ~0.1 IoU for that speed", C.TEXT_BRIGHT, False),
+        ("  MobileSAM is obsoleted — no reason to pick it over EfficientSAM-Tiny", C.ACCENT_ORANGE, True),
+        ("  EfficientSAM is resolution-invariant per box; MobileSAM latency grows with image area", C.TEXT_DIM, False),
+        ("  Edge projections use emulator's 15%/85% compute/bandwidth split (conservative for conv-heavy YOLO)", C.TEXT_DIM, False),
+    ]
+    for i, (text, color, bold) in enumerate(lines):
+        if text:
+            add_text_box(slide, Inches(0.5), Inches(5.0 + i * 0.28),
+                         Inches(9), Inches(0.28),
+                         text, font_size=11, color=color, bold=bold)
+
+
+def slide_bakeoff_visuals(prs: Presentation):
+    """Slide: side-by-side mask comparison PNG."""
+    vis_path = Path("data/output/bakeoff/visuals/720p_sidebyside.png")
+    if not vis_path.exists():
+        return
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide)
+
+    add_title_bar(slide, "Mask Model Bake-Off — Visual Comparison",
+                  "One frame, 720p: YOLO prompts + SAM 3 reference + four contestants")
+
+    slide.shapes.add_picture(str(vis_path),
+                             Inches(0.3), Inches(1.3), width=Inches(9.4))
+
+    add_text_box(slide, Inches(0.3), Inches(6.6), Inches(9.4), Inches(0.4),
+                 "EfficientSAM-Small edges closest to SAM 3; YOLO-seg masks are visibly coarser but fast.",
+                 font_size=11, color=C.ACCENT_PURPLE, bold=True, alignment=PP_ALIGN.CENTER)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1228,10 +1354,10 @@ def slide_optimization_roadmap(prs: Presentation):
     p.font.name = "Segoe UI"
 
     steps = [
-        "1. Evaluate EfficientSAM / MobileSAM — only viable path to real-time on edge",
+        "1. [DONE] Evaluated EfficientSAM / MobileSAM — ES-Tiny beats MobileSAM on speed+quality; ES-Small tops quality (0.91 IoU)",
         "2. Investigate FP8 (E4M3) activation quantization on RTX 5090",
         "3. Test SmoothQuant for activation-safe INT8 on SAM 3 ViT backbone",
-        "4. Consider hybrid: YOLO for detection + lightweight model for enrichment",
+        "4. [DONE] Hybrid V2: YOLO-seg + CLIP (~20 FPS edge); YOLO-seg alone ~11-13 FPS edge projection",
         "5. Monitor Meta for official quantized SAM 3 / SAM 3 Lite release",
     ]
     for step in steps:
@@ -1408,6 +1534,13 @@ def build_deck(output, runs_dir, data_dir):
     # Hybrid V2 breakthrough
     console.print("  Building: Hybrid V2 breakthrough")
     slide_hybrid_v2(prs)
+
+    # Mask-model bake-off (only if data present)
+    if Path("data/output/bakeoff/720p_EW_clip/summary.json").exists():
+        console.print("  Building: Mask bake-off summary")
+        slide_bakeoff_summary(prs)
+        console.print("  Building: Mask bake-off visuals")
+        slide_bakeoff_visuals(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
