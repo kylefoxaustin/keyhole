@@ -13,6 +13,8 @@ venv/
 data/videos/*.mp4
 data/videos/*.avi
 data/videos/*.mkv
+data/videos/*.mov
+data/videos/*.MOV
 data/output/
 weights/
 third_party/
