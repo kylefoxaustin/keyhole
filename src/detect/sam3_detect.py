@@ -163,7 +163,7 @@ class SAM3SinglePassDetector:
                         coco_image_id=query_id,
                         original_image_id=query_id,
                         original_category_id=1,
-                        original_size=[w, h],
+                        original_size=[h, w],
                         object_id=0,
                         frame_index=0,
                     ),
