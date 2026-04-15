@@ -1310,6 +1310,76 @@ def slide_bakeoff_visuals(prs: Presentation):
                  font_size=11, color=C.ACCENT_PURPLE, bold=True, alignment=PP_ALIGN.CENTER)
 
 
+def slide_fp8_quantization(prs: Presentation):
+    """Slide: FP8 activation quantization results on the bake-off winners."""
+    fp8_path = Path("data/output/bakeoff/fp8_edge_projection.json")
+    if not fp8_path.exists():
+        return
+    fp8 = json.loads(fp8_path.read_text())
+    fp8_proj = fp8.get("fp8_projections", {})
+
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide, C.BG_DARK)
+
+    add_title_bar(slide, "FP8 Activation Quantization — Real-World Test",
+                  "Does halving activation traffic actually work on our bake-off winners?")
+
+    display_name = {
+        "efficientsam_small": "EfficientSAM-Small",
+        "yolo_seg": "YOLO-seg (yolo11s-seg)",
+    }
+
+    headers = ["Model", "Res", "FP8 applied?", "IoU bf16", "IoU FP8", "Δ IoU",
+               "Edge FPS bf16", "Edge FPS FP8"]
+    rows = []
+    for res in ["720p", "1080p", "4K"]:
+        for name in ["efficientsam_small", "yolo_seg"]:
+            p = fp8_proj.get(res, {}).get(name)
+            if not p:
+                continue
+            applied = p.get("fp8_actually_applied", False)
+            applied_text = f"YES ({p['n_fp8_weights_swapped']} Linears)" if applied else "NO (Conv2d not supported)"
+            # bf16 edge fps — use the reciprocal of projected_ms_edge_bf16, but that's an off-by-compute-limited
+            # number; simpler to read from the bf16 projection file if present. For consistency here, use
+            # 1000 / (bandwidth_limited_ms_bf16 + compute_limited_ms).
+            bw_bf16 = p["bandwidth_limited_ms_bf16"]
+            comp = p["compute_limited_ms"]
+            edge_bf16_fps = 1000.0 / (comp + bw_bf16) if (comp + bw_bf16) > 0 else 0
+            rows.append([
+                display_name[name],
+                res,
+                applied_text,
+                f"{p['mean_iou_bf16']:.3f}",
+                f"{p['mean_iou_fp8']:.3f}",
+                f"{p['iou_delta']:+.3f}",
+                f"{edge_bf16_fps:.1f}",
+                f"{p['projected_fps_edge_fp8']:.1f}",
+            ])
+    add_styled_table(slide, Inches(0.2), Inches(1.3), Inches(9.6), Inches(2.3),
+                     headers, rows)
+
+    lines = [
+        ("KEY FINDINGS:", C.ACCENT_BLUE, True),
+        ("  EfficientSAM-Small: 94 of 95 Linear layers quantized to E4M3 via torchao (PerTensor)", C.TEXT_BRIGHT, False),
+        ("  Quality loss is negligible (< 0.003 IoU) — FP8 activations preserve mask quality", C.ACCENT_GREEN, True),
+        ("  Edge FPS projection doubles: 2.5 -> 4.9 FPS at 720p (halved activation traffic on LPDDR5X)", C.ACCENT_GREEN, True),
+        ("", C.TEXT_DIM, False),
+        ("YOLO-seg — blocked by tool maturity, not by the model:", C.ACCENT_ORANGE, True),
+        ("  torchao 0.17's Float8DynamicActivationFloat8Weight only targets nn.Linear", C.TEXT_BRIGHT, False),
+        ("  YOLO-seg is 100 Conv2d / 0 Linear; no layers were actually quantized", C.TEXT_DIM, False),
+        ("  Conv FP8 needs custom kernels or transformer_engine-style rewrite", C.TEXT_DIM, False),
+        ("", C.TEXT_DIM, False),
+        ("DESKTOP CAVEAT:", C.ACCENT_PURPLE, True),
+        ("  FP8 matmul is slower than bf16 on RTX 5090 (torchao kernel overhead dominates tiny models)", C.TEXT_DIM, False),
+        ("  Desktop latency is NOT predictive — edge silicon's native FP8 MMA will realize the bandwidth win", C.TEXT_DIM, False),
+    ]
+    for i, (text, color, bold) in enumerate(lines):
+        if text:
+            add_text_box(slide, Inches(0.5), Inches(3.8 + i * 0.26),
+                         Inches(9), Inches(0.26),
+                         text, font_size=10, color=color, bold=bold)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = prs.slides.add_slide(prs.slide_layouts[6])
@@ -1354,11 +1424,12 @@ def slide_optimization_roadmap(prs: Presentation):
     p.font.name = "Segoe UI"
 
     steps = [
-        "1. [DONE] Evaluated EfficientSAM / MobileSAM — ES-Tiny beats MobileSAM on speed+quality; ES-Small tops quality (0.91 IoU)",
-        "2. Investigate FP8 (E4M3) activation quantization on RTX 5090",
-        "3. Test SmoothQuant for activation-safe INT8 on SAM 3 ViT backbone",
+        "1. [DONE] Evaluated EfficientSAM / MobileSAM — ES-Tiny beats MobileSAM; ES-Small tops quality (0.91 IoU)",
+        "2. [DONE] FP8 (E4M3) on ES-Small: 94/95 Linears quantized, IoU -0.002, edge FPS 2.5 -> 4.9 (halved act traffic)",
+        "3. Test SmoothQuant for activation-safe INT8 on the bake-off winners (apply same method, broader op coverage)",
         "4. [DONE] Hybrid V2: YOLO-seg + CLIP (~20 FPS edge); YOLO-seg alone ~11-13 FPS edge projection",
         "5. Monitor Meta for official quantized SAM 3 / SAM 3 Lite release",
+        "6. [NEW] YOLO-seg FP8 blocked in torchao (Conv-only model); needs custom kernels or transformer_engine approach",
     ]
     for step in steps:
         p2 = tf.add_paragraph()
@@ -1541,6 +1612,11 @@ def build_deck(output, runs_dir, data_dir):
         slide_bakeoff_summary(prs)
         console.print("  Building: Mask bake-off visuals")
         slide_bakeoff_visuals(prs)
+
+    # FP8 activation quantization (only if data present)
+    if Path("data/output/bakeoff/fp8_edge_projection.json").exists():
+        console.print("  Building: FP8 activation quantization")
+        slide_fp8_quantization(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
