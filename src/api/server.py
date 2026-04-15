@@ -62,18 +62,22 @@ embed_engine: Optional[EmbeddingEngine] = None
 _KNOWN_CLASS_NAMES: set[str] = set()
 
 # Background processing state: video_id -> {popen, pipeline, fps, started_at,
-# last_frames, stderr_path}. Populated by POST /api/videos, drained by the
-# watcher task, observed by _video_to_dict for status and by the WS endpoint
-# for broadcasts.
+# last_frames, stderr_path}. Populated by the processing worker, drained by
+# the watcher task, observed by _video_to_dict for status and by the WS
+# endpoint for broadcasts. At most one entry at a time — the worker is
+# serialized so concurrent uploads never fight over GPU VRAM.
 _active_processing: dict[int, dict] = {}
 _ws_clients: set[WebSocket] = set()
 _watcher_task: Optional[asyncio.Task] = None
+_worker_task: Optional[asyncio.Task] = None
+_processing_queue: Optional[asyncio.Queue] = None
 
 
 @app.on_event("startup")
 async def startup():
-    global store, embed_engine, _KNOWN_CLASS_NAMES, _watcher_task
+    global store, embed_engine, _KNOWN_CLASS_NAMES, _watcher_task, _worker_task, _processing_queue
     store = DetectionStore(settings.database.url)
+    _processing_queue = asyncio.Queue()
 
     # Load embedding model + warm the in-memory matrix from existing rows
     embed_engine = EmbeddingEngine(device="cpu")
@@ -90,6 +94,7 @@ async def startup():
         _KNOWN_CLASS_NAMES = {c[0].lower() for c in class_rows if c[0]}
 
     _watcher_task = asyncio.create_task(_processing_watcher())
+    _worker_task = asyncio.create_task(_processing_worker())
 
     logger.info(
         "Keyhole API started at %s:%d — %d embeddings cached, %d known classes",
@@ -100,12 +105,13 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown():
-    if _watcher_task is not None:
-        _watcher_task.cancel()
-        try:
-            await _watcher_task
-        except (asyncio.CancelledError, Exception):
-            pass
+    for task in (_watcher_task, _worker_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 # ============================================================
@@ -339,7 +345,7 @@ async def upload_video(
         raise HTTPException(400, f"Failed to probe video: {exc}") from exc
 
     video_id = store.register_video(meta)
-    store.set_video_status(video_id, "processing")
+    store.set_video_status(video_id, "queued")
 
     log_dir = Path("data/processing")
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -352,38 +358,39 @@ async def upload_video(
         "--fps", str(fps),
         *_PIPELINE_ARGS[pipeline],
     ]
-    # Unbuffered so the log files update live rather than in 4KB chunks
-    popen = subprocess.Popen(
-        cmd,
-        stdout=open(stdout_path, "wb"),
-        stderr=open(stderr_path, "wb"),
-        cwd=str(Path(__file__).resolve().parents[2]),
-    )
-
     estimated_frames = int(meta.duration * fps) if meta.duration else 0
-    _active_processing[video_id] = {
-        "popen": popen,
+
+    # Enqueue for the serialized worker. Actual subprocess spawn happens in
+    # the worker so concurrent uploads can't clobber each other's VRAM.
+    await _processing_queue.put({
+        "video_id": video_id,
+        "cmd": cmd,
         "pipeline": pipeline,
         "fps": fps,
-        "started_at": time.time(),
-        "last_frames": 0,
         "stderr_path": stderr_path,
+        "stdout_path": stdout_path,
         "estimated_frames": estimated_frames,
-    }
+    })
+
+    # Queue depth the UI can show as a "position". Subtract 1 because the
+    # job we just enqueued is included in qsize; if no worker run is in
+    # flight, our job will start immediately (position 0).
+    position = max(0, _processing_queue.qsize() - 1)
+    if _active_processing:
+        position += 1
 
     await _broadcast({
         "type": "status",
         "video_id": video_id,
-        "status": "processing",
-        "progress": {
-            "frames_done": 0,
-            "frames_total": estimated_frames,
-            "current_fps": 0.0,
-            "eta_seconds": None,
-        },
+        "status": "queued",
+        "queue_position": position,
     })
 
-    return {"video_id": video_id, "status": "processing"}
+    return {
+        "video_id": video_id,
+        "status": "queued",
+        "queue_position": position,
+    }
 
 
 # ============================================================
@@ -793,6 +800,73 @@ async def _broadcast(message: dict) -> None:
             dead.append(ws)
     for ws in dead:
         _ws_clients.discard(ws)
+
+
+async def _processing_worker():
+    """
+    Serialize subprocess execution so concurrent uploads don't fight over
+    GPU VRAM. Pulls jobs FIFO, spawns the subprocess, and blocks until the
+    watcher has finalized it (cleared the _active_processing entry).
+    """
+    while True:
+        try:
+            job = await _processing_queue.get()
+        except asyncio.CancelledError:
+            raise
+
+        video_id = job["video_id"]
+        popen: Optional[subprocess.Popen] = None
+        try:
+            store.set_video_status(video_id, "processing")
+            popen = subprocess.Popen(
+                job["cmd"],
+                stdout=open(job["stdout_path"], "wb"),
+                stderr=open(job["stderr_path"], "wb"),
+                cwd=str(Path(__file__).resolve().parents[2]),
+            )
+            _active_processing[video_id] = {
+                "popen": popen,
+                "pipeline": job["pipeline"],
+                "fps": job["fps"],
+                "started_at": time.time(),
+                "last_frames": 0,
+                "stderr_path": job["stderr_path"],
+                "estimated_frames": job["estimated_frames"],
+            }
+            await _broadcast({
+                "type": "status",
+                "video_id": video_id,
+                "status": "processing",
+                "progress": {
+                    "frames_done": 0,
+                    "frames_total": job["estimated_frames"],
+                    "current_fps": 0.0,
+                    "eta_seconds": None,
+                },
+            })
+
+            # Wait for the watcher to observe subprocess exit and clean up.
+            # We don't finalize here to keep the terminal-message logic in
+            # one place (the watcher already handles WS + DB status writes).
+            while video_id in _active_processing:
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            if popen is not None and popen.poll() is None:
+                popen.terminate()
+            raise
+        except Exception:
+            logger.exception("worker failed for video %d", video_id)
+            store.set_video_status(video_id, "failed")
+            _active_processing.pop(video_id, None)
+            await _broadcast({
+                "type": "error",
+                "video_id": video_id,
+                "message": "Internal worker error — check server logs",
+                "exit_code": -1,
+                "details": "",
+            })
+        finally:
+            _processing_queue.task_done()
 
 
 async def _processing_watcher():
