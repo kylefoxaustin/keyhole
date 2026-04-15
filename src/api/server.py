@@ -284,6 +284,60 @@ async def stream_annotated(video_id: int):
         return FileResponse(str(annotated), media_type="video/mp4")
 
 
+@app.get("/api/videos/{video_id}/density")
+async def get_video_density(
+    video_id: int,
+    buckets: int = Query(200, ge=1, le=500, description="Number of time buckets"),
+):
+    """
+    Detection density buckets for timeline heatmaps. Server-side aggregation
+    so the UI doesn't pull thousands of events just to histogram them. Each
+    bucket reports detection_count and unique_class_count over its window.
+    """
+    with store.get_session() as session:
+        video = session.query(VideoSource).filter_by(id=video_id).first()
+        if not video:
+            raise HTTPException(404, f"Video {video_id} not found")
+
+        duration = video.duration_sec or 0.0
+        if duration <= 0:
+            return {"video_id": video_id, "duration_sec": 0.0, "buckets": []}
+
+        bucket_size = duration / buckets
+
+        # One GROUP BY pulls every non-empty bucket; we backfill zeros below
+        # so the UI gets a fixed-length array keyed by bucket index.
+        rows = (
+            session.query(
+                (func.floor(DetectionEvent.timestamp_sec / bucket_size)).label("idx"),
+                func.count(DetectionEvent.id).label("det_count"),
+                func.count(func.distinct(DetectionEvent.class_name)).label("cls_count"),
+            )
+            .join(ProcessedFrame)
+            .filter(ProcessedFrame.video_id == video_id)
+            .group_by("idx")
+            .all()
+        )
+        by_idx = {int(r.idx): (r.det_count, r.cls_count) for r in rows}
+
+        out = []
+        for i in range(buckets):
+            det, cls = by_idx.get(i, (0, 0))
+            out.append({
+                "t_start_sec": round(i * bucket_size, 3),
+                "t_end_sec": round((i + 1) * bucket_size, 3),
+                "detection_count": int(det),
+                "unique_class_count": int(cls),
+            })
+
+        return {
+            "video_id": video_id,
+            "duration_sec": duration,
+            "bucket_size_sec": round(bucket_size, 3),
+            "buckets": out,
+        }
+
+
 @app.delete("/api/videos/{video_id}")
 async def delete_video(video_id: int):
     """Remove a video and all its associated events."""
