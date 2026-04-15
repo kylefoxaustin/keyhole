@@ -741,6 +741,48 @@ async def list_classes():
 # Processing Status (WebSocket + watcher)
 # ============================================================
 
+def _extract_error_from_stderr(stderr_path: Path, rc: int) -> tuple[str, str]:
+    """
+    Return (tail, summary). The tail is the last ~1 KB of stderr for
+    diagnostics; the summary is a human-readable one-liner the UI can
+    surface directly. For Python tracebacks we lift the final
+    'ExceptionClass: message' line since that's where the real signal
+    lives. Falls back to the exit code if we can't parse anything useful.
+    """
+    fallback = f"Processing exited with code {rc}"
+    try:
+        text = Path(stderr_path).read_text(errors="replace")
+    except Exception:
+        return "", fallback
+
+    tail = text[-1024:]
+
+    # Scan backwards for the canonical 'Error: message' line that closes a
+    # Python traceback. Accept any capitalized identifier ending in 'Error'
+    # or a bare 'Exception: ...'.
+    import re
+    pattern = re.compile(
+        r"^([A-Za-z_][\w.]*(?:Error|Exception|Warning)):\s*(.+?)$",
+        re.MULTILINE,
+    )
+    matches = pattern.findall(text)
+    if matches:
+        err_class, err_msg = matches[-1]
+        # Collapse whitespace and trim overly-long CUDA/dtype messages
+        err_msg = " ".join(err_msg.split())
+        if len(err_msg) > 240:
+            err_msg = err_msg[:237] + "…"
+        return tail, f"{err_class}: {err_msg}"
+
+    # No traceback — use the last non-empty stderr line as a best-effort
+    for line in reversed(tail.splitlines()):
+        line = line.strip()
+        if line:
+            return tail, line[:240]
+
+    return tail, fallback
+
+
 async def _broadcast(message: dict) -> None:
     """Send a JSON message to every connected WS client. Drops dead ones."""
     dead: list[WebSocket] = []
@@ -821,16 +863,14 @@ async def _processing_watcher():
                     })
                 else:
                     store.set_video_status(video_id, "failed")
-                    # Grab the tail of stderr so the UI can show a real reason
-                    tail = ""
-                    try:
-                        tail = Path(info["stderr_path"]).read_text(errors="replace")[-500:]
-                    except Exception:
-                        pass
+                    tail, summary = _extract_error_from_stderr(
+                        info["stderr_path"], rc,
+                    )
                     await _broadcast({
                         "type": "error",
                         "video_id": video_id,
-                        "message": f"Processing exited with code {rc}",
+                        "message": summary,
+                        "exit_code": rc,
                         "details": tail,
                     })
 
