@@ -175,7 +175,7 @@ def process(video: str, fps: float, max_frames: int, detect_only: bool, profile:
     # Standard mode: YOLO detection + optional SAM 3 enrichment
     detector = None
     enricher = None
-    if not single_pass and not hybrid:
+    if not single_pass and not hybrid and not hybrid_v2:
         detector = YOLODetector(
             model_name=settings.yolo.model,
             confidence=settings.yolo.confidence,
