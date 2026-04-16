@@ -1433,6 +1433,68 @@ def slide_hybrid_v2_bakeoff(prs: Presentation):
     ], font_size=11)
 
 
+def slide_yolo_conv_quant(prs: Presentation):
+    """Slide: YOLO-seg Conv-INT8 via 1x1 swap — FP8 still blocked, INT8 works."""
+    path = Path("data/output/bakeoff/yolo_conv_quant_edge_projection.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+    proj = data["projections"]
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "YOLO-seg Conv Quantization — Partial Unblock via 1×1 Swap",
+                       "torchao swap_conv2d_1x1_to_linear captures half the layers (44% of conv weights)")
+
+    headers = ["Res", "Recipe", "1×1 swapped", "Q'd", "% conv wts", "Box recall",
+               "Match IoU", "5090 ms", "Edge BF16", "Edge Q", "Edge FPS"]
+    rows = []
+    highlight = []
+    row_i = 0
+    for res in ["720p", "1080p", "4K"]:
+        for recipe in ["bf16", "int8_1x1_swap", "fp8_1x1_swap"]:
+            p = proj.get(res, {}).get(recipe)
+            if not p:
+                continue
+            row_i += 1
+            if "error" in p:
+                rows.append([
+                    res, recipe, "—", "—", "—", "—", "—", "—", "—", "—",
+                    "BLOCKED — see note",
+                ])
+                continue
+            recall_str = f"{p.get('box_recall', 0):.3f}" if recipe != "bf16" else "1.000"
+            miou_str = f"{p.get('mean_matched_iou', 0):.3f}" if recipe != "bf16" else "1.000"
+            rows.append([
+                res, recipe,
+                str(p['n_swapped_linears']) if p['n_swapped_linears'] else "—",
+                str(p['n_quantized']) if p['n_quantized'] else "—",
+                f"{100*p['frac_conv_weights_quantized']:.1f}%" if p['n_quantized'] else "—",
+                recall_str, miou_str,
+                f"{p['mean_frame_ms_5090']:.1f}",
+                f"{p['projected_ms_edge_bf16']:.1f}",
+                f"{p['projected_ms_edge_recipe']:.1f}",
+                f"{p['projected_fps_edge_recipe']:.1f}",
+            ])
+            if res == "720p" and recipe == "int8_1x1_swap":
+                highlight.append(row_i)
+
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(3.3), headers, rows,
+                     highlight_rows=highlight)
+
+    add_bullet_box(slide, CONTENT_LEFT, 4.85, CONTENT_W, 2.3, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        "• yolo11s-seg: 100 Conv2d, 0 Linear. Half the Convs are 1×1 (44% of conv weights); these can be swapped to equivalent Linears and quantized.",
+        ("• INT8 path works — 49/50 swapped 1×1 Convs quantized, 96-98% box recall, matched IoU 0.986-0.988. Detections essentially unchanged.", C.ACCENT_GREEN, True),
+        ("• Edge FPS (720p): 18.7 BF16 → 23.8 INT8 (+27%). Hybrid V2 + 1 Hz CLIP + YOLO-INT8 projects to ~20 FPS — real real-time.", C.ACCENT_GREEN, True),
+        "",
+        ("FP8 path still blocked — second tooling gap below the Linear-only one", C.ACCENT_ORANGE, True),
+        ("• torchao 0.17 Float8 PerTensor version=2 asserts 'input_tensor must be 1x128 scaled' inside _float8_addmm_impl — YOLO activations don't satisfy it", C.TEXT_DIM),
+        ("• PerRow fails ('Only bf16/fp16 high-precision output types supported'); version=1 is rejected at runtime", C.TEXT_DIM),
+        ("• Full Conv-FP8 needs custom kernels, TensorRT INT8/FP8, or transformer_engine — not reachable without platform work", C.ACCENT_AMBER, True),
+    ], font_size=11)
+
+
 def slide_keyframe_debounce(prs: Presentation):
     """Slide: CLIP keyframe debouncing unlocks real-time on Hybrid V2."""
     path = Path("data/output/bakeoff/keyframe_debounce_summary.json")
@@ -1510,11 +1572,12 @@ def slide_optimization_roadmap(prs: Presentation):
         ["Hybrid V2 (YOLO-seg + CLIP) BF16",   "1× (CLIP dominates 22 ms)",  "2.9 FPS",   "MEASURED"],
         ["Hybrid V2 + FP8/INT8 on CLIP",       "~2× on CLIP half",           "4.9 FPS",   "MEASURED (48/72 Linears)"],
         ["Hybrid V2 + CLIP @ 1 Hz (N=30)",      "~30× on CLIP amortized",    "16.0 FPS",  "MEASURED — 93% of YOLO ceiling"],
-        ["YOLO-seg alone (no CLIP)",           "ceiling",                    "17.3 FPS",  "Real-time ceiling on Edge MPU"],
+        ["YOLO-seg INT8 via 1×1 swap",          "~22% BW savings on YOLO",   "23.8 FPS",  "MEASURED — 49/50 swapped (44% wts)"],
+        ["Hybrid V2 + 1 Hz CLIP + YOLO-INT8",    "stacked",                    "~20 FPS",  "PROJECTED — shipping target"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
                      Inches(CONTENT_W), Inches(3.0), headers, rows,
-                     highlight_rows=[11])  # Hybrid V2 + 1 Hz CLIP debounce — the shipping target
+                     highlight_rows=[12])  # Hybrid V2 + 1 Hz CLIP + YOLO-INT8 is the full stack
 
     add_bullet_box(slide, CONTENT_LEFT, 4.8, CONTENT_W, 2.1, [
         ("Next steps (updated post-debounce bake-off)", C.ACCENT_PURPLE, True),
@@ -1523,8 +1586,9 @@ def slide_optimization_roadmap(prs: Presentation):
         ("3. [DONE] SmoothQuant / INT8 on ES-Small: plain INT8 matches FP8 (ΔIoU -0.002, edge 2.5→4.9 FPS); SmoothQuant CONVERT blocked by torchao 0.17 API gap",),
         ("4. [DONE] Hybrid V2 CLIP quant: 48/72 Linears, 2.9 → 4.9 FPS edge; FP8 preserves top-1 tags better than INT8",),
         ("5. [DONE] CLIP keyframe debouncing: N=30 (1 Hz CLIP) → 16.0 FPS edge @ 720p — 93% of YOLO-only ceiling; top-3 stability 0.55 at 1-sec gaps",),
-        ("6. [NEXT] YOLO-seg Conv-FP8 — unlock the 17.3 FPS ceiling. torchao blocked; needs custom kernels or transformer_engine",),
-        ("7. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
+        ("6. [DONE] YOLO-seg Conv-INT8 via torchao 1×1 swap: 49/50 swapped Convs quantized (44% conv wts), box recall 96-98%, edge FPS 18.7 → 23.8",),
+        ("7. [BLOCKED] YOLO-seg Conv-FP8 proper: torchao 0.17 asserts 1×128-scaled activations. Needs TensorRT/transformer_engine/custom kernels",),
+        ("8. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
     ], font_size=11)
 
 
@@ -1690,6 +1754,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/keyframe_debounce_summary.json").exists():
         console.print("  Building: CLIP keyframe debouncing")
         slide_keyframe_debounce(prs)
+
+    # YOLO-seg conv quantization (INT8 via 1x1 swap; FP8 blocked)
+    if Path("data/output/bakeoff/yolo_conv_quant_edge_projection.json").exists():
+        console.print("  Building: YOLO-seg conv quantization")
+        slide_yolo_conv_quant(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
