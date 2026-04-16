@@ -1546,6 +1546,57 @@ def slide_trt_yolo(prs: Presentation):
     ], font_size=11)
 
 
+def slide_trt_clip(prs: Presentation):
+    """Slide: TRT-compile CLIP visual — FP8 halves the CLIP edge cost."""
+    path = Path("data/output/bakeoff/trt_clip_edge_projection.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+    proj = data["projections"]
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "TensorRT CLIP — Visual Tower Compiled, FP8 Halves Edge Cost",
+                       "Completes the Hybrid V2 TRT stack: YOLO-seg FP8 + CLIP ViT-B-32 FP8")
+
+    headers = ["Res", "Recipe", "5090 ms", "Top-1 vs BF16",
+               "Edge CLIP ms", "CLIP-only FPS"]
+    rows = []
+    highlight = []
+    row_i = 0
+    for res in ["720p", "1080p", "4K"]:
+        for recipe in ["bf16_torch", "fp16", "fp8"]:
+            p = proj.get(res, {}).get(recipe)
+            if not p or "error" in p:
+                continue
+            row_i += 1
+            name = {"bf16_torch": "BF16 torch", "fp16": "TRT FP16", "fp8": "TRT FP8"}[recipe]
+            rows.append([
+                res, name,
+                f"{p['mean_frame_ms_5090']:.2f}",
+                f"{p['top1_agreement']:.3f}",
+                f"{p['projected_clip_ms_edge']:.1f}",
+                f"{p['projected_fps_edge_clip_only']:.1f}",
+            ])
+            if res == "720p" and recipe == "fp8":
+                highlight.append(row_i)
+
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(3.1), headers, rows,
+                     highlight_rows=highlight)
+
+    add_bullet_box(slide, CONTENT_LEFT, 4.75, CONTENT_W, 2.4, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        ("• CLIP visual TRT-compiled cleanly at FP16 + FP8 (180 MB engine). No QDQ nodes needed — TRT auto-selects FP8 layers.", C.ACCENT_GREEN, True),
+        ("• FP8 edge CLIP drops from 29.8 ms (BF16/FP16) to 15.1 ms (+120% CLIP-only FPS).", C.ACCENT_GREEN, True),
+        ("• Top-1 concept-tag agreement: TRT FP16 0.970, TRT FP8 0.964 — FP8 costs ~0.4 pts, noise-level.", C.TEXT_DIM),
+        ("• Earlier hybrid_v2 CLIP measurement (22 ms) included per-crop Python dispatch. Pure visual() kernel time is 2.3 ms BF16 — TRT exposes the honest number.", C.ACCENT_AMBER, True),
+        "",
+        ("Recalibrated full-stack (720p Edge MPU)", C.ACCENT_INDIGO, True),
+        ("• YOLO-FP8 (27.2 ms) + CLIP-FP8 every frame (15.1 ms) = 42.3 ms → 24 FPS  — real-time with ZERO debouncing",),
+        ("• YOLO-FP8 + CLIP-FP8 at 1 Hz (0.5 ms amortized) = 27.7 ms → 36 FPS  — at the YOLO-only ceiling; CLIP is effectively free",),
+    ], font_size=11)
+
+
 def slide_keyframe_debounce(prs: Presentation):
     """Slide: CLIP keyframe debouncing unlocks real-time on Hybrid V2."""
     path = Path("data/output/bakeoff/keyframe_debounce_summary.json")
@@ -1625,11 +1676,13 @@ def slide_optimization_roadmap(prs: Presentation):
         ["Hybrid V2 + CLIP @ 1 Hz (N=30)",      "~30× on CLIP amortized",    "16.0 FPS",  "MEASURED — 93% of YOLO ceiling"],
         ["YOLO-seg INT8 via torchao 1×1 swap",   "~22% BW savings on YOLO",   "23.8 FPS",  "MEASURED — 49/50 swapped (44% wts)"],
         ["YOLO-seg FP8 via TensorRT 10.16",       "~50% on YOLO (full model)", "36.8 FPS",  "MEASURED — recall 1.00, IoU 0.998"],
-        ["Hybrid V2 + 1 Hz CLIP + YOLO-FP8",      "stacked, TRT",               "~31 FPS",  "PROJECTED — full shipping stack"],
+        ["CLIP visual FP8 via TensorRT 10.16",     "~50% on CLIP (full model)", "66.3 FPS",  "MEASURED — top-1 agree 0.964"],
+        ["Hybrid V2 + CLIP every-frame (all TRT)", "stacked, no debounce",       "24 FPS",    "PROJECTED — real-time, simplest"],
+        ["Hybrid V2 + 1 Hz CLIP (all TRT)",        "stacked, debounced",         "36 FPS",    "PROJECTED — at YOLO ceiling"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
                      Inches(CONTENT_W), Inches(3.0), headers, rows,
-                     highlight_rows=[13])  # Hybrid V2 + 1 Hz CLIP + YOLO-FP8 is the new full stack
+                     highlight_rows=[15])  # Full-stack 1 Hz all-TRT is the shipping target
 
     add_bullet_box(slide, CONTENT_LEFT, 4.8, CONTENT_W, 2.1, [
         ("Next steps (updated post-debounce bake-off)", C.ACCENT_PURPLE, True),
@@ -1640,7 +1693,8 @@ def slide_optimization_roadmap(prs: Presentation):
         ("5. [DONE] CLIP keyframe debouncing: N=30 (1 Hz CLIP) → 16.0 FPS edge @ 720p — 93% of YOLO-only ceiling; top-3 stability 0.55 at 1-sec gaps",),
         ("6. [DONE] YOLO-seg Conv-INT8 via torchao 1×1 swap: partial (44% conv wts), edge 18.7 → 23.8 FPS — interim result",),
         ("7. [DONE] YOLO-seg Conv-FP8 via TensorRT 10.16 on Blackwell: full model, recall 1.00 / IoU 0.998, edge 18.6 → 36.8 FPS (+98%)",),
-        ("8. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
+        ("8. [DONE] CLIP visual FP8 via TensorRT: edge 29.8 → 15.1 ms (+120% CLIP FPS), top-1 tag agree 0.964",),
+        ("9. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
     ], font_size=11)
 
 
@@ -1816,6 +1870,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/trt_yolo_edge_projection.json").exists():
         console.print("  Building: TensorRT YOLO FP8/INT8")
         slide_trt_yolo(prs)
+
+    # TRT CLIP visual tower
+    if Path("data/output/bakeoff/trt_clip_edge_projection.json").exists():
+        console.print("  Building: TensorRT CLIP visual")
+        slide_trt_clip(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
