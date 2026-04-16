@@ -1433,6 +1433,63 @@ def slide_hybrid_v2_bakeoff(prs: Presentation):
     ], font_size=11)
 
 
+def slide_keyframe_debounce(prs: Presentation):
+    """Slide: CLIP keyframe debouncing unlocks real-time on Hybrid V2."""
+    path = Path("data/output/bakeoff/keyframe_debounce_summary.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+    per_res = data["per_resolution"]
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "CLIP Keyframe Debouncing — Unlocking Real-Time on Hybrid V2",
+                       "Run YOLO every frame; CLIP only every Nth. YOLO is the real-time ceiling.")
+
+    # Primary table: 720p sweep
+    r720 = per_res["720p"]
+    headers = ["N (native frames)", "Interval", "Top-1 stab", "Top-3 stab",
+               "Edge ms / frame", "Edge FPS", "% of YOLO ceiling"]
+    rows = []
+    highlight = []
+    ceiling = r720["edge_fps_yolo_only"]
+    target_Ns = {30, 60}  # highlight the two sweet-spot candidates
+    for i, row in enumerate(r720["rows"]):
+        N = row["N_native_frames"]
+        is_target = N in target_Ns
+        if is_target:
+            highlight.append(i + 1)
+        rows.append([
+            f"N = {N}",
+            f"{row['keyframe_interval_sec']:.2f} s",
+            f"{row['stability_top1']:.2f}",
+            f"{row['stability_top3_jaccard']:.2f}",
+            f"{row['eff_edge_ms_per_frame']:.1f}",
+            f"{row['eff_edge_fps']:.1f}",
+            f"{100 * row['eff_edge_fps'] / ceiling:.0f}%",
+        ])
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(2.7), headers, rows,
+                     highlight_rows=highlight)
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(4.2), Inches(CONTENT_W), Inches(0.3),
+                 f"720p shown. YOLO-only ceiling: 720p {per_res['720p']['edge_fps_yolo_only']:.1f} FPS  "
+                 f"•  1080p {per_res['1080p']['edge_fps_yolo_only']:.1f} FPS  "
+                 f"•  4K {per_res['4K']['edge_fps_yolo_only']:.1f} FPS. "
+                 f"Same debounce shape at all resolutions.",
+                 font_size=10, color=C.TEXT_DIM)
+
+    add_bullet_box(slide, CONTENT_LEFT, 4.65, CONTENT_W, 2.5, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        ("• Debouncing works. 720p edge FPS climbs from 4.9 (N=1) to 16.0 at N=30 (CLIP every 1 s) — 93% of the YOLO-only ceiling", C.ACCENT_GREEN, True),
+        "• YOLO-seg is now the real-time ceiling (17.3 FPS @ 720p edge). Further speedup needs Conv-FP8 / custom kernels.",
+        ("• Recommended operating point: N = 30 (1 Hz CLIP rerun). Good FPS, top-3 stability 0.55 — new concept tags within one second of a scene change.", C.ACCENT_INDIGO, True),
+        ("• N = 60 buys ~4% more FPS at the cost of 2-second stale tags — viable if the UI already displays cached tags on non-keyframes.", C.ACCENT_AMBER, True),
+        "",
+        ("Caveat on the stability numbers", C.ACCENT_ORANGE, True),
+        ("• Bake-off frames are sampled at 1 fps, so N = 1..29 all collapse onto the 1-second-gap stability measurement. Sub-second drift is unmeasured and will be higher than shown.", C.TEXT_DIM),
+        ("• N = 90 (3 s) is where top-1 collapses to 0.19 — upper bound for any naive fixed-interval scheme.", C.TEXT_DIM),
+    ], font_size=11)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = new_slide(prs)
@@ -1452,20 +1509,21 @@ def slide_optimization_roadmap(prs: Presentation):
         ["EfficientSAM / MobileSAM",          "~50-100× (5-50M params)",    "~15-30 FPS","Bake-off completed"],
         ["Hybrid V2 (YOLO-seg + CLIP) BF16",   "1× (CLIP dominates 22 ms)",  "2.9 FPS",   "MEASURED"],
         ["Hybrid V2 + FP8/INT8 on CLIP",       "~2× on CLIP half",           "4.9 FPS",   "MEASURED (48/72 Linears)"],
-        ["Hybrid V2 + CLIP keyframe debounce", "~N× (CLIP every Nth frame)", "~13 FPS",   "NEXT — YOLO-bound"],
+        ["Hybrid V2 + CLIP @ 1 Hz (N=30)",      "~30× on CLIP amortized",    "16.0 FPS",  "MEASURED — 93% of YOLO ceiling"],
+        ["YOLO-seg alone (no CLIP)",           "ceiling",                    "17.3 FPS",  "Real-time ceiling on Edge MPU"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
                      Inches(CONTENT_W), Inches(3.0), headers, rows,
-                     highlight_rows=[11])  # Hybrid V2 + keyframe debounce is the target
+                     highlight_rows=[11])  # Hybrid V2 + 1 Hz CLIP debounce — the shipping target
 
     add_bullet_box(slide, CONTENT_LEFT, 4.8, CONTENT_W, 2.1, [
-        ("Next steps (updated post-bake-off + Hybrid V2 CLIP quant)", C.ACCENT_PURPLE, True),
+        ("Next steps (updated post-debounce bake-off)", C.ACCENT_PURPLE, True),
         ("1. [DONE] EfficientSAM / MobileSAM evaluated — ES-Tiny beats MobileSAM; ES-Small tops quality (0.91 IoU)",),
         ("2. [DONE] FP8 on ES-Small: 94/95 Linears quantized, ΔIoU -0.002, edge FPS 2.5 → 4.9 (halved act traffic)",),
         ("3. [DONE] SmoothQuant / INT8 on ES-Small: plain INT8 matches FP8 (ΔIoU -0.002, edge 2.5→4.9 FPS); SmoothQuant CONVERT blocked by torchao 0.17 API gap",),
-        ("4. [DONE] Hybrid V2 (YOLO-seg + CLIP): CLIP dominates (22 ms vs YOLO 4.4 ms @ 720p); FP8/INT8 swap 48/72 CLIP Linears → 2.9 → 4.9 FPS edge; FP8 preserves top-1 tags better",),
-        ("5. [NEXT] Debounce CLIP to keyframes — the only path to real-time on Hybrid V2; YOLO stays every frame (~13 FPS)",),
-        ("6. [BLOCKED] YOLO-seg FP8 — Conv-only, torchao skips. Needs custom kernels or transformer_engine",),
+        ("4. [DONE] Hybrid V2 CLIP quant: 48/72 Linears, 2.9 → 4.9 FPS edge; FP8 preserves top-1 tags better than INT8",),
+        ("5. [DONE] CLIP keyframe debouncing: N=30 (1 Hz CLIP) → 16.0 FPS edge @ 720p — 93% of YOLO-only ceiling; top-3 stability 0.55 at 1-sec gaps",),
+        ("6. [NEXT] YOLO-seg Conv-FP8 — unlock the 17.3 FPS ceiling. torchao blocked; needs custom kernels or transformer_engine",),
         ("7. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
     ], font_size=11)
 
@@ -1627,6 +1685,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/hybrid_v2_edge_projection.json").exists():
         console.print("  Building: Hybrid V2 CLIP quantization bake-off")
         slide_hybrid_v2_bakeoff(prs)
+
+    # CLIP keyframe debouncing (only if data present)
+    if Path("data/output/bakeoff/keyframe_debounce_summary.json").exists():
+        console.print("  Building: CLIP keyframe debouncing")
+        slide_keyframe_debounce(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
