@@ -166,6 +166,103 @@ def add_styled_table(slide, left, top, width, height,
     return table_shape
 
 
+# ============================================================
+# Widescreen layout helpers (16:9 template modeled on personal-ai-framework)
+# ============================================================
+
+SLIDE_W_IN = 13.333
+SLIDE_H_IN = 7.5
+CONTENT_LEFT = 0.5
+CONTENT_W = 12.3
+TITLE_TOP = 0.2
+SUBTITLE_TOP = 0.8
+CONTENT_TOP = 1.4
+FOOTER_TOP = 7.1
+PROJECT_FOOTER = "Keyhole — Edge AI Video Intelligence"
+
+
+def set_deck_size(prs: Presentation):
+    """Switch the presentation to 16:9 widescreen (13.333 x 7.5 in)."""
+    prs.slide_width = Inches(SLIDE_W_IN)
+    prs.slide_height = Inches(SLIDE_H_IN)
+
+
+def new_slide(prs: Presentation, bg_color=None, accent_stripe: bool = True):
+    """Create a blank slide with background + optional top accent stripe."""
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    set_slide_bg(slide, bg_color or C.BG_SLIDE)
+    if accent_stripe:
+        stripe = slide.shapes.add_shape(
+            MSO_SHAPE.RECTANGLE,
+            Inches(0), Inches(0), Inches(SLIDE_W_IN), Pt(4),
+        )
+        stripe.fill.solid()
+        stripe.fill.fore_color.rgb = C.ACCENT_BLUE
+        stripe.line.fill.background()
+    return slide
+
+
+def add_title_subtitle(slide, title, subtitle=None):
+    """Standard title (26pt bold) + subtitle (13pt dim) pair."""
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(TITLE_TOP),
+                 Inches(CONTENT_W), Inches(0.6),
+                 title, font_size=26, color=C.ACCENT_BLUE, bold=True)
+    if subtitle:
+        add_text_box(slide, Inches(CONTENT_LEFT), Inches(SUBTITLE_TOP),
+                     Inches(CONTENT_W), Inches(0.4),
+                     subtitle, font_size=13, color=C.TEXT_DIM)
+
+
+def add_bullet_box(slide, left, top, width, height, items,
+                   font_size=13, font_name="Segoe UI"):
+    """Put multi-paragraph bulleted content in a single textbox.
+
+    Each item is one of:
+      - "" / None: blank separator line
+      - str: regular bullet at TEXT_BRIGHT
+      - (text, color): colored regular line
+      - (text, color, bold): colored bold line
+    """
+    txBox = slide.shapes.add_textbox(
+        Inches(left), Inches(top), Inches(width), Inches(height),
+    )
+    tf = txBox.text_frame
+    tf.word_wrap = True
+    for i, item in enumerate(items):
+        if item is None or item == "":
+            text, color, bold = "", C.TEXT_DIM, False
+        elif isinstance(item, str):
+            text, color, bold = item, C.TEXT_BRIGHT, False
+        else:
+            text = item[0]
+            color = item[1] if len(item) > 1 else C.TEXT_BRIGHT
+            bold = item[2] if len(item) > 2 else False
+        p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        p.text = text
+        if p.runs:
+            r = p.runs[0]
+            r.font.size = Pt(font_size)
+            r.font.color.rgb = color
+            r.font.bold = bold
+            r.font.name = font_name
+    return txBox
+
+
+def add_footer(slide, n: int, total: int):
+    """Add consistent footer with project name + page."""
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(FOOTER_TOP),
+                 Inches(CONTENT_W), Inches(0.3),
+                 f"{PROJECT_FOOTER}  •  {n}/{total}",
+                 font_size=9, color=C.TEXT_DIM)
+
+
+def finalize_footers(prs: Presentation):
+    """Add footers after all slides are built (so we know the total)."""
+    total = len(prs.slides)
+    for i, slide in enumerate(prs.slides):
+        add_footer(slide, i + 1, total)
+
+
 def fig_to_image_stream(fig) -> io.BytesIO:
     """Convert a matplotlib figure to a BytesIO PNG stream."""
     buf = io.BytesIO()
@@ -501,113 +598,107 @@ def project_for_deck(run: dict, targets: dict) -> list[dict]:
 
 def slide_title(prs: Presentation):
     """Slide 1: Title slide."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])  # Blank
-    set_slide_bg(slide, C.BG_DARK)
+    slide = new_slide(prs, bg_color=C.BG_DARK)
 
-    add_text_box(slide, Inches(1), Inches(1.5), Inches(8), Inches(1),
-                 "KEYHOLE", font_size=48, color=C.ACCENT_BLUE, bold=True,
-                 alignment=PP_ALIGN.CENTER, font_name="Segoe UI")
+    add_text_box(slide, Inches(0.5), Inches(2.5), Inches(CONTENT_W), Inches(1.2),
+                 "KEYHOLE", font_size=64, color=C.ACCENT_BLUE, bold=True,
+                 alignment=PP_ALIGN.CENTER)
 
-    add_text_box(slide, Inches(1), Inches(2.5), Inches(8), Inches(0.6),
+    add_text_box(slide, Inches(0.5), Inches(3.7), Inches(CONTENT_W), Inches(0.6),
                  "Open-Source AI Key Prototype", font_size=24,
                  color=C.TEXT_WHITE, alignment=PP_ALIGN.CENTER)
 
-    add_text_box(slide, Inches(1), Inches(3.2), Inches(8), Inches(0.5),
-                 "Edge AI Video Intelligence Pipeline  |  Workload Characterization & NPU Feasibility",
-                 font_size=14, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
+    add_text_box(slide, Inches(0.5), Inches(4.3), Inches(CONTENT_W), Inches(0.5),
+                 "Edge AI Video Intelligence  •  Model Bake-Off  •  NPU Feasibility",
+                 font_size=15, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
 
     # Accent line
     line = slide.shapes.add_shape(
         MSO_SHAPE.RECTANGLE,
-        Inches(3), Inches(3.8), Inches(4), Pt(2),
+        Inches(5.5), Inches(5.1), Inches(2.3), Pt(2),
     )
     line.fill.solid()
     line.fill.fore_color.rgb = C.ACCENT_BLUE
     line.line.fill.background()
 
     timestamp = datetime.now().strftime("%B %d, %Y")
-    add_text_box(slide, Inches(1), Inches(4.2), Inches(8), Inches(0.5),
-                 f"Generated {timestamp}  |  github.com/kylefoxaustin/keyhole",
-                 font_size=11, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
+    add_text_box(slide, Inches(0.5), Inches(5.4), Inches(CONTENT_W), Inches(0.4),
+                 f"Generated {timestamp}  •  github.com/kylefoxaustin/keyhole",
+                 font_size=12, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
 
 
 def slide_architecture(prs: Presentation):
     """Slide 2: Pipeline architecture diagram."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-    add_title_bar(slide, "Pipeline Architecture",
-                  "5-stage edge AI video intelligence pipeline")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Pipeline Architecture",
+                       "5-stage edge AI video intelligence pipeline")
 
     fig = build_architecture_diagram()
     img_stream = fig_to_image_stream(fig)
-    slide.shapes.add_picture(img_stream, Inches(0.3), Inches(1.5),
-                              width=Inches(9.4))
+    slide.shapes.add_picture(img_stream, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                              width=Inches(CONTENT_W))
 
-    # Key specs box
-    specs = [
-        "Tier 1: YOLO 11x  (56.9M params, ~196 GFLOPs/frame)",
-        "Tier 2: SAM 3 Concept Segmentation  (840.5M params, ~4,175 GFLOPs/frame)",
-        "NLQ: Claude API / Ollama / Skippy  (3B-8B int4 models)",
-        "Store: SQLite + FTS5 + optional vector embeddings",
-    ]
-    for i, spec in enumerate(specs):
-        add_text_box(slide, Inches(0.8), Inches(4.0 + i * 0.35),
-                     Inches(8.5), Inches(0.35),
-                     spec, font_size=10, color=C.TEXT_DIM)
+    add_bullet_box(slide, CONTENT_LEFT, 4.5, CONTENT_W, 2.0, [
+        ("Pipeline stages and scale", C.ACCENT_BLUE, True),
+        ("• Tier 1 — YOLO 11x: 56.9M params, ~196 GFLOPs/frame — detection + bounding boxes",),
+        ("• Tier 2 — SAM 3 concept segmentation: 840.5M params, ~4,175 GFLOPs/frame — open-vocabulary masks",),
+        ("• NLQ — Claude API / Ollama / Skippy: 3B–8B int4 models — natural-language questions over the metadata",),
+        ("• Store — SQLite + FTS5 + optional vector embeddings — drives the /api/events search endpoint",),
+    ], font_size=13)
 
 
 def slide_sam3_reference(prs: Presentation, ref_data: dict):
     """Slide 3: SAM 3 reference architecture breakdown."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
+    slide = new_slide(prs)
 
     summary = ref_data.get("model_summary", {})
     total_gflops = summary.get("total_gflops", 0)
     total_params = summary.get("total_params", 0)
     num_layers = len(ref_data.get("layers", []))
 
-    add_title_bar(slide, "SAM 3 Reference Architecture",
-                  f"{total_params/1e6:.0f}M params  |  {total_gflops:.0f} GFLOPs  |  {num_layers} layers")
+    add_title_subtitle(slide, "SAM 3 Reference Architecture",
+                       f"{total_params/1e6:.0f}M params  •  {total_gflops:.0f} GFLOPs  •  {num_layers} layers")
 
     fig = build_sam3_flop_breakdown(ref_data)
     if fig:
         img_stream = fig_to_image_stream(fig)
-        slide.shapes.add_picture(img_stream, Inches(0.2), Inches(1.4),
-                                  width=Inches(9.6))
+        slide.shapes.add_picture(img_stream, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                                  width=Inches(CONTENT_W))
 
-    # Component table
     components = ref_data.get("model_summary", {}).get("components", {})
     if components:
         headers = ["Component", "Params", "Role"]
-        rows = []
-        for name, info in components.items():
-            rows.append([
-                name.replace("_", " ").title(),
-                f"{info['params_m']}M",
-                info["role"],
-            ])
-        add_styled_table(slide, Inches(0.5), Inches(4.5), Inches(9), Inches(1.2),
+        rows = [[name.replace("_", " ").title(), f"{info['params_m']}M", info["role"]]
+                for name, info in components.items()]
+        add_styled_table(slide, Inches(CONTENT_LEFT), Inches(5.2),
+                         Inches(CONTENT_W), Inches(1.4),
                          headers, rows,
-                         col_widths=[Inches(2), Inches(1), Inches(6)])
+                         col_widths=[Inches(2.5), Inches(1.3), Inches(8.5)])
 
 
 def slide_roofline(prs: Presentation, targets: dict, sam3_ref: Optional[dict]):
     """Slide 4: Roofline model."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-    add_title_bar(slide, "Roofline Model — Compute vs Bandwidth",
-                  "Workload placement determines bottleneck on each hardware target")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Roofline Model — Compute vs Bandwidth",
+                       "Workload placement determines the bottleneck on each hardware target")
 
     fig = build_roofline_chart(targets, sam3_ref)
     img_stream = fig_to_image_stream(fig)
-    slide.shapes.add_picture(img_stream, Inches(0.1), Inches(1.3),
-                              width=Inches(9.8))
+    # Center the chart at ~9" wide so it doesn't collide with the bullet box.
+    slide.shapes.add_picture(img_stream, Inches(2.2), Inches(CONTENT_TOP),
+                              width=Inches(9.0))
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.5, CONTENT_W, 1.4, [
+        ("Reading the chart", C.ACCENT_BLUE, True),
+        "• SAM 3 PE sits high on the bandwidth ramp — memory-bandwidth-bound on every target",
+        "• YOLO 11x is past the ridge point — compute-bound, not traffic-bound",
+        "• Edge bandwidth gap (RTX 5090 → Edge MPU Target) is ~15×; compute gap is only ~1.2×",
+    ], font_size=12)
 
 
 def slide_run_results(prs: Presentation, run: dict, run_index: int):
     """Per-run result slide with profiling data."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
+    slide = new_slide(prs)
 
     video = run.get("video", {})
     video_name = video.get("name", "unknown")
@@ -615,33 +706,24 @@ def slide_run_results(prs: Presentation, run: dict, run_index: int):
     width = video.get("width", 0)
     height = video.get("height", 0)
 
-    # Determine resolution label
-    if height >= 2160:
-        res_label = "4K"
-    elif height >= 1080:
-        res_label = "1080p"
-    elif height >= 720:
-        res_label = "720p"
-    elif height > 0:
-        res_label = f"{height}p"
-    else:
-        res_label = "?"
+    if height >= 2160: res_label = "4K"
+    elif height >= 1080: res_label = "1080p"
+    elif height >= 720: res_label = "720p"
+    elif height > 0: res_label = f"{height}p"
+    else: res_label = "?"
 
-    # Determine pipeline mode
     is_single_pass = run.get("pipeline", {}).get("single_pass", False)
-    mode_label = "Single-Pass" if is_single_pass else ("Detect Only" if run.get("pipeline", {}).get("detect_only") else "YOLO+SAM3")
+    mode_label = ("Single-Pass" if is_single_pass
+                  else ("Detect Only" if run.get("pipeline", {}).get("detect_only") else "YOLO+SAM3"))
 
-    add_title_bar(slide, f"Test Run: {video_name} ({res_label})",
-                  f"{width}x{height} | {mode_label} | {video.get('extract_fps', '?')} FPS extraction | Run: {run_id}")
+    add_title_subtitle(slide, f"Test Run — {video_name} ({res_label})",
+                       f"{width}x{height}  •  {mode_label}  •  {video.get('extract_fps', '?')} FPS extraction  •  Run: {run_id}")
 
     yolo = run.get("yolo", {})
     sam3 = run.get("sam3", {})
     pipeline = run.get("pipeline", {})
 
-    # YOLO results
-    add_text_box(slide, Inches(0.5), Inches(1.4), Inches(4), Inches(0.4),
-                 "YOLO 11x Detection", font_size=16, color=C.ACCENT_GREEN, bold=True)
-
+    # Two side-by-side tables: YOLO + SAM 3
     yolo_rows = [
         ["Model", yolo.get("model", "yolo11x.pt")],
         ["Avg Inference", f"{yolo.get('avg_ms', 0):.1f} ms"],
@@ -649,46 +731,32 @@ def slide_run_results(prs: Presentation, run: dict, run_index: int):
         ["P99 Latency", f"{yolo.get('p99_ms', 0):.1f} ms"],
         ["Parameters", f"{yolo.get('params_m', 0):.1f}M"],
     ]
-    add_styled_table(slide, Inches(0.5), Inches(1.9), Inches(4), Inches(1.8),
-                     ["Metric", "Value"], yolo_rows,
-                     col_widths=[Inches(2), Inches(2)])
-
-    # SAM 3 results
-    add_text_box(slide, Inches(5.2), Inches(1.4), Inches(4), Inches(0.4),
-                 "SAM 3 Enrichment", font_size=16, color=C.ACCENT_ORANGE, bold=True)
-
-    sam3_model = sam3.get("model", "not loaded")
     sam3_rows = [
-        ["Model", sam3_model],
+        ["Model", sam3.get("model", "not loaded")],
         ["Avg Enrichment", f"{sam3.get('avg_enrichment_ms', 0):.0f} ms"],
         ["P95 Latency", f"{sam3.get('p95_enrichment_ms', 0):.0f} ms"],
         ["Parameters", f"{sam3.get('model_params_m', 0):.1f}M"],
         ["Frames Profiled", str(sam3.get("total_frames", 0))],
     ]
-    add_styled_table(slide, Inches(5.2), Inches(1.9), Inches(4.3), Inches(1.8),
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP), Inches(6), Inches(0.4),
+                 "YOLO 11x Detection", font_size=14, color=C.ACCENT_GREEN, bold=True)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.85),
+                     Inches(6), Inches(2.0),
+                     ["Metric", "Value"], yolo_rows,
+                     col_widths=[Inches(2.3), Inches(3.7)])
+
+    add_text_box(slide, Inches(6.8), Inches(CONTENT_TOP), Inches(6), Inches(0.4),
+                 "SAM 3 Enrichment", font_size=14, color=C.ACCENT_ORANGE, bold=True)
+    add_styled_table(slide, Inches(6.8), Inches(1.85),
+                     Inches(6), Inches(2.0),
                      ["Metric", "Value"], sam3_rows,
-                     col_widths=[Inches(2.2), Inches(2.1)])
+                     col_widths=[Inches(2.3), Inches(3.7)])
 
-    # Pipeline summary
-    add_text_box(slide, Inches(0.5), Inches(4.0), Inches(9), Inches(0.4),
-                 "Pipeline Summary", font_size=16, color=C.ACCENT_BLUE, bold=True)
-
-    pipe_rows = [
-        ["Total Frames", str(pipeline.get("total_frames", 0))],
-        ["Total Detections", str(pipeline.get("total_detections", 0))],
-        ["Pipeline Time", f"{pipeline.get('total_seconds', 0):.1f}s"],
-        ["Throughput", f"{pipeline.get('fps', 0):.2f} FPS"],
-        ["Detect Only", str(pipeline.get("detect_only", False))],
-    ]
-    add_styled_table(slide, Inches(0.5), Inches(4.5), Inches(9), Inches(1.3),
-                     ["Metric", "Value", "Metric", "Value", "Metric"],
-                     # Flatten to single row table
-                     [],
-    )
-    # Actually use a simpler approach — two-column table
-    slide.shapes[-1]._element.getparent().remove(slide.shapes[-1]._element)
-
-    add_styled_table(slide, Inches(0.5), Inches(4.5), Inches(9), Inches(1.2),
+    # Pipeline summary — single-row wide table
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(4.2), Inches(CONTENT_W), Inches(0.4),
+                 "Pipeline Summary", font_size=14, color=C.ACCENT_BLUE, bold=True)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(4.65),
+                     Inches(CONTENT_W), Inches(1.1),
                      ["Frames", "Detections", "Pipeline Time", "Throughput", "Mode"],
                      [[
                          str(pipeline.get("total_frames", 0)),
@@ -701,166 +769,121 @@ def slide_run_results(prs: Presentation, run: dict, run_index: int):
 
 def slide_npu_projections(prs: Presentation, run: dict, targets: dict):
     """NPU projection slide for a given run."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
+    slide = new_slide(prs)
 
     video_name = run.get("video", {}).get("name", "unknown")
-    add_title_bar(slide, "Edge NPU Projections",
-                  f"Based on: {video_name}  |  Measured on RTX 5090, projected to edge targets")
+    add_title_subtitle(slide, "Edge NPU Projections",
+                       f"{video_name}  •  Measured on RTX 5090, projected to edge targets")
 
     projections = project_for_deck(run, targets)
 
-    headers = ["Target", "TOPS", "BW (GB/s)", "YOLO", "SAM 3",
-               "Combined", "FPS", "1 FPS?", "5 FPS?", "TDP"]
+    headers = ["Target", "TOPS", "BW (GB/s)", "YOLO", "SAM 3", "Combined", "FPS",
+               "1 FPS?", "5 FPS?", "TDP"]
     rows = []
     for p in projections:
         rows.append([
-            p["target"],
-            f"{p['tops']:.0f}",
-            f"{p['bw_gbs']:.0f}",
-            f"{p['yolo_projected_ms']:.1f}ms",
-            f"{p['sam3_projected_ms']:.1f}ms",
-            f"{p['combined_ms']:.1f}ms",
-            f"{p['combined_fps']:.0f}",
+            p["target"], f"{p['tops']:.0f}", f"{p['bw_gbs']:.0f}",
+            f"{p['yolo_projected_ms']:.1f}ms", f"{p['sam3_projected_ms']:.1f}ms",
+            f"{p['combined_ms']:.1f}ms", f"{p['combined_fps']:.0f}",
             "YES" if p["feasible_1fps"] else "NO",
             "YES" if p["feasible_5fps"] else "NO",
             f"{p['tdp_w']:.0f}W",
         ])
 
-    add_styled_table(slide, Inches(0.3), Inches(1.5), Inches(9.4), Inches(1.5),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(1.8),
                      headers, rows)
 
-    # Key insight callout
     edge_mpu = next((p for p in projections if p["target_key"] == "edge_mpu"), None)
+    items = [("Key finding — Edge MPU Target", C.ACCENT_GREEN, True)]
     if edge_mpu:
-        bottleneck = edge_mpu["sam3_bottleneck"]
-        insight = (
-            f"Edge MPU Target: {edge_mpu['combined_ms']:.1f}ms combined "
-            f"({edge_mpu['combined_fps']:.0f} FPS)  |  "
-            f"SAM 3 is {bottleneck}-bound  |  "
-            f"{'FEASIBLE' if edge_mpu['feasible_1fps'] else 'NOT FEASIBLE'} at 1 FPS extraction  |  "
-            f"{'FEASIBLE' if edge_mpu['feasible_5fps'] else 'NOT FEASIBLE'} at 5 FPS extraction"
-        )
-
-        box = slide.shapes.add_shape(
-            MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(0.5), Inches(3.5), Inches(9), Inches(1.0),
-        )
-        box.fill.solid()
-        box.fill.fore_color.rgb = RGBColor(0x0D, 0x2B, 0x0D)
-        box.line.color.rgb = C.ACCENT_GREEN
-        box.line.width = Pt(2)
-
-        tf = box.text_frame
-        tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = "KEY FINDING"
-        p.font.size = Pt(12)
-        p.font.color.rgb = C.ACCENT_GREEN
-        p.font.bold = True
-        p.font.name = "Segoe UI"
-
-        p2 = tf.add_paragraph()
-        p2.text = insight
-        p2.font.size = Pt(11)
-        p2.font.color.rgb = C.TEXT_BRIGHT
-        p2.font.name = "Segoe UI"
+        feasible_1 = "FEASIBLE" if edge_mpu["feasible_1fps"] else "NOT FEASIBLE"
+        feasible_5 = "FEASIBLE" if edge_mpu["feasible_5fps"] else "NOT FEASIBLE"
+        items.extend([
+            f"• Combined latency: {edge_mpu['combined_ms']:.1f} ms  →  {edge_mpu['combined_fps']:.0f} FPS",
+            f"• SAM 3 is {edge_mpu['sam3_bottleneck']}-bound on this hardware",
+            (f"• 1 FPS extraction: {feasible_1}",
+             C.FEASIBLE if edge_mpu["feasible_1fps"] else C.NOT_FEASIBLE, True),
+            (f"• 5 FPS extraction: {feasible_5}",
+             C.FEASIBLE if edge_mpu["feasible_5fps"] else C.NOT_FEASIBLE, True),
+        ])
+    add_bullet_box(slide, CONTENT_LEFT, 3.6, CONTENT_W, 2.8, items, font_size=12)
 
 
 def slide_run_comparison(prs: Presentation, runs: list[dict], targets: dict):
     """Comparison chart across all runs."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-    add_title_bar(slide, "Run Comparison",
-                  f"{len(runs)} test runs  |  Inference latency on RTX 5090")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Run Comparison",
+                       f"{len(runs)} test runs  •  Inference latency on RTX 5090")
 
     fig = build_latency_comparison_chart(runs, targets)
     if fig:
         img_stream = fig_to_image_stream(fig)
-        slide.shapes.add_picture(img_stream, Inches(0.1), Inches(1.3),
-                                  width=Inches(9.8))
+        slide.shapes.add_picture(img_stream, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                                  width=Inches(CONTENT_W))
 
 
 def slide_bandwidth_wall(prs: Presentation):
     """Slide: Why SAM 3 hits a bandwidth wall on edge hardware."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, C.BG_DARK)
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "The Bandwidth Wall",
+                       "SAM 3 is deeply memory-bandwidth-bound — TOPS don't matter")
 
-    add_title_bar(slide, "The Bandwidth Wall",
-                  "SAM 3 is deeply memory-bandwidth-bound — TOPS don't matter")
-
-    lines = [
-        ("MEASURED: RTX 5090 (209 TOPS, 1792 GB/s, 72 MB L2 cache)", C.ACCENT_BLUE, True),
-        ("  GPU kernel time: 102ms   |   Wall clock: 107ms   |   CPU overhead: only 5ms", C.TEXT_BRIGHT, False),
-        ("  Theoretical compute floor (350 GFLOPs / 146 TOPS): 2.4ms", C.TEXT_DIM, False),
-        ("  Actual GPU time: 102ms  =  42x longer than compute-only", C.ACCENT_ORANGE, True),
-        ("  The GPU spends 98% of its time waiting for memory, not computing", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("WHY: Transformer activations stream through VRAM every layer", C.ACCENT_BLUE, True),
-        ("  840M params  |  3.71 GB peak activations  |  ~147 GB total memory traffic per frame", C.TEXT_BRIGHT, False),
-        ("  Arithmetic intensity: ~2 FLOPs/byte (ridge point: 117 FLOPs/byte)", C.TEXT_DIM, False),
-        ("  Even the 5090's 72 MB L2 cache can't absorb this — activations are too large", C.ACCENT_ORANGE, False),
-        ("", C.TEXT_DIM, False),
-        ("EDGE PROJECTION: Edge MPU Target (200 TOPS, 134.4 GB/s, ~4 MB SRAM)", C.ACCENT_BLUE, True),
-        ("  Bandwidth ratio: 1523 / 101 = 15.1x less bandwidth than RTX 5090", C.TEXT_BRIGHT, False),
-        ("  Projected: ~2,400ms per frame (0.4 FPS)  |  14x slowdown", C.NOT_FEASIBLE, True),
-        ("  200 TOPS is irrelevant — compute is only 2% of total time", C.TEXT_DIM, False),
-        ("  Memory capacity: 7.07 GB peak vs 8 GB total = no headroom", C.ACCENT_ORANGE, False),
-    ]
-
-    for i, (text, color, bold) in enumerate(lines):
-        if text:
-            add_text_box(slide, Inches(0.6), Inches(1.5 + i * 0.33),
-                         Inches(8.8), Inches(0.33),
-                         text, font_size=11, color=color, bold=bold)
+    add_bullet_box(slide, CONTENT_LEFT, CONTENT_TOP, CONTENT_W, 5.4, [
+        ("MEASURED on RTX 5090 (209 TOPS, 1792 GB/s, 72 MB L2 cache)", C.ACCENT_BLUE, True),
+        "• GPU kernel time 102 ms  •  wall clock 107 ms  •  CPU overhead only 5 ms",
+        ("• Theoretical compute floor (350 GFLOPs / 146 TOPS effective): 2.4 ms", C.TEXT_DIM),
+        ("• Actual GPU time is 42× longer than the compute-only floor", C.ACCENT_ORANGE, True),
+        ("• 98% of GPU time is spent waiting on memory, not computing", C.TEXT_DIM),
+        "",
+        ("WHY — transformer activations stream through VRAM every layer", C.ACCENT_BLUE, True),
+        "• 840M params  •  3.71 GB peak activations  •  ~147 GB total memory traffic per frame",
+        ("• Arithmetic intensity ~2 FLOPs/byte (ridge point on 5090: 117 FLOPs/byte)", C.TEXT_DIM),
+        ("• Even the 5090's 72 MB L2 cache can't absorb the activation stream", C.ACCENT_ORANGE),
+        "",
+        ("EDGE PROJECTION — Edge MPU Target (200 TOPS, 134.4 GB/s, ~4 MB SRAM)", C.ACCENT_BLUE, True),
+        "• Bandwidth ratio: 1523 / 101 = 15.1× less bandwidth than RTX 5090",
+        ("• Projected ~2,400 ms per frame (0.4 FPS) — a 14× slowdown",
+         C.NOT_FEASIBLE, True),
+        ("• 200 TOPS is irrelevant here — compute is only 2% of total time", C.TEXT_DIM),
+        ("• Memory capacity: 7.07 GB peak vs 8 GB total DRAM — no headroom", C.ACCENT_ORANGE),
+    ], font_size=12)
 
 
 def slide_bandwidth_requirements(prs: Presentation):
     """Slide: Required bandwidth for target framerates."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-
-    add_title_bar(slide, "Required Memory Bandwidth for Real-Time SAM 3",
-                  "~147 GB memory traffic per frame at 1080p, 9 concept prompts")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Required Memory Bandwidth for Real-Time SAM 3",
+                       "~147 GB memory traffic per frame at 1080p, 9 concept prompts")
 
     headers = ["Target FPS", "Time Budget", "Required BW (eff)", "Required BW (raw)",
                "Memory Tech", "Feasible at 25W?"]
     rows = [
-        ["1 FPS",  "1000ms", "147 GB/s",   "196 GB/s",   "256-bit LPDDR5X", "Possible"],
-        ["5 FPS",  "200ms",  "735 GB/s",   "980 GB/s",   "HBM2e or 512-bit", "Difficult"],
-        ["10 FPS", "100ms",  "1,470 GB/s", "1,960 GB/s", "HBM3 (desktop-class)", "No"],
-        ["24 FPS", "42ms",   "3,528 GB/s", "4,704 GB/s", "Beyond HBM3", "No"],
-        ["30 FPS", "33ms",   "4,414 GB/s", "5,885 GB/s", "Multi-die HBM3e", "No"],
+        ["1 FPS",  "1000 ms", "147 GB/s",   "196 GB/s",   "256-bit LPDDR5X",      "Possible"],
+        ["5 FPS",  "200 ms",  "735 GB/s",   "980 GB/s",   "HBM2e or 512-bit",     "Difficult"],
+        ["10 FPS", "100 ms",  "1,470 GB/s", "1,960 GB/s", "HBM3 (desktop-class)", "No"],
+        ["24 FPS", "42 ms",   "3,528 GB/s", "4,704 GB/s", "Beyond HBM3",          "No"],
+        ["30 FPS", "33 ms",   "4,414 GB/s", "5,885 GB/s", "Multi-die HBM3e",      "No"],
     ]
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(2.4), headers, rows)
 
-    add_styled_table(slide, Inches(0.3), Inches(1.5), Inches(9.4), Inches(2.2),
-                     headers, rows)
-
-    # Current hardware reference
-    ref_lines = [
-        ("Current Hardware Reference:", C.ACCENT_BLUE, True),
-        ("  Edge MPU Target:  134.4 GB/s  (128-bit LPDDR5X)  →  0.4 FPS", C.NOT_FEASIBLE, False),
-        ("  RTX 5090:      1,792 GB/s  (512-bit GDDR7)    →  6.0 FPS", C.TEXT_BRIGHT, False),
-        ("  NVIDIA H200:   4,800 GB/s  (HBM3e)            →  ~33 FPS (Meta's paper: 30ms)", C.ACCENT_GREEN, False),
-        ("", C.TEXT_DIM, False),
-        ("Conclusion: Real-time SAM 3 requires HBM-class bandwidth.", C.ACCENT_ORANGE, True),
-        ("For edge at 25W, the model must change — not the hardware.", C.TEXT_WHITE, True),
-    ]
-
-    for i, (text, color, bold) in enumerate(ref_lines):
-        if text:
-            add_text_box(slide, Inches(0.6), Inches(4.0 + i * 0.35),
-                         Inches(8.8), Inches(0.35),
-                         text, font_size=11, color=color, bold=bold)
+    add_bullet_box(slide, CONTENT_LEFT, 4.2, CONTENT_W, 2.7, [
+        ("Current hardware reference", C.ACCENT_BLUE, True),
+        ("• Edge MPU Target:  134.4 GB/s (128-bit LPDDR5X)  →  0.4 FPS", C.NOT_FEASIBLE),
+        ("• RTX 5090:        1,792 GB/s (512-bit GDDR7)    →  6.0 FPS", C.TEXT_BRIGHT),
+        ("• NVIDIA H200:     4,800 GB/s (HBM3e)            →  ~33 FPS (matches Meta's 30 ms report)", C.ACCENT_GREEN),
+        "",
+        ("Conclusion — real-time SAM 3 requires HBM-class bandwidth.", C.ACCENT_ORANGE, True),
+        ("For edge at 25 W, the model must change — not the hardware.", C.TEXT_WHITE, True),
+    ], font_size=12)
 
 
 def slide_prompt_scaling(prs: Presentation):
     """Slide: How concept prompt count affects performance."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-
-    add_title_bar(slide, "Prompt Count Scaling — Decoder Cost Is Linear",
-                  "Vision encoder is fixed cost (~70ms); each concept prompt adds ~6ms in decoder")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Prompt Count Scaling — Decoder Cost Is Linear",
+                       "Vision encoder is fixed cost (~70 ms); each concept prompt adds ~6 ms in decoder")
 
     # Measured data table
     headers = ["Concepts", "RTX 5090", "FPS", "Edge Projected", "Edge FPS", "Example Prompts"]
@@ -870,7 +893,8 @@ def slide_prompt_scaling(prs: Presentation):
         ["9 (current)", "121ms", "8.3", "~1,791ms", "0.6", "person, vehicle, car, truck, ..."],
         ["18", "177ms", "5.7", "~2,618ms", "0.4", "full concept set + accessories"],
     ]
-    add_styled_table(slide, Inches(0.3), Inches(1.4), Inches(9.4), Inches(1.7),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(1.5),
                      headers, rows)
 
     # Cost breakdown chart
@@ -912,169 +936,118 @@ def slide_prompt_scaling(prs: Presentation):
 
     fig.tight_layout(pad=1.5)
     img_stream = fig_to_image_stream(fig)
-    slide.shapes.add_picture(img_stream, Inches(0.2), Inches(3.3), width=Inches(9.6))
+    # Shrink chart to 10" wide centered so the takeaway fits under it
+    slide.shapes.add_picture(img_stream, Inches(1.7), Inches(3.2),
+                             width=Inches(10.0))
 
-    # Key insight
-    add_text_box(slide, Inches(0.5), Inches(6.5), Inches(9), Inches(0.5),
-                 "Vision encoder (~70ms) is the hard floor. Even 1 prompt → 1,068ms on edge. "
-                 "Prompt tuning helps on desktop (14 FPS) but cannot fix the edge bandwidth gap.",
-                 font_size=10, color=C.ACCENT_ORANGE, bold=True)
+    add_bullet_box(slide, CONTENT_LEFT, 6.35, CONTENT_W, 0.6, [
+        ("Takeaway — vision encoder (~70 ms) is the hard floor. Even 1 prompt = 1,068 ms on edge; "
+         "prompt tuning helps on desktop (14 FPS) but can't close the edge bandwidth gap.",
+         C.ACCENT_ORANGE, True),
+    ], font_size=11)
 
 
 def slide_quantization_tested(prs: Presentation):
     """Slide: Weight-only INT8 quantization results — doesn't help."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, C.BG_DARK)
-
-    add_title_bar(slide, "Quantization Tested — Weight-Only INT8 Doesn't Help",
-                  "Measured with torchao Int8WeightOnlyConfig on RTX 5090 (9 concepts, 720p)")
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "Quantization Tested — Weight-Only INT8 Doesn't Help",
+                       "Measured with torchao Int8WeightOnlyConfig on RTX 5090 (9 concepts, 720p)")
 
     headers = ["Metric", "BF16 (baseline)", "INT8 Weight-Only", "Delta"]
     rows = [
-        ["Wall clock", "121ms", "121ms", "0% (no change)"],
-        ["GPU kernel time", "102ms", "117ms", "15% SLOWER"],
-        ["Peak VRAM", "7.07 GB", "5.11 GB", "2 GB saved"],
-        ["Edge projection", "1,791ms (0.6 FPS)", "1,731ms (0.6 FPS)", "Negligible"],
+        ["Wall clock",      "121 ms",            "121 ms",            "0% (no change)"],
+        ["GPU kernel time", "102 ms",            "117 ms",            "15% SLOWER"],
+        ["Peak VRAM",       "7.07 GB",           "5.11 GB",           "2 GB saved"],
+        ["Edge projection", "1,791 ms (0.6 FPS)", "1,731 ms (0.6 FPS)", "Negligible"],
     ]
-    add_styled_table(slide, Inches(0.3), Inches(1.4), Inches(9.4), Inches(1.5),
-                     headers, rows)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(1.5), headers, rows)
 
-    lines = [
-        ("WHY IT DOESN'T HELP:", C.ACCENT_BLUE, True),
-        ("  Weight-only quantization shrinks model params (3.36 GB → 704 MB)", C.TEXT_BRIGHT, False),
-        ("  But activations stay in BF16 — and activations are 98% of bandwidth traffic", C.ACCENT_ORANGE, True),
-        ("  Dequantization overhead (INT8→BF16 per matmul) adds latency", C.TEXT_DIM, False),
-        ("  Lost Meta's fused addmm_act kernel → unfused path is slower", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("WHAT WOULD HELP: Activation quantization (INT8 or FP8 activations)", C.ACCENT_GREEN, True),
-        ("  Would halve the dominant memory traffic between layers", C.TEXT_BRIGHT, False),
-        ("  Edge projection: ~1,700ms → ~850ms (1.2 FPS) — still not real-time", C.ACCENT_ORANGE, False),
-    ]
-
-    for i, (text, color, bold) in enumerate(lines):
-        if text:
-            add_text_box(slide, Inches(0.6), Inches(3.2 + i * 0.30),
-                         Inches(8.8), Inches(0.30),
-                         text, font_size=11, color=color, bold=bold)
+    add_bullet_box(slide, CONTENT_LEFT, 3.2, CONTENT_W, 3.5, [
+        ("Why it doesn't help", C.ACCENT_BLUE, True),
+        "• Weight-only quantization shrinks model params (3.36 GB → 704 MB)",
+        ("• But activations stay in BF16 — and activations are 98% of bandwidth traffic", C.ACCENT_ORANGE, True),
+        ("• Dequantization overhead (INT8 → BF16 per matmul) adds latency", C.TEXT_DIM),
+        ("• Lost Meta's fused addmm_act kernel → unfused path is slower", C.TEXT_DIM),
+        "",
+        ("What WOULD help — activation quantization (INT8 or FP8 activations)", C.ACCENT_GREEN, True),
+        "• Would halve the dominant memory traffic between layers",
+        ("• Edge projection: ~1,700 ms → ~850 ms (1.2 FPS) — still not real-time", C.ACCENT_ORANGE),
+    ], font_size=12)
 
 
 def slide_activation_quant_challenges(prs: Presentation):
     """Slide: Why activation quantization is hard for SAM 3."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-
-    add_title_bar(slide, "Activation Quantization — Why It's Hard for SAM 3",
-                  "The one lever that could halve edge latency, but requires research-grade effort")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Activation Quantization — Why It's Hard for SAM 3",
+                       "The one lever that could halve edge latency, but requires research-grade effort")
 
     headers = ["Challenge", "Impact", "Mitigation"]
     rows = [
         ["Attention score clipping",
-         "INT8 clips outlier scores that encode\n'attend strongly to this location'",
+         "INT8 clips outlier scores that encode 'attend strongly to this location'",
          "FP8 (E4M3) preserves dynamic range"],
         ["Text-vision cross-attention",
-         "Quant errors → false positives, missed\ndetections, concept misclassification",
-         "Per-layer sensitivity analysis,\nmixed-precision (keep critical layers BF16)"],
+         "Quant errors → false positives, missed detections, concept misclassification",
+         "Per-layer sensitivity analysis, mixed-precision"],
         ["Calibration data dependency",
-         "Scale factors derived from cal data;\nmismatch → degraded accuracy",
-         "Diverse calibration set matching\ndeployment distribution"],
+         "Scale factors derived from cal data; mismatch → degraded accuracy",
+         "Diverse calibration set matching deployment distribution"],
         ["Flash Attention 3 incompatibility",
-         "No INT8 flash attention kernel;\nfallback to standard attention = slower",
-         "FP8 flash attention (future),\nor accept unfused penalty"],
+         "No INT8 flash attention kernel; fallback = slower unfused attention",
+         "FP8 flash attention (future), or accept the unfused penalty"],
         ["Not all layers are equal",
-         "LayerNorm outputs, residuals, first/last\nlayers are quantization-sensitive",
-         "Mixed-precision: INT8 bulk matmuls,\nBF16 for sensitive layers"],
+         "LayerNorm outputs, residuals, first/last layers are quantization-sensitive",
+         "Mixed-precision: INT8 bulk matmuls, BF16 for sensitive layers"],
     ]
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(2.6), headers, rows,
+                     col_widths=[Inches(2.8), Inches(5.0), Inches(4.5)])
 
-    add_styled_table(slide, Inches(0.2), Inches(1.4), Inches(9.6), Inches(3.0),
-                     headers, rows,
-                     col_widths=[Inches(2.5), Inches(3.5), Inches(3.6)])
-
-    # Projection box
-    box = slide.shapes.add_shape(
-        MSO_SHAPE.ROUNDED_RECTANGLE,
-        Inches(0.5), Inches(4.7), Inches(9), Inches(2.3),
-    )
-    box.fill.solid()
-    box.fill.fore_color.rgb = RGBColor(0x0D, 0x1A, 0x2B)
-    box.line.color.rgb = C.ACCENT_BLUE
-    box.line.width = Pt(2)
-
-    tf = box.text_frame
-    tf.word_wrap = True
-    p = tf.paragraphs[0]
-    p.text = "EVEN WITH PERFECT ACTIVATION QUANTIZATION"
-    p.font.size = Pt(12)
-    p.font.color.rgb = C.ACCENT_BLUE
-    p.font.bold = True
-    p.font.name = "Segoe UI"
-
-    projections = [
-        "INT8 activations → ~2x traffic reduction → edge: ~850ms (1.2 FPS)",
-        "FP8 activations  → ~2x traffic reduction → edge: ~850ms (1.2 FPS)",
-        "INT4 activations  → ~4x traffic reduction → edge: ~425ms (2.4 FPS) — significant accuracy risk",
+    add_bullet_box(slide, CONTENT_LEFT, 4.3, CONTENT_W, 2.6, [
+        ("Even with perfect activation quantization", C.ACCENT_BLUE, True),
+        ("• INT8 activations  →  ~2× traffic reduction  →  edge: ~850 ms (1.2 FPS)", C.TEXT_BRIGHT),
+        ("• FP8 activations   →  ~2× traffic reduction  →  edge: ~850 ms (1.2 FPS)", C.TEXT_BRIGHT),
+        ("• INT4 activations  →  ~4× traffic reduction  →  edge: ~425 ms (2.4 FPS) — significant accuracy risk", C.TEXT_BRIGHT),
+        ("• None of these reach the 5 FPS (200 ms) budget on 134.4 GB/s LPDDR5X.", C.NOT_FEASIBLE, True),
         "",
-        "None of these reach 5 FPS (200ms budget) on 134.4 GB/s LPDDR5X.",
-        "",
-        "Viable paths to activation quantization today:",
-        "  • SmoothQuant — shifts quant difficulty from activations to weights (proven on LLMs)",
-        "  • FP8 (E4M3) — RTX 5090 supports natively, best accuracy/speed tradeoff",
-        "  • Wait for Meta — official quantized SAM 3 checkpoint would bypass all issues",
-    ]
-    for line in projections:
-        p2 = tf.add_paragraph()
-        p2.text = line
-        p2.font.size = Pt(10)
-        p2.font.name = "Segoe UI"
-        if "None of these" in line:
-            p2.font.color.rgb = C.NOT_FEASIBLE
-            p2.font.bold = True
-        elif line.startswith("  •"):
-            p2.font.color.rgb = C.ACCENT_GREEN
-        elif "→" in line:
-            p2.font.color.rgb = C.TEXT_BRIGHT
-        else:
-            p2.font.color.rgb = C.TEXT_DIM
+        ("Viable paths today", C.ACCENT_GREEN, True),
+        ("• SmoothQuant — shifts quant difficulty from activations to weights (proven on LLMs)", C.ACCENT_GREEN),
+        ("• FP8 (E4M3) — RTX 5090 supports natively, best accuracy/speed tradeoff", C.ACCENT_GREEN),
+        ("• Wait for Meta — an official quantized SAM 3 checkpoint would bypass all these issues", C.ACCENT_GREEN),
+    ], font_size=11)
 
 
 def slide_resolution_lock(prs: Presentation):
     """Slide: Why reducing input resolution doesn't help."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, C.BG_DARK)
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "Resolution Is Locked — Input Size Doesn't Matter",
+                       "SAM 3 internally processes 1008x1008 regardless of input resolution")
 
-    add_title_bar(slide, "Resolution Is Locked — Input Size Doesn't Matter",
-                  "SAM 3 internally processes 1008x1008 regardless of input resolution")
-
-    # Resolution comparison table
-    headers = ["Input Resolution", "Internal Resolution", "ViT Tokens", "Avg Latency (5090)", "Detections/frame"]
+    headers = ["Input Resolution", "Internal Res", "ViT Tokens", "Avg Latency (5090)", "Detections/frame"]
     rows = [
-        ["4K (3840x2160)", "1008x1008", "3,969", "196ms", "37.2"],
-        ["1080p (1920x1080)", "1008x1008", "3,969", "139ms", "35.0"],
-        ["720p (1280x720)", "1008x1008", "3,969", "117ms", "32.1"],
+        ["4K (3840x2160)",    "1008x1008", "3,969", "196 ms", "37.2"],
+        ["1080p (1920x1080)", "1008x1008", "3,969", "139 ms", "35.0"],
+        ["720p (1280x720)",   "1008x1008", "3,969", "117 ms", "32.1"],
     ]
-    add_styled_table(slide, Inches(0.3), Inches(1.5), Inches(9.4), Inches(1.3),
-                     headers, rows)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(1.3), headers, rows)
 
-    lines = [
-        ("WHY: Rotary Position Embeddings (RoPE) are resolution-locked", C.ACCENT_BLUE, True),
-        ("  The ViT uses 2D RoPE pre-computed for a 63x63 token grid (1008/16 = 63)", C.TEXT_BRIGHT, False),
-        ("  Feeding a different resolution → shape mismatch → assertion failure", C.TEXT_DIM, False),
-        ("  The model has rope_interp support but it requires rebuild + retraining", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("WHAT THIS MEANS:", C.ACCENT_BLUE, True),
-        ("  The 16ms savings from 4K→720p is just pre/post processing overhead", C.TEXT_BRIGHT, False),
-        ("  Model compute + memory traffic is IDENTICAL at every input resolution", C.ACCENT_ORANGE, True),
-        ("  Token count (3,969), FLOP count, and activation memory are all fixed", C.TEXT_DIM, False),
-        ("  Only detection accuracy changes (fewer small objects at 720p)", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("IMPLICATION FOR EDGE: Resolution reduction is NOT a viable optimization lever.", C.NOT_FEASIBLE, True),
-        ("  The remaining options are: quantization, fewer params, or a different model.", C.TEXT_WHITE, False),
-    ]
-
-    for i, (text, color, bold) in enumerate(lines):
-        if text:
-            add_text_box(slide, Inches(0.6), Inches(3.1 + i * 0.30),
-                         Inches(8.8), Inches(0.30),
-                         text, font_size=11, color=color, bold=bold)
+    add_bullet_box(slide, CONTENT_LEFT, 3.0, CONTENT_W, 3.9, [
+        ("Why — Rotary Position Embeddings (RoPE) are resolution-locked", C.ACCENT_BLUE, True),
+        "• The ViT uses 2D RoPE pre-computed for a 63x63 token grid (1008/16 = 63)",
+        ("• Feeding a different resolution → shape mismatch → assertion failure", C.TEXT_DIM),
+        ("• rope_interp support exists but requires model rebuild + retraining", C.TEXT_DIM),
+        "",
+        ("What this means", C.ACCENT_BLUE, True),
+        "• The 16 ms savings from 4K → 720p is just pre/post-processing overhead",
+        ("• Model compute + memory traffic are IDENTICAL at every input resolution", C.ACCENT_ORANGE, True),
+        ("• Token count (3,969), FLOPs, and activation memory are all fixed", C.TEXT_DIM),
+        ("• Only detection accuracy changes (fewer small objects at 720p)", C.TEXT_DIM),
+        "",
+        ("Implication — resolution reduction is NOT a viable optimization lever.", C.NOT_FEASIBLE, True),
+        ("Remaining options: quantization, fewer params, or a different model.", C.TEXT_WHITE),
+    ], font_size=12)
 
 
 def slide_model_comparison(prs: Presentation, data_dir: Path):
@@ -1086,11 +1059,9 @@ def slide_model_comparison(prs: Presentation, data_dir: Path):
     with open(comp_path) as f:
         comp = json.load(f)
 
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-
-    add_title_bar(slide, "Speed vs Accuracy — The Model Tradeoff",
-                  "Same 5 frames (720p embedded world), same hardware (RTX 5090)")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Speed vs Accuracy — The Model Tradeoff",
+                       "Same 5 frames (720p embedded world), same hardware (RTX 5090)")
 
     profiles = comp.get("profiles", {})
     headers = ["Model", "Params", "5090 ms", "5090 FPS", "VRAM",
@@ -1101,87 +1072,65 @@ def slide_model_comparison(prs: Presentation, data_dir: Path):
             continue
         p = profiles[key]
         rows.append([
-            p["name"],
-            f"{p['param_count_m']:.0f}M",
-            f"{p['avg_inference_ms']:.0f}",
-            f"{1000/p['avg_inference_ms']:.0f}",
-            f"{p['peak_vram_gb']:.1f}GB",
-            f"{p['avg_detections']:.0f}",
+            p["name"], f"{p['param_count_m']:.0f}M",
+            f"{p['avg_inference_ms']:.0f}", f"{1000/p['avg_inference_ms']:.0f}",
+            f"{p['peak_vram_gb']:.1f}GB", f"{p['avg_detections']:.0f}",
             f"{p['recall_vs_sam3']:.0%}",
-            f"{p['edge_projected_ms']:.0f}",
-            f"{p['edge_fps']:.1f}",
+            f"{p['edge_projected_ms']:.0f}", f"{p['edge_fps']:.1f}",
             p["concept_vocabulary"][:15],
         ])
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(1.8), headers, rows)
 
-    add_styled_table(slide, Inches(0.2), Inches(1.4), Inches(9.6), Inches(1.7),
-                     headers, rows)
-
-    lines = [
-        ("THE TRADEOFF IS NOT SPEED — IT'S CAPABILITY", C.ACCENT_BLUE, True),
-        ("", C.TEXT_DIM, False),
-        ("  SAM 3 (840M): 4M+ concept vocabulary, text-prompted, segmentation masks", C.ACCENT_ORANGE, False),
-        ("    → 'person wearing red jacket carrying backpack near delivery truck'", C.TEXT_DIM, False),
-        ("    → 0.5 FPS on edge (too slow), but irreplaceable concept richness", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("  FastSAM (11-68M): YOLO-based segmentation, 80 COCO classes only", C.ACCENT_GREEN, False),
-        ("    → 'person', 'car', 'dog' — no attributes, no relationships", C.TEXT_DIM, False),
-        ("    → 3-4 FPS on edge, but 0% recall vs SAM 3 (different job entirely)", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("  YOLO 11x (57M): Detection boxes only, no masks, 80 classes", C.TEXT_BRIGHT, False),
-        ("    → 5 FPS on edge, real-time, but no segmentation or concepts", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("CONCLUSION: No smaller model replaces SAM 3's concept understanding.", C.NOT_FEASIBLE, True),
+    add_bullet_box(slide, CONTENT_LEFT, 3.4, CONTENT_W, 3.5, [
+        ("The tradeoff isn't speed — it's capability", C.ACCENT_BLUE, True),
+        "",
+        ("• SAM 3 (840M)  —  4M+ concept vocab, text-prompted, segmentation masks", C.ACCENT_ORANGE),
+        ("    e.g. 'person wearing red jacket carrying backpack near delivery truck'", C.TEXT_DIM),
+        ("    0.5 FPS on edge (too slow), but irreplaceable concept richness", C.TEXT_DIM),
+        ("• FastSAM (11-68M)  —  YOLO-based segmentation, 80 COCO classes only", C.ACCENT_GREEN),
+        ("    'person', 'car', 'dog' — no attributes, no relationships", C.TEXT_DIM),
+        ("    3-4 FPS on edge, but 0% recall vs SAM 3 (different job entirely)", C.TEXT_DIM),
+        ("• YOLO 11x (57M)  —  Detection boxes only, no masks, 80 classes", C.TEXT_BRIGHT),
+        ("    5 FPS on edge, real-time, but no segmentation or concepts", C.TEXT_DIM),
+        "",
+        ("Conclusion — no smaller model replaces SAM 3's concept understanding.", C.NOT_FEASIBLE, True),
         ("The real question: how much concept richness do you actually need?", C.ACCENT_PURPLE, True),
-    ]
-
-    for i, (text, color, bold) in enumerate(lines):
-        if text:
-            add_text_box(slide, Inches(0.5), Inches(3.3 + i * 0.27),
-                         Inches(9), Inches(0.27),
-                         text, font_size=10, color=color, bold=bold)
+    ], font_size=11)
 
 
 def slide_hybrid_v2(prs: Presentation):
     """Slide: Hybrid V2 results — the breakthrough."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, C.BG_DARK)
-
-    add_title_bar(slide, "Hybrid V2: YOLO-Seg + CLIP — The Breakthrough",
-                  "Eliminate MobileSAM entirely. Two models, 33x faster than SAM 3 on edge.")
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "Hybrid V2 — YOLO-Seg + CLIP  —  The Breakthrough",
+                       "Eliminate MobileSAM entirely. Two models, 33x faster than SAM 3 on edge.")
 
     headers = ["Pipeline", "5090 ms", "5090 FPS", "Params", "Edge ms", "Edge FPS", "vs SAM 3"]
     rows = [
-        ["SAM 3 single-pass", "121", "8.3", "840M", "~1,700", "0.6", "baseline"],
-        ["Hybrid V1 (YOLO+SAM+CLIP)", "142", "7.0", "218M", "~200", "5.0", "8.5x"],
-        ["V2 medium-seg + CLIP", "50", "20", "174M", "~65", "15", "26x"],
-        ["V2 small-seg + CLIP", "44", "23", "161M", "~58", "17", "29x"],
-        ["V2 nano-seg + CLIP", "39", "26", "155M", "~51", "20", "33x"],
+        ["SAM 3 single-pass",          "121", "8.3",  "840M", "~1,700", "0.6",  "baseline"],
+        ["Hybrid V1 (YOLO+SAM+CLIP)",  "142", "7.0",  "218M", "~200",   "5.0",  "8.5x"],
+        ["V2 medium-seg + CLIP",       "50",  "20",   "174M", "~65",    "15",   "26x"],
+        ["V2 small-seg + CLIP",        "44",  "23",   "161M", "~58",    "17",   "29x"],
+        ["V2 nano-seg + CLIP",         "39",  "26",   "155M", "~51",    "20",   "33x"],
     ]
-    add_styled_table(slide, Inches(0.2), Inches(1.4), Inches(9.6), Inches(2.0),
-                     headers, rows)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(2.0), headers, rows)
 
-    lines = [
-        ("WHY IT WORKS:", C.ACCENT_BLUE, True),
-        ("  YOLO-seg does detection + segmentation in ONE model pass (3-8ms)", C.TEXT_BRIGHT, False),
-        ("  Eliminates MobileSAM's 95ms image encoder entirely", C.ACCENT_GREEN, False),
-        ("  CLIP batched classification: text features cached, crops batched (25-34ms)", C.TEXT_BRIGHT, False),
-        ("  Total model params: 155-174M vs SAM 3's 840M (5x less memory traffic)", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("EDGE FEASIBILITY:", C.ACCENT_BLUE, True),
-        ("  Nano-seg + CLIP: ~51ms/frame = 20 FPS on 134.4 GB/s LPDDR5X", C.ACCENT_GREEN, True),
-        ("  Fits comfortably in 8 GB DRAM with headroom for OS + runtime", C.TEXT_BRIGHT, False),
-        ("  Models small enough to benefit from on-chip SRAM caching", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("VISUAL QUALITY: Confirmed visually indistinguishable from SAM 3", C.ACCENT_PURPLE, True),
-        ("  YOLO-seg masks + CLIP concept labels match SAM 3 output quality", C.TEXT_DIM, False),
-        ("  Trade-off: 80 COCO classes + CLIP open-vocab vs SAM 3's 4M+ native concepts", C.TEXT_DIM, False),
-    ]
-
-    for i, (text, color, bold) in enumerate(lines):
-        if text:
-            add_text_box(slide, Inches(0.5), Inches(3.6 + i * 0.27),
-                         Inches(9), Inches(0.27),
-                         text, font_size=10, color=color, bold=bold)
+    add_bullet_box(slide, CONTENT_LEFT, 3.7, CONTENT_W, 3.2, [
+        ("Why it works", C.ACCENT_BLUE, True),
+        "• YOLO-seg does detection + segmentation in ONE pass (3-8 ms)",
+        ("• Eliminates MobileSAM's 95 ms image encoder entirely", C.ACCENT_GREEN),
+        "• CLIP batched classification: text features cached, crops batched (25-34 ms)",
+        ("• Total model params: 155-174M vs SAM 3's 840M — 5× less memory traffic", C.TEXT_DIM),
+        "",
+        ("Edge feasibility", C.ACCENT_BLUE, True),
+        ("• Nano-seg + CLIP: ~51 ms/frame = 20 FPS on 134.4 GB/s LPDDR5X", C.ACCENT_GREEN, True),
+        "• Fits comfortably in 8 GB DRAM with headroom for OS + runtime",
+        ("• Models small enough to benefit from on-chip SRAM caching", C.TEXT_DIM),
+        "",
+        ("Visual quality — confirmed indistinguishable from SAM 3", C.ACCENT_PURPLE, True),
+        ("• Trade-off: 80 COCO classes + CLIP open-vocab vs SAM 3's 4M+ native concepts", C.TEXT_DIM),
+    ], font_size=11)
 
 
 def _load_bakeoff_data():
@@ -1222,20 +1171,19 @@ def slide_bakeoff_summary(prs: Presentation):
     if data is None:
         return
 
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, C.BG_DARK)
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "Mask Model Bake-Off — Headline Numbers",
+                       "MobileSAM vs EfficientSAM-Tiny/Small vs YOLO-seg, scored against SAM 3 references")
 
-    add_title_bar(slide, "Mask Model Bake-Off — Headline Numbers",
-                  "MobileSAM vs EfficientSAM-Tiny/Small vs YOLO-seg, scored against SAM 3 references")
-
-    # Table 1: params, VRAM, IoU (one row per contestant)
-    headers = ["Model", "Params", "VRAM@1080p", "IoU @720p", "IoU @1080p", "IoU @4K"]
     display_name = {
-        "mobilesam": "MobileSAM (vit_t)",
-        "efficientsam_tiny": "EfficientSAM-Tiny",
+        "mobilesam":          "MobileSAM (vit_t)",
+        "efficientsam_tiny":  "EfficientSAM-Tiny",
         "efficientsam_small": "EfficientSAM-Small",
-        "yolo_seg": "YOLO-seg (yolo11s-seg)",
+        "yolo_seg":           "YOLO-seg (yolo11s-seg)",
     }
+
+    # Table 1: quality + params
+    headers = ["Model", "Params", "VRAM @1080p", "IoU @720p", "IoU @1080p", "IoU @4K"]
     rows = []
     for name in data["contestants"]:
         c720 = data["per_clip"]["720p"][name]
@@ -1249,14 +1197,15 @@ def slide_bakeoff_summary(prs: Presentation):
             f"{c1080['mean_iou']:.3f}",
             f"{c4k['mean_iou']:.3f}",
         ])
-    add_styled_table(slide, Inches(0.2), Inches(1.3), Inches(9.6), Inches(1.5),
-                     headers, rows)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(1.5), headers, rows)
 
     # Table 2: FPS (5090 measured + edge projection)
-    add_text_box(slide, Inches(0.3), Inches(2.95), Inches(9), Inches(0.3),
-                 "Full-frame FPS (~13 boxes/frame average)", font_size=11,
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.1), Inches(CONTENT_W), Inches(0.3),
+                 "Full-frame FPS (~13 boxes/frame average)", font_size=12,
                  color=C.ACCENT_PURPLE, bold=True)
-    headers2 = ["Model", "5090 @720p", "5090 @1080p", "5090 @4K", "Edge @720p", "Edge @1080p", "Edge @4K"]
+    headers2 = ["Model", "5090 @720p", "5090 @1080p", "5090 @4K",
+                "Edge @720p", "Edge @1080p", "Edge @4K"]
     rows2 = []
     for name in data["contestants"]:
         edge_720 = edge["projections"]["720p"][name]["projected_fps_edge"] if edge else 0
@@ -1267,27 +1216,20 @@ def slide_bakeoff_summary(prs: Presentation):
             f"{data['per_frame_fps']['720p'][name]:.0f}",
             f"{data['per_frame_fps']['1080p'][name]:.0f}",
             f"{data['per_frame_fps']['4K'][name]:.0f}",
-            f"{edge_720:.1f}",
-            f"{edge_1080:.1f}",
-            f"{edge_4k:.1f}",
+            f"{edge_720:.1f}", f"{edge_1080:.1f}", f"{edge_4k:.1f}",
         ])
-    add_styled_table(slide, Inches(0.2), Inches(3.3), Inches(9.6), Inches(1.5),
-                     headers2, rows2)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.4),
+                     Inches(CONTENT_W), Inches(1.4), headers2, rows2)
 
-    lines = [
-        ("KEY FINDINGS:", C.ACCENT_BLUE, True),
-        ("  EfficientSAM-Tiny dominates MobileSAM — same params, ~2-8x faster, slightly higher IoU", C.ACCENT_GREEN, False),
-        ("  EfficientSAM-Small leads quality: 0.91 IoU vs 0.86 for both Tiny and MobileSAM", C.TEXT_BRIGHT, False),
-        ("  YOLO-seg is 3-5x faster than any SAM variant; trades ~0.1 IoU for that speed", C.TEXT_BRIGHT, False),
-        ("  MobileSAM is obsoleted — no reason to pick it over EfficientSAM-Tiny", C.ACCENT_ORANGE, True),
-        ("  EfficientSAM is resolution-invariant per box; MobileSAM latency grows with image area", C.TEXT_DIM, False),
-        ("  Edge projections use emulator's 15%/85% compute/bandwidth split (conservative for conv-heavy YOLO)", C.TEXT_DIM, False),
-    ]
-    for i, (text, color, bold) in enumerate(lines):
-        if text:
-            add_text_box(slide, Inches(0.5), Inches(5.0 + i * 0.28),
-                         Inches(9), Inches(0.28),
-                         text, font_size=11, color=color, bold=bold)
+    add_bullet_box(slide, CONTENT_LEFT, 5.1, CONTENT_W, 1.9, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        ("• EfficientSAM-Tiny dominates MobileSAM — same params, ~2-8× faster, slightly higher IoU", C.ACCENT_GREEN),
+        "• EfficientSAM-Small leads quality: 0.91 IoU vs 0.86 for Tiny and MobileSAM",
+        "• YOLO-seg is 3-5× faster than any SAM variant; trades ~0.1 IoU for that speed",
+        ("• MobileSAM is obsoleted — no reason to pick it over EfficientSAM-Tiny", C.ACCENT_ORANGE, True),
+        ("• EfficientSAM is resolution-invariant per box; MobileSAM latency grows with image area", C.TEXT_DIM),
+        ("• Edge projections use the emulator's 15%/85% compute/bandwidth split (conservative for conv-heavy YOLO)", C.TEXT_DIM),
+    ], font_size=11)
 
 
 def slide_bakeoff_visuals(prs: Presentation):
@@ -1296,18 +1238,18 @@ def slide_bakeoff_visuals(prs: Presentation):
     if not vis_path.exists():
         return
 
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-
-    add_title_bar(slide, "Mask Model Bake-Off — Visual Comparison",
-                  "One frame, 720p: YOLO prompts + SAM 3 reference + four contestants")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Mask Model Bake-Off — Visual Comparison",
+                       "One frame, 720p: YOLO prompts + SAM 3 reference + four contestants")
 
     slide.shapes.add_picture(str(vis_path),
-                             Inches(0.3), Inches(1.3), width=Inches(9.4))
+                             Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                             width=Inches(CONTENT_W))
 
-    add_text_box(slide, Inches(0.3), Inches(6.6), Inches(9.4), Inches(0.4),
-                 "EfficientSAM-Small edges closest to SAM 3; YOLO-seg masks are visibly coarser but fast.",
-                 font_size=11, color=C.ACCENT_PURPLE, bold=True, alignment=PP_ALIGN.CENTER)
+    add_bullet_box(slide, CONTENT_LEFT, 6.4, CONTENT_W, 0.5, [
+        ("EfficientSAM-Small edges closest to SAM 3; YOLO-seg masks are visibly coarser but fast.",
+         C.ACCENT_PURPLE, True),
+    ], font_size=13)
 
 
 def slide_fp8_quantization(prs: Presentation):
@@ -1318,17 +1260,14 @@ def slide_fp8_quantization(prs: Presentation):
     fp8 = json.loads(fp8_path.read_text())
     fp8_proj = fp8.get("fp8_projections", {})
 
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, C.BG_DARK)
-
-    add_title_bar(slide, "FP8 Activation Quantization — Real-World Test",
-                  "Does halving activation traffic actually work on our bake-off winners?")
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "FP8 Activation Quantization — Real-World Test",
+                       "Does halving activation traffic actually work on our bake-off winners?")
 
     display_name = {
         "efficientsam_small": "EfficientSAM-Small",
-        "yolo_seg": "YOLO-seg (yolo11s-seg)",
+        "yolo_seg":           "YOLO-seg (yolo11s-seg)",
     }
-
     headers = ["Model", "Res", "FP8 applied?", "IoU bf16", "IoU FP8", "Δ IoU",
                "Edge FPS bf16", "Edge FPS FP8"]
     rows = []
@@ -1339,174 +1278,104 @@ def slide_fp8_quantization(prs: Presentation):
                 continue
             applied = p.get("fp8_actually_applied", False)
             applied_text = f"YES ({p['n_fp8_weights_swapped']} Linears)" if applied else "NO (Conv2d not supported)"
-            # bf16 edge fps — use the reciprocal of projected_ms_edge_bf16, but that's an off-by-compute-limited
-            # number; simpler to read from the bf16 projection file if present. For consistency here, use
-            # 1000 / (bandwidth_limited_ms_bf16 + compute_limited_ms).
             bw_bf16 = p["bandwidth_limited_ms_bf16"]
             comp = p["compute_limited_ms"]
             edge_bf16_fps = 1000.0 / (comp + bw_bf16) if (comp + bw_bf16) > 0 else 0
             rows.append([
-                display_name[name],
-                res,
-                applied_text,
-                f"{p['mean_iou_bf16']:.3f}",
-                f"{p['mean_iou_fp8']:.3f}",
-                f"{p['iou_delta']:+.3f}",
-                f"{edge_bf16_fps:.1f}",
-                f"{p['projected_fps_edge_fp8']:.1f}",
+                display_name[name], res, applied_text,
+                f"{p['mean_iou_bf16']:.3f}", f"{p['mean_iou_fp8']:.3f}", f"{p['iou_delta']:+.3f}",
+                f"{edge_bf16_fps:.1f}", f"{p['projected_fps_edge_fp8']:.1f}",
             ])
-    add_styled_table(slide, Inches(0.2), Inches(1.3), Inches(9.6), Inches(2.3),
-                     headers, rows)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(2.4), headers, rows)
 
-    lines = [
-        ("KEY FINDINGS:", C.ACCENT_BLUE, True),
-        ("  EfficientSAM-Small: 94 of 95 Linear layers quantized to E4M3 via torchao (PerTensor)", C.TEXT_BRIGHT, False),
-        ("  Quality loss is negligible (< 0.003 IoU) — FP8 activations preserve mask quality", C.ACCENT_GREEN, True),
-        ("  Edge FPS projection doubles: 2.5 -> 4.9 FPS at 720p (halved activation traffic on LPDDR5X)", C.ACCENT_GREEN, True),
-        ("", C.TEXT_DIM, False),
-        ("YOLO-seg — blocked by tool maturity, not by the model:", C.ACCENT_ORANGE, True),
-        ("  torchao 0.17's Float8DynamicActivationFloat8Weight only targets nn.Linear", C.TEXT_BRIGHT, False),
-        ("  YOLO-seg is 100 Conv2d / 0 Linear; no layers were actually quantized", C.TEXT_DIM, False),
-        ("  Conv FP8 needs custom kernels or transformer_engine-style rewrite", C.TEXT_DIM, False),
-        ("", C.TEXT_DIM, False),
-        ("DESKTOP CAVEAT:", C.ACCENT_PURPLE, True),
-        ("  FP8 matmul is slower than bf16 on RTX 5090 (torchao kernel overhead dominates tiny models)", C.TEXT_DIM, False),
-        ("  Desktop latency is NOT predictive — edge silicon's native FP8 MMA will realize the bandwidth win", C.TEXT_DIM, False),
-    ]
-    for i, (text, color, bold) in enumerate(lines):
-        if text:
-            add_text_box(slide, Inches(0.5), Inches(3.8 + i * 0.26),
-                         Inches(9), Inches(0.26),
-                         text, font_size=10, color=color, bold=bold)
+    add_bullet_box(slide, CONTENT_LEFT, 4.0, CONTENT_W, 2.9, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        "• EfficientSAM-Small: 94 of 95 Linear layers quantized to E4M3 via torchao (PerTensor)",
+        ("• Quality loss is negligible (< 0.003 IoU) — FP8 activations preserve mask quality", C.ACCENT_GREEN, True),
+        ("• Edge FPS projection doubles: 2.5 → 4.9 FPS at 720p (halved activation traffic on LPDDR5X)", C.ACCENT_GREEN, True),
+        "",
+        ("YOLO-seg — blocked by tool maturity, not by the model", C.ACCENT_ORANGE, True),
+        "• torchao 0.17's Float8DynamicActivationFloat8Weight only targets nn.Linear",
+        ("• YOLO-seg is 100 Conv2d / 0 Linear — zero layers were actually quantized", C.TEXT_DIM),
+        ("• Conv FP8 needs custom kernels or a transformer_engine-style rewrite", C.TEXT_DIM),
+        "",
+        ("Desktop caveat — desktop latency is NOT predictive of edge.", C.ACCENT_PURPLE, True),
+        ("• RTX 5090 FP8 matmul is slower than bf16 for tiny models (torchao kernel overhead dominates).", C.TEXT_DIM),
+        ("• Edge silicon's native FP8 MMA paths will realize the bandwidth win.", C.TEXT_DIM),
+    ], font_size=11)
 
 
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide)
-
-    add_title_bar(slide, "Optimization Roadmap — Path to Edge Real-Time",
-                  "Model changes required to fit within 134.4 GB/s bandwidth budget")
+    slide = new_slide(prs)
+    add_title_subtitle(slide, "Optimization Roadmap — Path to Edge Real-Time",
+                       "Model changes required to fit within 134.4 GB/s bandwidth budget")
 
     headers = ["Optimization", "Traffic Reduction", "Est. Edge FPS", "Status"]
     rows = [
-        ["SAM 3 BF16, 9 prompts (baseline)", "1x (~147 GB)", "0.4 FPS", "MEASURED"],
-        ["Lower input resolution (720p)", "~1x (no change)", "0.6 FPS", "TESTED — not viable"],
-        ["Reduce internal resolution", "N/A", "N/A", "BLOCKED — RoPE locked"],
-        ["INT8 weight-only quantization", "Weights only (not traffic)", "0.6 FPS", "TESTED — no speedup"],
-        ["Fewer prompts (1 vs 9)", "~0.6x (decoder only)", "0.9 FPS", "TESTED — helps on desktop"],
-        ["INT8 activation quantization", "~2x (halve act traffic)", "~1.2 FPS", "Research-grade effort"],
-        ["FP8 activation (E4M3)", "~2x (halve act traffic)", "~1.2 FPS", "RTX 5090 native, not in SAM 3"],
-        ["INT4 activation quantization", "~4x", "~2.4 FPS", "Significant accuracy risk"],
-        ["EfficientSAM / MobileSAM", "~50-100x (5-50M params)", "~15-30 FPS", "Different model entirely"],
+        ["SAM 3 BF16, 9 prompts (baseline)",  "1× (~147 GB)",               "0.4 FPS",   "MEASURED"],
+        ["Lower input resolution (720p)",     "~1× (no change)",            "0.6 FPS",   "TESTED — not viable"],
+        ["Reduce internal resolution",        "N/A",                        "N/A",       "BLOCKED — RoPE locked"],
+        ["INT8 weight-only quantization",     "Weights only (not traffic)", "0.6 FPS",   "TESTED — no speedup"],
+        ["Fewer prompts (1 vs 9)",            "~0.6× (decoder only)",       "0.9 FPS",   "TESTED — helps on desktop"],
+        ["INT8 activation quantization",      "~2× (halve act traffic)",    "~1.2 FPS",  "Research-grade effort"],
+        ["FP8 activation (E4M3)",             "~2× (halve act traffic)",    "~1.2 FPS",  "Measured on ES-Small"],
+        ["INT4 activation quantization",      "~4×",                        "~2.4 FPS",  "Significant accuracy risk"],
+        ["EfficientSAM / MobileSAM",          "~50-100× (5-50M params)",    "~15-30 FPS","Bake-off completed"],
     ]
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(3.0), headers, rows)
 
-    add_styled_table(slide, Inches(0.3), Inches(1.4), Inches(9.4), Inches(2.8),
-                     headers, rows)
-
-    # Key insight
-    box = slide.shapes.add_shape(
-        MSO_SHAPE.ROUNDED_RECTANGLE,
-        Inches(0.5), Inches(4.5), Inches(9), Inches(2.2),
-    )
-    box.fill.solid()
-    box.fill.fore_color.rgb = RGBColor(0x1A, 0x0D, 0x2B)
-    box.line.color.rgb = C.ACCENT_PURPLE
-    box.line.width = Pt(2)
-
-    tf = box.text_frame
-    tf.word_wrap = True
-    p = tf.paragraphs[0]
-    p.text = "NEXT STEPS (UPDATED)"
-    p.font.size = Pt(13)
-    p.font.color.rgb = C.ACCENT_PURPLE
-    p.font.bold = True
-    p.font.name = "Segoe UI"
-
-    steps = [
-        "1. [DONE] Evaluated EfficientSAM / MobileSAM — ES-Tiny beats MobileSAM; ES-Small tops quality (0.91 IoU)",
-        "2. [DONE] FP8 (E4M3) on ES-Small: 94/95 Linears quantized, IoU -0.002, edge FPS 2.5 -> 4.9 (halved act traffic)",
-        "3. Test SmoothQuant for activation-safe INT8 on the bake-off winners (apply same method, broader op coverage)",
-        "4. [DONE] Hybrid V2: YOLO-seg + CLIP (~20 FPS edge); YOLO-seg alone ~11-13 FPS edge projection",
-        "5. Monitor Meta for official quantized SAM 3 / SAM 3 Lite release",
-        "6. [NEW] YOLO-seg FP8 blocked in torchao (Conv-only model); needs custom kernels or transformer_engine approach",
-    ]
-    for step in steps:
-        p2 = tf.add_paragraph()
-        p2.text = step
-        p2.font.size = Pt(10)
-        p2.font.color.rgb = C.TEXT_BRIGHT
-        p2.font.name = "Segoe UI"
+    add_bullet_box(slide, CONTENT_LEFT, 4.8, CONTENT_W, 2.1, [
+        ("Next steps (updated post-bake-off + FP8)", C.ACCENT_PURPLE, True),
+        ("1. [DONE] EfficientSAM / MobileSAM evaluated — ES-Tiny beats MobileSAM; ES-Small tops quality (0.91 IoU)",),
+        ("2. [DONE] FP8 on ES-Small: 94/95 Linears quantized, ΔIoU -0.002, edge FPS 2.5 → 4.9 (halved act traffic)",),
+        ("3. Test SmoothQuant for activation-safe INT8 on the bake-off winners (broader op coverage than FP8)",),
+        ("4. [DONE] Hybrid V2 (YOLO-seg + CLIP) — ~20 FPS edge; YOLO-seg alone ~11-13 FPS edge projection",),
+        ("5. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
+        ("6. [NEW] YOLO-seg FP8 blocked in torchao (Conv-only); needs custom kernels or transformer_engine",),
+    ], font_size=11)
 
 
 def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
     """Final summary slide with key findings."""
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, C.BG_DARK)
-
-    add_text_box(slide, Inches(0.5), Inches(0.4), Inches(9), Inches(0.6),
-                 "Summary & Key Findings", font_size=28,
-                 color=C.ACCENT_BLUE, bold=True, alignment=PP_ALIGN.CENTER)
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "Summary & Key Findings",
+                       "What Keyhole has proven, tested, and ruled out")
 
     latest_run = runs[-1] if runs else {}
-    projections = project_for_deck(latest_run, targets) if latest_run else []
-    edge_mpu = next((p for p in projections if p["target_key"] == "edge_mpu"), None)
 
-    findings = []
-
+    items = []
     if latest_run:
         sam3_data = latest_run.get("sam3", {})
         sam3_ms = sam3_data.get("avg_inference_ms") or sam3_data.get("avg_enrichment_ms", 0)
         mode = sam3_data.get("mode", "sequential")
         if sam3_ms:
-            findings.append(
-                f"RTX 5090 Measured: SAM 3 {mode} = {sam3_ms:.0f}ms/frame "
-                f"({1000/sam3_ms:.1f} FPS)"
-            )
+            items.append((f"Measured on RTX 5090 — SAM 3 {mode} = {sam3_ms:.0f} ms/frame ({1000/sam3_ms:.1f} FPS)",
+                          C.TEXT_DIM, False))
+            items.append("")
 
-    findings.extend([
+    items += [
+        ("The problem — SAM 3 is deeply memory-bandwidth-bound", C.ACCENT_BLUE, True),
+        "• 840M params, 3.71 GB activations, 98% of GPU time is memory access",
+        ("• Edge projection: ~1,700 ms (0.6 FPS) — not feasible on LPDDR5X", C.NOT_FEASIBLE, True),
         "",
-        "THE PROBLEM: SAM 3 is deeply memory-bandwidth-bound",
-        "  840M params, 3.71 GB activations, 98% of GPU time is memory access",
-        "  Edge projection: ~1,700ms (0.6 FPS) — NOT FEASIBLE on LPDDR5X",
+        ("Tested and ruled out", C.ACCENT_BLUE, True),
+        "• Lower resolution: RoPE locked to 1008x1008 (tokens fixed)",
+        "• Weight-only INT8: no speedup (activations unchanged)",
+        "• Fewer prompts: helps on desktop, encoder floor remains",
         "",
-        "TESTED AND RULED OUT:",
-        "  Lower resolution: RoPE locked to 1008x1008 (tokens fixed)",
-        "  Weight-only INT8: No speedup (activations unchanged)",
-        "  Fewer prompts: Helps on desktop, encoder floor remains",
+        ("Bake-off winners (mask stage, scored vs SAM 3 references)", C.ACCENT_PURPLE, True),
+        "• EfficientSAM-Small — 0.91 IoU, 32 FPS on 5090, ~5 FPS edge (FP8)",
+        "• YOLO-seg-s — 0.78 IoU, 150+ FPS on 5090, ~13 FPS edge",
+        "• MobileSAM obsoleted by EfficientSAM-Tiny on all axes",
         "",
-        "THE SOLUTION: Hybrid V2 (YOLO-seg + CLIP)",
-        "  Two lightweight models replace one massive one",
-        "  YOLO-seg: detection + segmentation in 3-8ms (2.9-22M params)",
-        "  CLIP: open-vocabulary classification in 25-34ms (batched)",
-        "  Visual quality confirmed indistinguishable from SAM 3",
-        "",
-        "RESULT: 20 FPS on edge (33x faster than SAM 3)",
-        "  Nano-seg + CLIP: ~51ms/frame on 134.4 GB/s LPDDR5X",
-        "  Fits in 8 GB with headroom  |  Total: ~155M params",
-    ])
-
-    for i, finding in enumerate(findings):
-        color = C.TEXT_WHITE if finding.strip() else C.TEXT_DIM
-        if finding.startswith("THE PROBLEM") or finding.startswith("TESTED") or finding.startswith("THE SOLUTION") or finding.startswith("RESULT"):
-            color = C.ACCENT_BLUE
-            if "SOLUTION" in finding:
-                color = C.ACCENT_GREEN
-            elif "RESULT" in finding:
-                color = C.FEASIBLE
-        elif "NOT FEASIBLE" in finding:
-            color = C.NOT_FEASIBLE
-        elif "33x faster" in finding or "20 FPS" in finding:
-            color = C.FEASIBLE
-
-        add_text_box(slide, Inches(1), Inches(1.5 + i * 0.38),
-                     Inches(8), Inches(0.38),
-                     finding, font_size=13, color=color)
-
-    # Footer
-    add_text_box(slide, Inches(1), Inches(6.5), Inches(8), Inches(0.3),
-                 "Keyhole  |  TTA — Trust the Awesomeness",
-                 font_size=10, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
+        ("Hybrid V2 — the solution for open-vocabulary pipelines", C.ACCENT_GREEN, True),
+        "• YOLO-seg (3-8 ms) + CLIP (25-34 ms batched) replaces SAM 3 end-to-end",
+        ("• Result: 20 FPS on edge (33× faster than SAM 3) — fits in 8 GB", C.FEASIBLE, True),
+    ]
+    add_bullet_box(slide, CONTENT_LEFT, CONTENT_TOP, CONTENT_W, 5.5, items, font_size=12)
 
 
 # ============================================================
@@ -1540,10 +1409,9 @@ def build_deck(output, runs_dir, data_dir):
     console.print(f"  SAM 3 ref:      {'YES' if sam3_ref else 'NO'}")
     console.print(f"  NPU targets:    {len(targets)}")
 
-    # Build presentation
+    # Build presentation (widescreen 16:9)
     prs = Presentation()
-    prs.slide_width = Inches(10)
-    prs.slide_height = Inches(7.5)
+    set_deck_size(prs)
 
     # Slide 1: Title
     console.print("  Building: Title slide")
@@ -1625,6 +1493,9 @@ def build_deck(output, runs_dir, data_dir):
     # Summary slide
     console.print("  Building: Summary & findings")
     slide_summary(prs, runs, targets)
+
+    # Add consistent footer (project + page number) to every slide
+    finalize_footers(prs)
 
     # Save
     output.parent.mkdir(parents=True, exist_ok=True)
