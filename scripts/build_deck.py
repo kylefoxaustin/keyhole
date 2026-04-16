@@ -1495,6 +1495,57 @@ def slide_yolo_conv_quant(prs: Presentation):
     ], font_size=11)
 
 
+def slide_trt_yolo(prs: Presentation):
+    """Slide: Proper TensorRT FP8 on YOLO-seg — the full unblock."""
+    path = Path("data/output/bakeoff/trt_yolo_edge_projection.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+    proj = data["projections"]
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "TensorRT YOLO-seg — FP8 Unblocked, Real-Time Ceiling Broken",
+                       "TRT 10.16 on RTX 5090 Blackwell: full-model Conv quantization that torchao couldn't reach")
+
+    headers = ["Res", "Recipe", "5090 ms", "Dets", "Box recall", "Matched IoU",
+               "Edge ms", "Edge FPS"]
+    rows = []
+    highlight = []
+    row_i = 0
+    for res in ["720p", "1080p", "4K"]:
+        for recipe in ["fp16", "int8", "fp8"]:
+            p = proj.get(res, {}).get(recipe)
+            if not p or "error" in p:
+                continue
+            row_i += 1
+            rows.append([
+                res, recipe.upper(),
+                f"{p['mean_frame_ms_5090']:.2f}",
+                f"{p.get('n_matched', 0) + p.get('n_fp', 0)}" if recipe != "fp16" else "—",
+                f"{p.get('box_recall', 0):.3f}" if recipe != "fp16" else "1.000",
+                f"{p.get('mean_matched_iou', 0):.3f}" if recipe != "fp16" else "1.000",
+                f"{p['projected_ms_edge']:.1f}",
+                f"{p['projected_fps_edge']:.1f}",
+            ])
+            if res == "720p" and recipe == "fp8":
+                highlight.append(row_i)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(3.1), headers, rows,
+                     highlight_rows=highlight)
+
+    add_bullet_box(slide, CONTENT_LEFT, 4.75, CONTENT_W, 2.4, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        ("• FP8 on YOLO-seg WORKS via TRT 10.16 on Blackwell (SM 12.0). The earlier torchao block was a tool-chain gap, not a fundamental one.", C.ACCENT_GREEN, True),
+        ("• FP8 quality is essentially perfect — 100% box recall, matched IoU 0.998, detections indistinguishable from FP16.", C.ACCENT_GREEN, True),
+        ("• Edge FPS 720p: 18.6 FP16 → 36.8 FP8 (+98%) — nearly doubles; full-model activation halving vs torchao 1×1-only (+27%).",),
+        ("• INT8 via TRT ships too (36.8 FPS) but drops some low-confidence boxes (87-92% recall). FP8's wider range wins on the detection head's logits.", C.ACCENT_AMBER, True),
+        "",
+        ("New full-stack projection (720p Edge MPU)", C.ACCENT_INDIGO, True),
+        ("• Hybrid V2 + 1 Hz CLIP + YOLO-FP8 = 27.2 ms YOLO + 4.9 ms CLIP amortized = ~31 FPS edge  (prior target: 20 FPS — nearly 2×)",),
+        ("• Ceiling now set by CLIP keyframe rate. Push CLIP to lower N (e.g. 2 Hz) → ~30 FPS; push CLIP itself through TRT → higher still.", C.TEXT_DIM),
+    ], font_size=11)
+
+
 def slide_keyframe_debounce(prs: Presentation):
     """Slide: CLIP keyframe debouncing unlocks real-time on Hybrid V2."""
     path = Path("data/output/bakeoff/keyframe_debounce_summary.json")
@@ -1572,12 +1623,13 @@ def slide_optimization_roadmap(prs: Presentation):
         ["Hybrid V2 (YOLO-seg + CLIP) BF16",   "1× (CLIP dominates 22 ms)",  "2.9 FPS",   "MEASURED"],
         ["Hybrid V2 + FP8/INT8 on CLIP",       "~2× on CLIP half",           "4.9 FPS",   "MEASURED (48/72 Linears)"],
         ["Hybrid V2 + CLIP @ 1 Hz (N=30)",      "~30× on CLIP amortized",    "16.0 FPS",  "MEASURED — 93% of YOLO ceiling"],
-        ["YOLO-seg INT8 via 1×1 swap",          "~22% BW savings on YOLO",   "23.8 FPS",  "MEASURED — 49/50 swapped (44% wts)"],
-        ["Hybrid V2 + 1 Hz CLIP + YOLO-INT8",    "stacked",                    "~20 FPS",  "PROJECTED — shipping target"],
+        ["YOLO-seg INT8 via torchao 1×1 swap",   "~22% BW savings on YOLO",   "23.8 FPS",  "MEASURED — 49/50 swapped (44% wts)"],
+        ["YOLO-seg FP8 via TensorRT 10.16",       "~50% on YOLO (full model)", "36.8 FPS",  "MEASURED — recall 1.00, IoU 0.998"],
+        ["Hybrid V2 + 1 Hz CLIP + YOLO-FP8",      "stacked, TRT",               "~31 FPS",  "PROJECTED — full shipping stack"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
                      Inches(CONTENT_W), Inches(3.0), headers, rows,
-                     highlight_rows=[12])  # Hybrid V2 + 1 Hz CLIP + YOLO-INT8 is the full stack
+                     highlight_rows=[13])  # Hybrid V2 + 1 Hz CLIP + YOLO-FP8 is the new full stack
 
     add_bullet_box(slide, CONTENT_LEFT, 4.8, CONTENT_W, 2.1, [
         ("Next steps (updated post-debounce bake-off)", C.ACCENT_PURPLE, True),
@@ -1586,8 +1638,8 @@ def slide_optimization_roadmap(prs: Presentation):
         ("3. [DONE] SmoothQuant / INT8 on ES-Small: plain INT8 matches FP8 (ΔIoU -0.002, edge 2.5→4.9 FPS); SmoothQuant CONVERT blocked by torchao 0.17 API gap",),
         ("4. [DONE] Hybrid V2 CLIP quant: 48/72 Linears, 2.9 → 4.9 FPS edge; FP8 preserves top-1 tags better than INT8",),
         ("5. [DONE] CLIP keyframe debouncing: N=30 (1 Hz CLIP) → 16.0 FPS edge @ 720p — 93% of YOLO-only ceiling; top-3 stability 0.55 at 1-sec gaps",),
-        ("6. [DONE] YOLO-seg Conv-INT8 via torchao 1×1 swap: 49/50 swapped Convs quantized (44% conv wts), box recall 96-98%, edge FPS 18.7 → 23.8",),
-        ("7. [BLOCKED] YOLO-seg Conv-FP8 proper: torchao 0.17 asserts 1×128-scaled activations. Needs TensorRT/transformer_engine/custom kernels",),
+        ("6. [DONE] YOLO-seg Conv-INT8 via torchao 1×1 swap: partial (44% conv wts), edge 18.7 → 23.8 FPS — interim result",),
+        ("7. [DONE] YOLO-seg Conv-FP8 via TensorRT 10.16 on Blackwell: full model, recall 1.00 / IoU 0.998, edge 18.6 → 36.8 FPS (+98%)",),
         ("8. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
     ], font_size=11)
 
@@ -1759,6 +1811,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/yolo_conv_quant_edge_projection.json").exists():
         console.print("  Building: YOLO-seg conv quantization")
         slide_yolo_conv_quant(prs)
+
+    # TRT proper FP8/INT8 on YOLO-seg (real unblock)
+    if Path("data/output/bakeoff/trt_yolo_edge_projection.json").exists():
+        console.print("  Building: TensorRT YOLO FP8/INT8")
+        slide_trt_yolo(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
