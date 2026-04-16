@@ -48,6 +48,8 @@ class C:
     ACCENT_ORANGE = RGBColor(0xFF, 0x8C, 0x00)
     ACCENT_RED = RGBColor(0xFF, 0x44, 0x44)
     ACCENT_PURPLE = RGBColor(0xBB, 0x86, 0xFC)
+    ACCENT_AMBER = RGBColor(0xF5, 0x9E, 0x0B)    # cherry-picked from the Skippy template (storage / projected)
+    ACCENT_INDIGO = RGBColor(0x63, 0x66, 0xF1)   # cherry-picked from the Skippy template (transport / emphasis)
     TEXT_WHITE = RGBColor(0xFF, 0xFF, 0xFF)
     TEXT_DIM = RGBColor(0xAA, 0xAA, 0xCC)
     TEXT_BRIGHT = RGBColor(0xE0, 0xE0, 0xFF)
@@ -121,10 +123,15 @@ def add_title_bar(slide, title, subtitle=None):
 
 
 def add_styled_table(slide, left, top, width, height,
-                     headers, rows, col_widths=None):
-    """Add a table with dark themed styling."""
+                     headers, rows, col_widths=None, highlight_rows=None):
+    """Add a table with dark themed styling.
+
+    highlight_rows: iterable of 1-based row indices to emphasize with the indigo
+    accent fill + bold white text (Skippy-template-style "target row" highlight).
+    """
     num_rows = len(rows) + 1
     num_cols = len(headers)
+    highlight = set(highlight_rows or [])
 
     table_shape = slide.shapes.add_table(
         num_rows, num_cols, left, top, width, height
@@ -151,15 +158,19 @@ def add_styled_table(slide, left, top, width, height,
 
     # Style data rows
     for r_idx, row in enumerate(rows):
-        bg = C.TABLE_ROW_1 if r_idx % 2 == 0 else C.TABLE_ROW_2
+        row_idx = r_idx + 1  # 1-based to match header numbering
+        is_hl = row_idx in highlight
+        bg = C.ACCENT_INDIGO if is_hl else (C.TABLE_ROW_1 if r_idx % 2 == 0 else C.TABLE_ROW_2)
+        fg = C.TEXT_WHITE if is_hl else C.TEXT_BRIGHT
         for c_idx, value in enumerate(row):
-            cell = table.cell(r_idx + 1, c_idx)
+            cell = table.cell(row_idx, c_idx)
             cell.text = str(value)
             cell.fill.solid()
             cell.fill.fore_color.rgb = bg
             for paragraph in cell.text_frame.paragraphs:
                 paragraph.font.size = Pt(10)
-                paragraph.font.color.rgb = C.TEXT_BRIGHT
+                paragraph.font.color.rgb = fg
+                paragraph.font.bold = is_hl
                 paragraph.font.name = "Segoe UI"
                 paragraph.alignment = PP_ALIGN.CENTER
 
@@ -1368,6 +1379,60 @@ def slide_smoothquant(prs: Presentation):
     ], font_size=11)
 
 
+def slide_hybrid_v2_bakeoff(prs: Presentation):
+    """Slide: CLIP quantization on Hybrid V2 — YOLO-seg stays BF16, CLIP gets FP8/INT8."""
+    path = Path("data/output/bakeoff/hybrid_v2_edge_projection.json")
+    if not path.exists():
+        return
+    proj = json.loads(path.read_text()).get("projections", {})
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "Hybrid V2 Bake-off — CLIP Quantization on the Real-Time Path",
+                       "YOLO-seg stays Conv-only / BF16; CLIP's 72 Linears are the quantizable surface")
+
+    headers = ["Res", "Recipe", "CLIP Linears Q'd", "Top-1 agree", "Top-3 Jaccard",
+               "5090 YOLO ms", "5090 CLIP ms", "Edge total ms", "Edge FPS"]
+    rows = []
+    highlight = []
+    row_idx = 0
+    for res in ["720p", "1080p", "4K"]:
+        for recipe in ["bf16", "fp8", "int8"]:
+            p = proj.get(res, {}).get(recipe)
+            if not p:
+                continue
+            row_idx += 1
+            applied = f"{p['n_quantized']} of {p['n_linear']}" if p["actually_applied"] else "—"
+            top1 = f"{p.get('top1_agreement', 0):.3f}" if recipe != "bf16" else "1.000"
+            top3 = f"{p.get('top3_jaccard', 0):.3f}" if recipe != "bf16" else "1.000"
+            rows.append([
+                res, recipe.upper(), applied, top1, top3,
+                f"{p['mean_yolo_ms_5090']:.1f}",
+                f"{p['mean_clip_ms_5090']:.1f}",
+                f"{p['projected_total_ms_edge']:.0f}",
+                f"{p['projected_fps_edge']:.1f}",
+            ])
+            # Highlight the 720p FP8 row as the winning config (best quality-preserving quantized path)
+            if res == "720p" and recipe == "fp8":
+                highlight.append(row_idx)
+
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(3.1), headers, rows,
+                     highlight_rows=highlight)
+
+    add_bullet_box(slide, CONTENT_LEFT, 4.7, CONTENT_W, 2.5, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        "• CLIP — not YOLO — dominates per-frame cost. At 720p: YOLO 4.4 ms vs CLIP 22 ms (5× ratio)",
+        ("• torchao swapped 48 of 72 CLIP Linears (67%) for both FP8 and INT8; remaining 24 are small projection layers skipped by torchao 0.17", C.TEXT_DIM),
+        ("• Edge FPS projection (720p): 2.9 BF16 → 4.9 quantized (+69%) — same win for FP8 and INT8 since both halve CLIP activation bytes", C.ACCENT_GREEN, True),
+        ("• FP8 preserves concept tags better than INT8: 86.8% vs 80.2% top-1 agreement at 720p (FP8's wider dynamic range wins on softmax rankings)", C.ACCENT_AMBER, True),
+        "",
+        ("Reality check on the earlier 20 FPS Hybrid V2 claim", C.ACCENT_ORANGE, True),
+        ("• That number assumed YOLO-dominated cost. Measuring CLIP-every-frame on every detection puts the full pipeline at ~5 FPS edge even after quantization.", C.TEXT_DIM),
+        ("• Path to actual real-time: debounce CLIP to keyframes only. YOLO stays every frame (~13 FPS); CLIP reruns every Nth frame for concept tags.", C.ACCENT_INDIGO, True),
+        ("• YOLO-seg remains BF16 / unquantized — Conv-only, torchao blocked. Custom kernels or transformer_engine required.", C.TEXT_DIM),
+    ], font_size=11)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = new_slide(prs)
@@ -1385,18 +1450,23 @@ def slide_optimization_roadmap(prs: Presentation):
         ["FP8 activation (E4M3)",             "~2× (halve act traffic)",    "~1.2 FPS",  "Measured on ES-Small"],
         ["INT4 activation quantization",      "~4×",                        "~2.4 FPS",  "Significant accuracy risk"],
         ["EfficientSAM / MobileSAM",          "~50-100× (5-50M params)",    "~15-30 FPS","Bake-off completed"],
+        ["Hybrid V2 (YOLO-seg + CLIP) BF16",   "1× (CLIP dominates 22 ms)",  "2.9 FPS",   "MEASURED"],
+        ["Hybrid V2 + FP8/INT8 on CLIP",       "~2× on CLIP half",           "4.9 FPS",   "MEASURED (48/72 Linears)"],
+        ["Hybrid V2 + CLIP keyframe debounce", "~N× (CLIP every Nth frame)", "~13 FPS",   "NEXT — YOLO-bound"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
-                     Inches(CONTENT_W), Inches(3.0), headers, rows)
+                     Inches(CONTENT_W), Inches(3.0), headers, rows,
+                     highlight_rows=[11])  # Hybrid V2 + keyframe debounce is the target
 
     add_bullet_box(slide, CONTENT_LEFT, 4.8, CONTENT_W, 2.1, [
-        ("Next steps (updated post-bake-off + FP8)", C.ACCENT_PURPLE, True),
+        ("Next steps (updated post-bake-off + Hybrid V2 CLIP quant)", C.ACCENT_PURPLE, True),
         ("1. [DONE] EfficientSAM / MobileSAM evaluated — ES-Tiny beats MobileSAM; ES-Small tops quality (0.91 IoU)",),
         ("2. [DONE] FP8 on ES-Small: 94/95 Linears quantized, ΔIoU -0.002, edge FPS 2.5 → 4.9 (halved act traffic)",),
         ("3. [DONE] SmoothQuant / INT8 on ES-Small: plain INT8 matches FP8 (ΔIoU -0.002, edge 2.5→4.9 FPS); SmoothQuant CONVERT blocked by torchao 0.17 API gap",),
-        ("4. [DONE] Hybrid V2 (YOLO-seg + CLIP) — ~20 FPS edge; YOLO-seg alone ~11-13 FPS edge projection",),
-        ("5. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
-        ("6. [NEW] YOLO-seg FP8 blocked in torchao (Conv-only); needs custom kernels or transformer_engine",),
+        ("4. [DONE] Hybrid V2 (YOLO-seg + CLIP): CLIP dominates (22 ms vs YOLO 4.4 ms @ 720p); FP8/INT8 swap 48/72 CLIP Linears → 2.9 → 4.9 FPS edge; FP8 preserves top-1 tags better",),
+        ("5. [NEXT] Debounce CLIP to keyframes — the only path to real-time on Hybrid V2; YOLO stays every frame (~13 FPS)",),
+        ("6. [BLOCKED] YOLO-seg FP8 — Conv-only, torchao skips. Needs custom kernels or transformer_engine",),
+        ("7. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
     ], font_size=11)
 
 
@@ -1552,6 +1622,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/smoothquant_edge_projection.json").exists():
         console.print("  Building: SmoothQuant + INT8")
         slide_smoothquant(prs)
+
+    # Hybrid V2 CLIP-quantization bake-off (only if data present)
+    if Path("data/output/bakeoff/hybrid_v2_edge_projection.json").exists():
+        console.print("  Building: Hybrid V2 CLIP quantization bake-off")
+        slide_hybrid_v2_bakeoff(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
