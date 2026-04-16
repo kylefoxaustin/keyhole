@@ -123,11 +123,14 @@ def add_title_bar(slide, title, subtitle=None):
 
 
 def add_styled_table(slide, left, top, width, height,
-                     headers, rows, col_widths=None, highlight_rows=None):
+                     headers, rows, col_widths=None, highlight_rows=None,
+                     font_size=10, header_font_size=11):
     """Add a table with dark themed styling.
 
     highlight_rows: iterable of 1-based row indices to emphasize with the indigo
     accent fill + bold white text (Skippy-template-style "target row" highlight).
+    font_size: body-cell font size in pt. Drop to 8-9 for dense tables.
+    header_font_size: header-row font size in pt (bold, white).
     """
     num_rows = len(rows) + 1
     num_cols = len(headers)
@@ -150,7 +153,7 @@ def add_styled_table(slide, left, top, width, height,
         cell.fill.solid()
         cell.fill.fore_color.rgb = C.TABLE_HEADER
         for paragraph in cell.text_frame.paragraphs:
-            paragraph.font.size = Pt(11)
+            paragraph.font.size = Pt(header_font_size)
             paragraph.font.color.rgb = C.TEXT_WHITE
             paragraph.font.bold = True
             paragraph.font.name = "Segoe UI"
@@ -168,7 +171,7 @@ def add_styled_table(slide, left, top, width, height,
             cell.fill.solid()
             cell.fill.fore_color.rgb = bg
             for paragraph in cell.text_frame.paragraphs:
-                paragraph.font.size = Pt(10)
+                paragraph.font.size = Pt(font_size)
                 paragraph.font.color.rgb = fg
                 paragraph.font.bold = is_hl
                 paragraph.font.name = "Segoe UI"
@@ -214,10 +217,14 @@ def new_slide(prs: Presentation, bg_color=None, accent_stripe: bool = True):
 
 
 def add_title_subtitle(slide, title, subtitle=None):
-    """Standard title (26pt bold) + subtitle (13pt dim) pair."""
+    """Standard title (22pt bold) + subtitle (13pt dim) pair.
+
+    22pt keeps all current slide titles single-line at 12.3" width; bump to
+    24pt only after verifying against the longest titles in the deck.
+    """
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(TITLE_TOP),
                  Inches(CONTENT_W), Inches(0.6),
-                 title, font_size=26, color=C.ACCENT_BLUE, bold=True)
+                 title, font_size=22, color=C.ACCENT_BLUE, bold=True)
     if subtitle:
         add_text_box(slide, Inches(CONTENT_LEFT), Inches(SUBTITLE_TOP),
                      Inches(CONTENT_W), Inches(0.4),
@@ -257,6 +264,71 @@ def add_bullet_box(slide, left, top, width, height, items,
             r.font.bold = bold
             r.font.name = font_name
     return txBox
+
+
+def add_pipeline_strip(slide, stages: list[str | tuple[str, bool]], top_in: float = 1.2):
+    """Compact 5-stage pipeline state strip for bake-off slides.
+
+    stages: list of 5 entries — either a plain string (normal/dim), or
+    a tuple (label, True) for a highlighted box (what changed on this slide).
+    Used to orient the reader on which component the slide is swapping.
+
+    Occupies vertical band [top_in, top_in + 0.55] in. Bake-off slides should
+    push their main content_top to ~1.85 in to make room.
+    """
+    total_w = CONTENT_W
+    n = len(stages)
+    gap = 0.12
+    arrow_w = 0.22
+    box_w = (total_w - (n - 1) * (gap + arrow_w)) / n
+    box_h = 0.55
+    x = CONTENT_LEFT
+
+    for i, entry in enumerate(stages):
+        if isinstance(entry, tuple):
+            label, highlighted = entry
+        else:
+            label, highlighted = entry, False
+
+        shp = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(x), Inches(top_in), Inches(box_w), Inches(box_h),
+        )
+        if highlighted:
+            shp.fill.solid(); shp.fill.fore_color.rgb = C.ACCENT_INDIGO
+            shp.line.color.rgb = C.ACCENT_INDIGO
+            text_color = C.TEXT_WHITE
+            bold = True
+        else:
+            shp.fill.solid(); shp.fill.fore_color.rgb = C.TABLE_ROW_2
+            shp.line.color.rgb = C.TEXT_DIM
+            text_color = C.TEXT_DIM
+            bold = False
+        shp.line.width = Pt(1.0)
+
+        tf = shp.text_frame
+        tf.word_wrap = True
+        tf.margin_left = Emu(40000); tf.margin_right = Emu(40000)
+        tf.margin_top = Emu(20000); tf.margin_bottom = Emu(20000)
+        tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+        p = tf.paragraphs[0]
+        p.alignment = PP_ALIGN.CENTER
+        r = p.add_run()
+        r.text = label
+        r.font.size = Pt(10)
+        r.font.bold = bold
+        r.font.color.rgb = text_color
+        r.font.name = "Segoe UI"
+
+        if i < n - 1:
+            # Arrow between boxes
+            ar_x = x + box_w + gap / 2
+            ar = add_text_box(slide, Inches(ar_x), Inches(top_in),
+                              Inches(arrow_w), Inches(box_h),
+                              "→", font_size=14, color=C.TEXT_DIM,
+                              alignment=PP_ALIGN.CENTER)
+            ar.text_frame.vertical_anchor = MSO_ANCHOR.MIDDLE
+        x += box_w + gap + arrow_w
 
 
 def add_footer(slide, n: int, total: int):
@@ -734,20 +806,36 @@ def slide_run_results(prs: Presentation, run: dict, run_index: int):
     sam3 = run.get("sam3", {})
     pipeline = run.get("pipeline", {})
 
-    # Two side-by-side tables: YOLO + SAM 3
+    # Per-stage YOLO stats aren't captured in single-pass runs (YOLO + SAM 3
+    # share one forward). Show "—" instead of fake zeros.
+    def _ms(val, fmt=".1f"):
+        return f"{val:{fmt}} ms" if val and val > 0 else "—"
+
+    yolo_avg = yolo.get("avg_ms") or yolo.get("avg_inference_ms")
+    yolo_p95 = yolo.get("p95_ms") or yolo.get("p95_inference_ms")
+    yolo_p99 = yolo.get("p99_ms") or yolo.get("p99_inference_ms")
+    yolo_params = yolo.get("params_m") or yolo.get("model_params_m")
+
     yolo_rows = [
-        ["Model", yolo.get("model", "yolo11x.pt")],
-        ["Avg Inference", f"{yolo.get('avg_ms', 0):.1f} ms"],
-        ["P95 Latency", f"{yolo.get('p95_ms', 0):.1f} ms"],
-        ["P99 Latency", f"{yolo.get('p99_ms', 0):.1f} ms"],
-        ["Parameters", f"{yolo.get('params_m', 0):.1f}M"],
+        ["Model",         yolo.get("model", "yolo11x.pt")],
+        ["Avg Inference", _ms(yolo_avg)],
+        ["P95 Latency",   _ms(yolo_p95)],
+        ["P99 Latency",   _ms(yolo_p99)],
+        ["Parameters",    f"{yolo_params:.1f}M" if yolo_params else "— (folded into SAM 3 single-pass)"],
     ]
+
+    # Accept both enrichment_ms and inference_ms field naming in SAM 3 runs.
+    sam3_avg = sam3.get("avg_enrichment_ms") or sam3.get("avg_inference_ms")
+    sam3_p95 = sam3.get("p95_enrichment_ms") or sam3.get("p95_inference_ms")
+    sam3_p99 = sam3.get("p99_enrichment_ms") or sam3.get("p99_inference_ms")
+
     sam3_rows = [
-        ["Model", sam3.get("model", "not loaded")],
-        ["Avg Enrichment", f"{sam3.get('avg_enrichment_ms', 0):.0f} ms"],
-        ["P95 Latency", f"{sam3.get('p95_enrichment_ms', 0):.0f} ms"],
-        ["Parameters", f"{sam3.get('model_params_m', 0):.1f}M"],
-        ["Frames Profiled", str(sam3.get("total_frames", 0))],
+        ["Model",            sam3.get("model", "not loaded")],
+        ["Avg Enrichment",   _ms(sam3_avg, ".0f")],
+        ["P95 Latency",      _ms(sam3_p95, ".0f")],
+        ["P99 Latency",      _ms(sam3_p99, ".0f")],
+        ["Parameters",       f"{sam3.get('model_params_m', 0):.1f}M" if sam3.get('model_params_m') else "—"],
+        ["Frames Profiled",  str(sam3.get("total_frames", 0))],
     ]
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP), Inches(6), Inches(0.4),
                  "YOLO 11x Detection", font_size=14, color=C.ACCENT_GREEN, bold=True)
@@ -1115,6 +1203,8 @@ def slide_hybrid_v2(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "Hybrid V2 — YOLO-Seg + CLIP  —  The Breakthrough",
                        "Eliminate MobileSAM entirely. Two models, 33x faster than SAM 3 on edge.")
+    add_pipeline_strip(slide, ["FFmpeg", ("YOLO-seg", True), ("CLIP", True),
+                                "SQLite", "NLQ / LLM"])
 
     headers = ["Pipeline", "5090 ms", "5090 FPS", "Params", "Edge ms", "Edge FPS", "vs SAM 3"]
     rows = [
@@ -1124,10 +1214,10 @@ def slide_hybrid_v2(prs: Presentation):
         ["V2 small-seg + CLIP",        "44",  "23",   "161M", "~58",    "17",   "29x"],
         ["V2 nano-seg + CLIP",         "39",  "26",   "155M", "~51",    "20",   "33x"],
     ]
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(2.0), headers, rows)
 
-    add_bullet_box(slide, CONTENT_LEFT, 3.7, CONTENT_W, 3.2, [
+    add_bullet_box(slide, CONTENT_LEFT, 4.2, CONTENT_W, 2.7, [
         ("Why it works", C.ACCENT_BLUE, True),
         "• YOLO-seg does detection + segmentation in ONE pass (3-8 ms)",
         ("• Eliminates MobileSAM's 95 ms image encoder entirely", C.ACCENT_GREEN),
@@ -1185,6 +1275,8 @@ def slide_bakeoff_summary(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "Mask Model Bake-Off — Headline Numbers",
                        "MobileSAM vs EfficientSAM-Tiny/Small vs YOLO-seg, scored against SAM 3 references")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO 11x", ("Mask bake-off", True),
+                                "SQLite", "NLQ / LLM"])
 
     display_name = {
         "mobilesam":          "MobileSAM (vit_t)",
@@ -1208,11 +1300,11 @@ def slide_bakeoff_summary(prs: Presentation):
             f"{c1080['mean_iou']:.3f}",
             f"{c4k['mean_iou']:.3f}",
         ])
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(1.5), headers, rows)
 
     # Table 2: FPS (5090 measured + edge projection)
-    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.1), Inches(CONTENT_W), Inches(0.3),
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.6), Inches(CONTENT_W), Inches(0.3),
                  "Full-frame FPS (~13 boxes/frame average)", font_size=12,
                  color=C.ACCENT_PURPLE, bold=True)
     headers2 = ["Model", "5090 @720p", "5090 @1080p", "5090 @4K",
@@ -1229,10 +1321,10 @@ def slide_bakeoff_summary(prs: Presentation):
             f"{data['per_frame_fps']['4K'][name]:.0f}",
             f"{edge_720:.1f}", f"{edge_1080:.1f}", f"{edge_4k:.1f}",
         ])
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.4),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.9),
                      Inches(CONTENT_W), Inches(1.4), headers2, rows2)
 
-    add_bullet_box(slide, CONTENT_LEFT, 5.1, CONTENT_W, 1.9, [
+    add_bullet_box(slide, CONTENT_LEFT, 5.55, CONTENT_W, 1.5, [
         ("Key findings", C.ACCENT_BLUE, True),
         ("• EfficientSAM-Tiny dominates MobileSAM — same params, ~2-8× faster, slightly higher IoU", C.ACCENT_GREEN),
         "• EfficientSAM-Small leads quality: 0.91 IoU vs 0.86 for Tiny and MobileSAM",
@@ -1252,12 +1344,14 @@ def slide_bakeoff_visuals(prs: Presentation):
     slide = new_slide(prs)
     add_title_subtitle(slide, "Mask Model Bake-Off — Visual Comparison",
                        "One frame, 720p: YOLO prompts + SAM 3 reference + four contestants")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO 11x", ("Mask bake-off", True),
+                                "SQLite", "NLQ / LLM"])
 
     slide.shapes.add_picture(str(vis_path),
-                             Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                             Inches(CONTENT_LEFT), Inches(1.9),
                              width=Inches(CONTENT_W))
 
-    add_bullet_box(slide, CONTENT_LEFT, 6.4, CONTENT_W, 0.5, [
+    add_bullet_box(slide, CONTENT_LEFT, 6.55, CONTENT_W, 0.45, [
         ("EfficientSAM-Small edges closest to SAM 3; YOLO-seg masks are visibly coarser but fast.",
          C.ACCENT_PURPLE, True),
     ], font_size=13)
@@ -1274,6 +1368,9 @@ def slide_fp8_quantization(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "FP8 Activation Quantization — Real-World Test",
                        "Does halving activation traffic actually work on our bake-off winners?")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO 11x",
+                                ("ES-Small / YOLO-seg  •  FP8 test", True),
+                                "SQLite", "NLQ / LLM"])
 
     display_name = {
         "efficientsam_small": "EfficientSAM-Small",
@@ -1297,10 +1394,10 @@ def slide_fp8_quantization(prs: Presentation):
                 f"{p['mean_iou_bf16']:.3f}", f"{p['mean_iou_fp8']:.3f}", f"{p['iou_delta']:+.3f}",
                 f"{edge_bf16_fps:.1f}", f"{p['projected_fps_edge_fp8']:.1f}",
             ])
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(2.4), headers, rows)
 
-    add_bullet_box(slide, CONTENT_LEFT, 4.0, CONTENT_W, 2.9, [
+    add_bullet_box(slide, CONTENT_LEFT, 4.5, CONTENT_W, 2.5, [
         ("Key findings", C.ACCENT_BLUE, True),
         "• EfficientSAM-Small: 94 of 95 Linear layers quantized to E4M3 via torchao (PerTensor)",
         ("• Quality loss is negligible (< 0.003 IoU) — FP8 activations preserve mask quality", C.ACCENT_GREEN, True),
@@ -1328,6 +1425,9 @@ def slide_smoothquant(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "INT8 + SmoothQuant — Activation Quant on the Winners",
                        "Does activation-safe INT8 preserve IoU, and does SmoothQuant smoothing help?")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO 11x",
+                                ("ES-Small / YOLO-seg  •  INT8 + SmoothQuant", True),
+                                "SQLite", "NLQ / LLM"])
 
     display_name = {
         "efficientsam_small": "EfficientSAM-Small",
@@ -1358,13 +1458,13 @@ def slide_smoothquant(prs: Presentation):
                 f"{edge_bf16:.1f}",
                 f"{p['projected_fps_edge_recipe']:.1f}",
             ])
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(2.0), headers, rows)
-    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.55), Inches(CONTENT_W), Inches(0.3),
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(4.05), Inches(CONTENT_W), Inches(0.3),
                  "720p shown; 1080p and 4K yield the same pattern (ΔIoU -0.001 to -0.002, edge FPS doubles on ES-Small).",
                  font_size=10, color=C.TEXT_DIM)
 
-    add_bullet_box(slide, CONTENT_LEFT, 4.0, CONTENT_W, 3.0, [
+    add_bullet_box(slide, CONTENT_LEFT, 4.45, CONTENT_W, 2.55, [
         ("Key findings", C.ACCENT_BLUE, True),
         "• Plain INT8 on ES-Small: 95/95 Linears quantized; ΔIoU -0.002 across resolutions",
         ("• Edge FPS projection matches FP8: 2.5 → 4.9 FPS at 720p (halved activation traffic)", C.ACCENT_GREEN, True),
@@ -1389,6 +1489,8 @@ def slide_hybrid_v2_bakeoff(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "Hybrid V2 Bake-off — CLIP Quantization on the Real-Time Path",
                        "YOLO-seg stays Conv-only / BF16; CLIP's 72 Linears are the quantizable surface")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO-seg", ("CLIP FP8 / INT8", True),
+                                "SQLite", "NLQ / LLM"])
 
     headers = ["Res", "Recipe", "CLIP Linears Q'd", "Top-1 agree", "Top-3 Jaccard",
                "5090 YOLO ms", "5090 CLIP ms", "Edge total ms", "Edge FPS"]
@@ -1415,11 +1517,11 @@ def slide_hybrid_v2_bakeoff(prs: Presentation):
             if res == "720p" and recipe == "fp8":
                 highlight.append(row_idx)
 
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(3.1), headers, rows,
                      highlight_rows=highlight)
 
-    add_bullet_box(slide, CONTENT_LEFT, 4.7, CONTENT_W, 2.5, [
+    add_bullet_box(slide, CONTENT_LEFT, 5.2, CONTENT_W, 1.8, [
         ("Key findings", C.ACCENT_BLUE, True),
         "• CLIP — not YOLO — dominates per-frame cost. At 720p: YOLO 4.4 ms vs CLIP 22 ms (5× ratio)",
         ("• torchao swapped 48 of 72 CLIP Linears (67%) for both FP8 and INT8; remaining 24 are small projection layers skipped by torchao 0.17", C.TEXT_DIM),
@@ -1444,6 +1546,8 @@ def slide_yolo_conv_quant(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "YOLO-seg Conv Quantization — Partial Unblock via 1×1 Swap",
                        "torchao swap_conv2d_1x1_to_linear captures half the layers (44% of conv weights)")
+    add_pipeline_strip(slide, ["FFmpeg", ("YOLO-seg INT8 (torchao 1×1)", True),
+                                "CLIP FP8", "SQLite", "NLQ / LLM"])
 
     headers = ["Res", "Recipe", "1×1 swapped", "Q'd", "% conv wts", "Box recall",
                "Match IoU", "5090 ms", "Edge BF16", "Edge Q", "Edge FPS"]
@@ -1478,11 +1582,11 @@ def slide_yolo_conv_quant(prs: Presentation):
             if res == "720p" and recipe == "int8_1x1_swap":
                 highlight.append(row_i)
 
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(3.3), headers, rows,
                      highlight_rows=highlight)
 
-    add_bullet_box(slide, CONTENT_LEFT, 4.85, CONTENT_W, 2.3, [
+    add_bullet_box(slide, CONTENT_LEFT, 5.35, CONTENT_W, 1.7, [
         ("Key findings", C.ACCENT_BLUE, True),
         "• yolo11s-seg: 100 Conv2d, 0 Linear. Half the Convs are 1×1 (44% of conv weights); these can be swapped to equivalent Linears and quantized.",
         ("• INT8 path works — 49/50 swapped 1×1 Convs quantized, 96-98% box recall, matched IoU 0.986-0.988. Detections essentially unchanged.", C.ACCENT_GREEN, True),
@@ -1506,6 +1610,8 @@ def slide_trt_yolo(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "TensorRT YOLO-seg — FP8 Unblocked, Real-Time Ceiling Broken",
                        "TRT 10.16 on RTX 5090 Blackwell: full-model Conv quantization that torchao couldn't reach")
+    add_pipeline_strip(slide, ["FFmpeg", ("YOLO-seg FP8 (TRT)", True),
+                                "CLIP FP8", "SQLite", "NLQ / LLM"])
 
     headers = ["Res", "Recipe", "5090 ms", "Dets", "Box recall", "Matched IoU",
                "Edge ms", "Edge FPS"]
@@ -1529,11 +1635,11 @@ def slide_trt_yolo(prs: Presentation):
             ])
             if res == "720p" and recipe == "fp8":
                 highlight.append(row_i)
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(3.1), headers, rows,
                      highlight_rows=highlight)
 
-    add_bullet_box(slide, CONTENT_LEFT, 4.75, CONTENT_W, 2.4, [
+    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.85, [
         ("Key findings", C.ACCENT_BLUE, True),
         ("• FP8 on YOLO-seg WORKS via TRT 10.16 on Blackwell (SM 12.0). The earlier torchao block was a tool-chain gap, not a fundamental one.", C.ACCENT_GREEN, True),
         ("• FP8 quality is essentially perfect — 100% box recall, matched IoU 0.998, detections indistinguishable from FP16.", C.ACCENT_GREEN, True),
@@ -1557,6 +1663,8 @@ def slide_trt_clip(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "TensorRT CLIP — Visual Tower Compiled, FP8 Halves Edge Cost",
                        "Completes the Hybrid V2 TRT stack: YOLO-seg FP8 + CLIP ViT-B-32 FP8")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO-seg FP8 (TRT)",
+                                ("CLIP FP8 (TRT)", True), "SQLite", "NLQ / LLM"])
 
     headers = ["Res", "Recipe", "5090 ms", "Top-1 vs BF16",
                "Edge CLIP ms", "CLIP-only FPS"]
@@ -1580,11 +1688,11 @@ def slide_trt_clip(prs: Presentation):
             if res == "720p" and recipe == "fp8":
                 highlight.append(row_i)
 
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(3.1), headers, rows,
                      highlight_rows=highlight)
 
-    add_bullet_box(slide, CONTENT_LEFT, 4.75, CONTENT_W, 2.4, [
+    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.85, [
         ("Key findings", C.ACCENT_BLUE, True),
         ("• CLIP visual TRT-compiled cleanly at FP16 + FP8 (180 MB engine). No QDQ nodes needed — TRT auto-selects FP8 layers.", C.ACCENT_GREEN, True),
         ("• FP8 edge CLIP drops from 29.8 ms (BF16/FP16) to 15.1 ms (+120% CLIP-only FPS).", C.ACCENT_GREEN, True),
@@ -1608,6 +1716,8 @@ def slide_keyframe_debounce(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "CLIP Keyframe Debouncing — Unlocking Real-Time on Hybrid V2",
                        "Run YOLO every frame; CLIP only every Nth. YOLO is the real-time ceiling.")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO-seg", ("CLIP FP8 @ 1 Hz", True),
+                                "SQLite", "NLQ / LLM"])
 
     # Primary table: 720p sweep
     r720 = per_res["720p"]
@@ -1631,17 +1741,17 @@ def slide_keyframe_debounce(prs: Presentation):
             f"{row['eff_edge_fps']:.1f}",
             f"{100 * row['eff_edge_fps'] / ceiling:.0f}%",
         ])
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(2.7), headers, rows,
                      highlight_rows=highlight)
-    add_text_box(slide, Inches(CONTENT_LEFT), Inches(4.2), Inches(CONTENT_W), Inches(0.3),
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(4.7), Inches(CONTENT_W), Inches(0.3),
                  f"720p shown. YOLO-only ceiling: 720p {per_res['720p']['edge_fps_yolo_only']:.1f} FPS  "
                  f"•  1080p {per_res['1080p']['edge_fps_yolo_only']:.1f} FPS  "
                  f"•  4K {per_res['4K']['edge_fps_yolo_only']:.1f} FPS. "
                  f"Same debounce shape at all resolutions.",
                  font_size=10, color=C.TEXT_DIM)
 
-    add_bullet_box(slide, CONTENT_LEFT, 4.65, CONTENT_W, 2.5, [
+    add_bullet_box(slide, CONTENT_LEFT, 5.1, CONTENT_W, 2.0, [
         ("Key findings", C.ACCENT_BLUE, True),
         ("• Debouncing works. 720p edge FPS climbs from 4.9 (N=1) to 16.0 at N=30 (CLIP every 1 s) — 93% of the YOLO-only ceiling", C.ACCENT_GREEN, True),
         "• YOLO-seg is now the real-time ceiling (17.3 FPS @ 720p edge). Further speedup needs Conv-FP8 / custom kernels.",
@@ -1681,21 +1791,18 @@ def slide_optimization_roadmap(prs: Presentation):
         ["Hybrid V2 + 1 Hz CLIP (all TRT)",        "stacked, debounced",         "36 FPS",    "PROJECTED — at YOLO ceiling"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
-                     Inches(CONTENT_W), Inches(3.0), headers, rows,
-                     highlight_rows=[15])  # Full-stack 1 Hz all-TRT is the shipping target
+                     Inches(CONTENT_W), Inches(3.9), headers, rows,
+                     highlight_rows=[15],  # Full-stack 1 Hz all-TRT — shipping target
+                     font_size=9, header_font_size=10)
 
-    add_bullet_box(slide, CONTENT_LEFT, 4.8, CONTENT_W, 2.1, [
-        ("Next steps (updated post-debounce bake-off)", C.ACCENT_PURPLE, True),
-        ("1. [DONE] EfficientSAM / MobileSAM evaluated — ES-Tiny beats MobileSAM; ES-Small tops quality (0.91 IoU)",),
-        ("2. [DONE] FP8 on ES-Small: 94/95 Linears quantized, ΔIoU -0.002, edge FPS 2.5 → 4.9 (halved act traffic)",),
-        ("3. [DONE] SmoothQuant / INT8 on ES-Small: plain INT8 matches FP8 (ΔIoU -0.002, edge 2.5→4.9 FPS); SmoothQuant CONVERT blocked by torchao 0.17 API gap",),
-        ("4. [DONE] Hybrid V2 CLIP quant: 48/72 Linears, 2.9 → 4.9 FPS edge; FP8 preserves top-1 tags better than INT8",),
-        ("5. [DONE] CLIP keyframe debouncing: N=30 (1 Hz CLIP) → 16.0 FPS edge @ 720p — 93% of YOLO-only ceiling; top-3 stability 0.55 at 1-sec gaps",),
-        ("6. [DONE] YOLO-seg Conv-INT8 via torchao 1×1 swap: partial (44% conv wts), edge 18.7 → 23.8 FPS — interim result",),
-        ("7. [DONE] YOLO-seg Conv-FP8 via TensorRT 10.16 on Blackwell: full model, recall 1.00 / IoU 0.998, edge 18.6 → 36.8 FPS (+98%)",),
-        ("8. [DONE] CLIP visual FP8 via TensorRT: edge 29.8 → 15.1 ms (+120% CLIP FPS), top-1 tag agree 0.964",),
-        ("9. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
-    ], font_size=11)
+    add_bullet_box(slide, CONTENT_LEFT, 5.45, CONTENT_W, 1.6, [
+        ("Bake-off sequence — all measurements complete", C.ACCENT_PURPLE, True),
+        ("1-3. ES-Small quantization: FP8 (94/95 Linears) & plain INT8 both halve act traffic → 4.9 FPS edge; SmoothQuant CONVERT blocked by torchao 0.17",),
+        ("4-5. Hybrid V2 CLIP: torchao FP8/INT8 on 48/72 Linears → 4.9 FPS; CLIP @ 1 Hz keyframe debounce → 16 FPS (93% of YOLO ceiling)",),
+        ("6-7. YOLO-seg Conv: torchao 1×1 swap INT8 → 23.8 FPS (partial); TensorRT 10.16 full Conv-FP8 → 36.8 FPS (+98%, recall 1.00)",),
+        ("8. CLIP visual FP8 via TensorRT → 29.8 → 15.1 ms edge (+120% CLIP FPS); full TRT stack projects 36 FPS shipping",),
+        ("9. [OPEN] Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
+    ], font_size=9)
 
 
 def gather_platform_specs() -> dict:
