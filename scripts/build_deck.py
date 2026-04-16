@@ -1698,44 +1698,228 @@ def slide_optimization_roadmap(prs: Presentation):
     ], font_size=11)
 
 
-def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
-    """Final summary slide with key findings."""
+def gather_platform_specs() -> dict:
+    """Read host machine specs directly from /proc, /sys, lscpu, nvidia-smi, and torch."""
+    import subprocess, shutil
+    def _read(path):
+        try:
+            return Path(path).read_text().strip()
+        except Exception:
+            return ""
+    def _sh(cmd):
+        try:
+            r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+            return r.stdout.strip()
+        except Exception:
+            return ""
+
+    # CPU
+    cpu_info = {}
+    lscpu = _sh(["lscpu"])
+    for line in lscpu.splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            cpu_info[k.strip()] = v.strip()
+
+    # RAM
+    meminfo = _read("/proc/meminfo")
+    mem_total_kb = 0
+    for line in meminfo.splitlines():
+        if line.startswith("MemTotal:"):
+            mem_total_kb = int(line.split()[1])
+            break
+    ram_gb = round(mem_total_kb / (1024 * 1024), 0)
+
+    # System / motherboard (no sudo)
+    sys_vendor = _read("/sys/devices/virtual/dmi/id/sys_vendor") or "?"
+    product = _read("/sys/devices/virtual/dmi/id/product_name") or "?"
+    board_vendor = _read("/sys/devices/virtual/dmi/id/board_vendor") or "?"
+    board_name = _read("/sys/devices/virtual/dmi/id/board_name") or "?"
+    bios_ver = _read("/sys/devices/virtual/dmi/id/bios_version") or "?"
+
+    # OS
+    os_pretty = "?"
+    for line in _read("/etc/os-release").splitlines():
+        if line.startswith("PRETTY_NAME="):
+            os_pretty = line.split("=", 1)[1].strip().strip('"')
+            break
+    kernel = _sh(["uname", "-r"])
+
+    # Storage (real disks only)
+    storage_lines = []
+    try:
+        r = subprocess.run(["lsblk", "-d", "-n", "-o", "NAME,SIZE,MODEL,TYPE"],
+                           capture_output=True, text=True, timeout=5)
+        for line in r.stdout.splitlines():
+            parts = line.split(None, 3)
+            if len(parts) >= 4 and parts[3].strip() == "disk":
+                storage_lines.append(f"/dev/{parts[0]}  {parts[1]}  {parts[2]}")
+    except Exception:
+        pass
+
+    # GPU via nvidia-smi + torch
+    gpu_specs = {}
+    try:
+        r = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,driver_version,compute_cap,"
+             "memory.total,power.max_limit,clocks.max.sm,clocks.max.memory",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=5)
+        parts = [p.strip() for p in r.stdout.split(",")]
+        if len(parts) >= 7:
+            gpu_specs = {
+                "name": parts[0], "driver": parts[1], "compute_cap": parts[2],
+                "vram_mib": int(parts[3]), "tdp_w": float(parts[4]),
+                "sm_clock_mhz": int(parts[5]), "mem_clock_mhz": int(parts[6]),
+            }
+    except Exception:
+        pass
+    try:
+        import torch
+        p = torch.cuda.get_device_properties(0)
+        gpu_specs["sm_count"] = p.multi_processor_count
+        gpu_specs["l2_cache_mb"] = round(getattr(p, "L2_cache_size", 0) / 1e6, 1)
+        gpu_specs["cuda_runtime"] = torch.version.cuda
+        gpu_specs["cudnn"] = torch.backends.cudnn.version()
+    except Exception:
+        pass
+
+    return {
+        "cpu_model": cpu_info.get("Model name", "?"),
+        "cpu_cores": cpu_info.get("Core(s) per socket", "?"),
+        "cpu_threads": cpu_info.get("CPU(s)", "?"),
+        "cpu_max_mhz": cpu_info.get("CPU max MHz", "?"),
+        "cpu_l3": cpu_info.get("L3 cache", "?"),
+        "ram_gb": ram_gb,
+        "system": f"{sys_vendor} {product}",
+        "motherboard": f"{board_vendor} {board_name}  (BIOS {bios_ver})",
+        "os": os_pretty,
+        "kernel": kernel,
+        "storage": storage_lines,
+        "gpu": gpu_specs,
+    }
+
+
+def slide_platform_specs(prs: Presentation):
+    """Slide: detail the measurement workstation so readers have a grounded ref."""
+    s = gather_platform_specs()
     slide = new_slide(prs, bg_color=C.BG_DARK)
-    add_title_subtitle(slide, "Summary & Key Findings",
-                       "What Keyhole has proven, tested, and ruled out")
+    add_title_subtitle(slide, "Measurement Platform — Keyhole Development Workstation",
+                       "Every 5090 number in this deck was measured here. Edge projections project FROM this.")
 
-    latest_run = runs[-1] if runs else {}
+    gpu = s["gpu"]
+    vram_gb = round(gpu.get("vram_mib", 0) / 1024, 0) if gpu.get("vram_mib") else "?"
+    sm_ghz = gpu.get("sm_clock_mhz", 0) / 1000
 
-    items = []
-    if latest_run:
-        sam3_data = latest_run.get("sam3", {})
-        sam3_ms = sam3_data.get("avg_inference_ms") or sam3_data.get("avg_enrichment_ms", 0)
-        mode = sam3_data.get("mode", "sequential")
-        if sam3_ms:
-            items.append((f"Measured on RTX 5090 — SAM 3 {mode} = {sam3_ms:.0f} ms/frame ({1000/sam3_ms:.1f} FPS)",
-                          C.TEXT_DIM, False))
-            items.append("")
+    # ─── System column (left) ───
+    sys_items = [
+        ("Host", C.ACCENT_BLUE, True),
+        f"System:  {s['system']}",
+        f"Motherboard:  {s['motherboard']}",
+        f"OS:  {s['os']}  (kernel {s['kernel']})",
+        "",
+        ("CPU", C.ACCENT_BLUE, True),
+        f"{s['cpu_model']}",
+        f"{s['cpu_cores']} cores / {s['cpu_threads']} threads  •  boost {s['cpu_max_mhz']} MHz  •  L3 {s['cpu_l3']}",
+        "",
+        ("Memory", C.ACCENT_BLUE, True),
+        f"{int(s['ram_gb'])} GB system RAM (DDR5)",
+        "",
+        ("Storage", C.ACCENT_BLUE, True),
+    ] + [f"• {line}" for line in s["storage"]]
+    add_bullet_box(slide, CONTENT_LEFT, CONTENT_TOP, CONTENT_W / 2 - 0.15, 3.2,
+                    sys_items, font_size=11)
 
-    items += [
-        ("The problem — SAM 3 is deeply memory-bandwidth-bound", C.ACCENT_BLUE, True),
-        "• 840M params, 3.71 GB activations, 98% of GPU time is memory access",
-        ("• Edge projection: ~1,700 ms (0.6 FPS) — not feasible on LPDDR5X", C.NOT_FEASIBLE, True),
+    # ─── GPU column (right) ───
+    gpu_items = [
+        ("GPU — the measurement reference", C.ACCENT_GREEN, True),
+        f"{gpu.get('name', '?')}",
+        f"Compute capability {gpu.get('compute_cap', '?')} (Blackwell)  •  {gpu.get('sm_count', '?')} SMs",
+        f"{vram_gb} GB GDDR7  •  1792 GB/s bandwidth (512-bit @ 28 Gbps)",
+        f"Boost clock {sm_ghz:.3f} GHz  •  Mem {gpu.get('mem_clock_mhz', 0)} MHz",
+        f"TDP {int(gpu.get('tdp_w', 0))} W  •  L2 cache {gpu.get('l2_cache_mb', '?')} MB",
+        f"Driver {gpu.get('driver', '?')}  •  CUDA {gpu.get('cuda_runtime', '?')}  •  cuDNN {gpu.get('cudnn', '?')}",
         "",
-        ("Tested and ruled out", C.ACCENT_BLUE, True),
-        "• Lower resolution: RoPE locked to 1008x1008 (tokens fixed)",
-        "• Weight-only INT8: no speedup (activations unchanged)",
-        "• Fewer prompts: helps on desktop, encoder floor remains",
-        "",
-        ("Bake-off winners (mask stage, scored vs SAM 3 references)", C.ACCENT_PURPLE, True),
-        "• EfficientSAM-Small — 0.91 IoU, 32 FPS on 5090, ~5 FPS edge (FP8)",
-        "• YOLO-seg-s — 0.78 IoU, 150+ FPS on 5090, ~13 FPS edge",
-        "• MobileSAM obsoleted by EfficientSAM-Tiny on all axes",
-        "",
-        ("Hybrid V2 — the solution for open-vocabulary pipelines", C.ACCENT_GREEN, True),
-        "• YOLO-seg (3-8 ms) + CLIP (25-34 ms batched) replaces SAM 3 end-to-end",
-        ("• Result: 20 FPS on edge (33× faster than SAM 3) — fits in 8 GB", C.FEASIBLE, True),
+        ("Peak tensor throughput (dense)", C.ACCENT_GREEN, True),
+        "• FP32 shader:    104.8 TFLOPS",
+        "• BF16 / FP16:    209.5 TFLOPS (tensor)",
+        "• INT8:           419 TOPS (tensor)",
+        "• FP8  (E4M3):    419 TFLOPS (tensor — Blackwell)",
+        "• INT4 / FP4:     838 TFLOPS (tensor — Blackwell 5th-gen)",
+        "• Sparse 2:4:     values above × 2",
     ]
-    add_bullet_box(slide, CONTENT_LEFT, CONTENT_TOP, CONTENT_W, 5.5, items, font_size=12)
+    add_bullet_box(slide, CONTENT_LEFT + CONTENT_W / 2 + 0.15, CONTENT_TOP,
+                    CONTENT_W / 2 - 0.15, 3.4, gpu_items, font_size=11)
+
+    # ─── Precision support table (full width) ───
+    headers = ["Precision", "Tensor-core support", "Used in Keyhole", "Notes"]
+    rows = [
+        ["FP32",          "Yes (TF32 tensor)",          "—",                  "Default torch dtype; no quantization payoff"],
+        ["BF16",          "Yes",                         "SAM 3 baseline, all PyTorch runs", "Preserves FP32 range, half the bytes"],
+        ["FP16",          "Yes",                         "TRT baseline",       "Same bytes as BF16, narrower range"],
+        ["INT8",          "Yes (dynamic act)",           "torchao + TRT YOLO + ES-Small",    "96-99% box recall; halves activation bytes"],
+        ["FP8 (E4M3)",    "Yes — Blackwell native",      "TRT YOLO + TRT CLIP + ES-Small",  "Best quality/speed; halves activation bytes"],
+        ["INT4 / FP4",    "Yes — Blackwell 5th-gen",     "Not yet exercised",  "~2× over INT8/FP8; accuracy risk on detection heads"],
+        ["GGUF  Q4_K_M",  "Runs via llama.cpp CUDA",     "—",                  "Practical ~70B LLM ceiling on 32 GB VRAM"],
+        ["GGUF  Q8_0",    "Runs via llama.cpp CUDA",     "—",                  "Practical ~14B LLM at long context"],
+    ]
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(5.0),
+                     Inches(CONTENT_W), Inches(2.0), headers, rows,
+                     highlight_rows=[5])  # FP8 is the headline
+
+
+def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
+    """Final summary slide — the 90× journey from 0.4 to 36 FPS."""
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "Summary & Key Findings — 0.4 FPS → 36 FPS (90× Edge Improvement)",
+                       "What Keyhole proved, ruled out, and what ships")
+
+    # Hero stat bar (indigo)
+    hero = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+        Inches(CONTENT_W), Inches(0.7))
+    hero.fill.solid(); hero.fill.fore_color.rgb = C.ACCENT_INDIGO
+    hero.line.fill.background()
+    add_text_box(slide, Inches(CONTENT_LEFT + 0.2), Inches(CONTENT_TOP + 0.1),
+                 Inches(CONTENT_W - 0.4), Inches(0.5),
+                 "Shipping stack  •  Hybrid V2 + YOLO-seg FP8 + CLIP FP8 (all TensorRT)  •  720p Edge MPU (134.4 GB/s LPDDR5X)  •  36 FPS projected",
+                 font_size=14, color=C.TEXT_WHITE, bold=True, alignment=PP_ALIGN.CENTER)
+
+    items = [
+        ("The journey", C.ACCENT_BLUE, True),
+        ("0.4 FPS",   C.ACCENT_RED, True),
+        ("  SAM 3 BF16 — bandwidth-bound on 134.4 GB/s LPDDR5X. 840M params, 3.71 GB activations.",),
+        ("  Cheap levers tested & ruled out: weight-only INT8 (no act savings), lower resolution (RoPE locked), fewer prompts (encoder floor).",),
+        ("4.9 FPS",   C.ACCENT_ORANGE, True),
+        ("  Model-family switch → EfficientSAM-Small + FP8/INT8 activation quant (torchao, 94/95 Linears). ΔIoU < 0.002.",),
+        ("16 FPS",    C.ACCENT_AMBER, True),
+        ("  Hybrid V2 (YOLO-seg + CLIP) + FP8 CLIP + 1 Hz keyframe debounce. YOLO becomes the ceiling.",),
+        ("24 FPS",    C.ACCENT_GREEN, True),
+        ("  YOLO-seg FP8 via TensorRT 10.16 on Blackwell (recall 1.00, IoU 0.998). CLIP FP8 every frame — no debounce needed.",),
+        ("36 FPS  ← shipping", C.ACCENT_INDIGO, True),
+        ("  Full TRT stack + CLIP @ 1 Hz. YOLO-only ceiling. Room for INT4/FP4 if the edge NPU exposes them.",),
+    ]
+    add_bullet_box(slide, CONTENT_LEFT, 2.2, CONTENT_W / 2 - 0.15, 4.6, items, font_size=11)
+
+    right = [
+        ("What we proved",  C.ACCENT_GREEN, True),
+        "• Bandwidth — not compute — sets the edge ceiling for vision transformers",
+        "• FP8 activation quant is near-lossless on ViT + detection heads on Blackwell",
+        "• Hybrid pipelines (YOLO-seg + CLIP) beat a monolithic big-ViT mask model for edge",
+        "• CLIP keyframe debouncing is an optional lever, not a hard requirement once TRT-compiled",
+        "",
+        ("What we ruled out", C.ACCENT_RED, True),
+        "• SAM 3 BF16 on 134.4 GB/s — not feasible without model replacement",
+        "• INT8 weight-only quantization — doesn't touch activation traffic, no edge gain",
+        "• torchao FP8 on Conv-only models (YOLO-seg) — tool-chain gap, use TensorRT",
+        "",
+        ("What remains open", C.ACCENT_AMBER, True),
+        "• Meta releasing quantized SAM 3 / SAM 3 Lite (passive watch)",
+        "• INT4/FP4 on detection head — accuracy risk; warrants targeted study if NPU ships with it",
+        "• Live streaming subsystem — architecture locked (MJPEG+WS, YOLO-FP8), ~500-line build when prioritized",
+    ]
+    add_bullet_box(slide, CONTENT_LEFT + CONTENT_W / 2 + 0.15, 2.2,
+                    CONTENT_W / 2 - 0.15, 4.6, right, font_size=11)
 
 
 # ============================================================
@@ -1777,7 +1961,11 @@ def build_deck(output, runs_dir, data_dir):
     console.print("  Building: Title slide")
     slide_title(prs)
 
-    # Slide 2: Architecture
+    # Slide 2: Platform specs (read live from /proc, /sys, nvidia-smi, torch)
+    console.print("  Building: Platform specs")
+    slide_platform_specs(prs)
+
+    # Slide 3: Architecture
     console.print("  Building: Architecture diagram")
     slide_architecture(prs)
 
