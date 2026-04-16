@@ -1306,6 +1306,68 @@ def slide_fp8_quantization(prs: Presentation):
     ], font_size=11)
 
 
+def slide_smoothquant(prs: Presentation):
+    """Slide: SmoothQuant + plain INT8 bake-off on ES-Small + YOLO-seg."""
+    sq_path = Path("data/output/bakeoff/smoothquant_edge_projection.json")
+    if not sq_path.exists():
+        return
+    sq = json.loads(sq_path.read_text())
+    proj = sq.get("projections", {})
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "INT8 + SmoothQuant — Activation Quant on the Winners",
+                       "Does activation-safe INT8 preserve IoU, and does SmoothQuant smoothing help?")
+
+    display_name = {
+        "efficientsam_small": "EfficientSAM-Small",
+        "yolo_seg":           "YOLO-seg (yolo11s-seg)",
+    }
+    # Show only 720p results — pattern is identical at 1080p and 4K.
+    headers = ["Model", "Recipe", "Applied?", "IoU bf16", "IoU quant", "Δ IoU",
+               "Edge FPS bf16", "Edge FPS quant"]
+    rows = []
+    res = "720p"
+    for name in ["efficientsam_small", "yolo_seg"]:
+        for recipe in ["int8", "smoothquant"]:
+            p = proj.get(res, {}).get(name, {}).get(recipe)
+            if not p:
+                # ES-Small SmoothQuant fails at CONVERT due to torchao 0.17 API gap.
+                rows.append([display_name[name], recipe, "CONVERT FAILED",
+                             "—", "—", "—", "—", "—"])
+                continue
+            applied = "YES" if p["recipe_applied"] else "NO (Conv-only)"
+            comp = p["compute_limited_ms"]
+            bw_bf16 = p["bandwidth_limited_ms_bf16"]
+            edge_bf16 = 1000.0 / (comp + bw_bf16) if (comp + bw_bf16) > 0 else 0
+            rows.append([
+                display_name[name], recipe, applied,
+                f"{p['mean_iou_bf16']:.3f}",
+                f"{p['mean_iou_recipe']:.3f}",
+                f"{p['iou_delta']:+.3f}",
+                f"{edge_bf16:.1f}",
+                f"{p['projected_fps_edge_recipe']:.1f}",
+            ])
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
+                     Inches(CONTENT_W), Inches(2.0), headers, rows)
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.55), Inches(CONTENT_W), Inches(0.3),
+                 "720p shown; 1080p and 4K yield the same pattern (ΔIoU -0.001 to -0.002, edge FPS doubles on ES-Small).",
+                 font_size=10, color=C.TEXT_DIM)
+
+    add_bullet_box(slide, CONTENT_LEFT, 4.0, CONTENT_W, 3.0, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        "• Plain INT8 on ES-Small: 95/95 Linears quantized; ΔIoU -0.002 across resolutions",
+        ("• Edge FPS projection matches FP8: 2.5 → 4.9 FPS at 720p (halved activation traffic)", C.ACCENT_GREEN, True),
+        "• INT8 and FP8 deliver the same bandwidth win — pick based on edge silicon's native path",
+        "",
+        ("SmoothQuant blocked by torchao API maturity", C.ACCENT_ORANGE, True),
+        "• CONVERT step asserts weight implements SupportsActivationPreScaling",
+        ("• torchao 0.17 Int8DynamicActivationInt8Weight doesn't implement that protocol — open bug", C.TEXT_DIM),
+        ("• Given ΔIoU is already < 0.002 with plain INT8, smoothing is unlikely to move the needle here", C.TEXT_DIM),
+        "",
+        ("YOLO-seg still blocked on Conv2d — 0 layers quantized by any recipe.", C.ACCENT_ORANGE, True),
+    ], font_size=11)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = new_slide(prs)
@@ -1331,7 +1393,7 @@ def slide_optimization_roadmap(prs: Presentation):
         ("Next steps (updated post-bake-off + FP8)", C.ACCENT_PURPLE, True),
         ("1. [DONE] EfficientSAM / MobileSAM evaluated — ES-Tiny beats MobileSAM; ES-Small tops quality (0.91 IoU)",),
         ("2. [DONE] FP8 on ES-Small: 94/95 Linears quantized, ΔIoU -0.002, edge FPS 2.5 → 4.9 (halved act traffic)",),
-        ("3. Test SmoothQuant for activation-safe INT8 on the bake-off winners (broader op coverage than FP8)",),
+        ("3. [DONE] SmoothQuant / INT8 on ES-Small: plain INT8 matches FP8 (ΔIoU -0.002, edge 2.5→4.9 FPS); SmoothQuant CONVERT blocked by torchao 0.17 API gap",),
         ("4. [DONE] Hybrid V2 (YOLO-seg + CLIP) — ~20 FPS edge; YOLO-seg alone ~11-13 FPS edge projection",),
         ("5. Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
         ("6. [NEW] YOLO-seg FP8 blocked in torchao (Conv-only); needs custom kernels or transformer_engine",),
@@ -1485,6 +1547,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/fp8_edge_projection.json").exists():
         console.print("  Building: FP8 activation quantization")
         slide_fp8_quantization(prs)
+
+    # SmoothQuant + plain INT8 (only if data present)
+    if Path("data/output/bakeoff/smoothquant_edge_projection.json").exists():
+        console.print("  Building: SmoothQuant + INT8")
+        slide_smoothquant(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
