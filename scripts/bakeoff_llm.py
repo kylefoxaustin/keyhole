@@ -62,6 +62,24 @@ QUANT_RUNTIME = {
     "Q8_0":   {"n_gpu_layers": 32,  "n_ctx": 12288, "offload_note": "partial offload (32/48 layers on GPU) — weights exceed 32 GB VRAM"},
 }
 
+# NPU tier actuals from Kyle's vendor-provided edge benchmarks on Qwen3-30B-A3B.
+# These supersede our BW-only projection (which was 2.3× pessimistic — edge
+# NPUs are purpose-built for LLM with better memory controllers / tiling /
+# expert routing than a desktop GPU running llama.cpp).
+#   NPU_LOW:  64-bit LPDDR4 @ 4.0 GT/s   (~32  GB/s theoretical)
+#   NPU_MID:  128-bit LPDDR5X @ 8.4 GT/s (~134 GB/s theoretical — matches our EDGE_MPU_TARGET)
+#   NPU_HIGH: higher-BW bin (vendor-quoted)
+# Prefill is compute-bound; decode is bandwidth-bound. Values below are for
+# Qwen3-30B-A3B (3B active / 30B total) at 1K prompt / short response.
+NPU_TIER_ACTUALS = {
+    "NPU Low":  {"bus": "64-bit LPDDR4 @ 4.0 GT/s",
+                 "ttft_1k_sec": 1.67,     "decode_tok_s": 29.27},
+    "NPU Mid":  {"bus": "128-bit LPDDR5X @ 8.4 GT/s",
+                 "ttft_1k_sec": 0.351,    "decode_tok_s": 37.85},
+    "NPU High": {"bus": "vendor high-bin LPDDR5X",
+                 "ttft_1k_sec": 0.1755,   "decode_tok_s": 50.46},
+}
+
 N_BATCH = 512          # llama.cpp batch size for prefill
 N_THREADS = 8
 
@@ -337,17 +355,69 @@ def project_edge(all_results: dict) -> dict:
             "rag_edge_total_sec": rag_edge_total_ms / 1000,
         }
 
+    # --- Per-NPU-tier projections using Kyle's vendor-provided actuals ---
+    #
+    # Our BW-only projection above uses the 5090's llama.cpp efficiency (~28%),
+    # which turns out to be 2.3× pessimistic vs vendor-measured edge NPU numbers.
+    # Edge NPUs are purpose-built for LLM inference and hit higher effective
+    # efficiency than desktop GPUs running llama.cpp. So for the deck story
+    # we present vendor-quoted actuals for NPU Low/Mid/High as the authoritative
+    # edge numbers; our BW projection becomes a sanity-check reference.
+    tier_projections = {}
+    for tier, actuals in NPU_TIER_ACTUALS.items():
+        decode_tok_s = actuals["decode_tok_s"]
+        ttft_1k_sec = actuals["ttft_1k_sec"]
+        prefill_1k_tok_s = 1000 / ttft_1k_sec if ttft_1k_sec > 0 else 0
+
+        # Scale this tier's decode rate by quant (ceiling scales as 1/bytes_per_param)
+        per_quant_tier = {}
+        # Assume the vendor-quoted number is the production target quant — Q4_K_M
+        ref_bpp = BYTES_PER_PARAM["Q4_K_M"]
+        for quant in ("Q4_K_M", "Q5_K_M", "Q8_0"):
+            bpp = BYTES_PER_PARAM[quant]
+            # Decode is BW/bytes_bound — scale inversely with bytes per param
+            decode_for_quant = decode_tok_s * (ref_bpp / bpp)
+            # Prefill is compute-bound — same across quants to first order
+            # (mostly depends on FLOPs which are constant for the same model)
+            prefill_for_quant = prefill_1k_tok_s
+
+            # RAG end-to-end: 8K prefill at that rate + 2K decode at that rate
+            rag_prefill_ms = (RAG_PROMPT_LEN / prefill_for_quant) * 1000 if prefill_for_quant > 0 else 0
+            rag_decode_ms = (RAG_RESPONSE_LEN / decode_for_quant) * 1000 if decode_for_quant > 0 else 0
+            per_quant_tier[quant] = {
+                "decode_tok_s": decode_for_quant,
+                "prefill_1k_tok_s": prefill_for_quant,
+                "ttft_1k_sec": ttft_1k_sec,
+                "rag_prefill_ms": rag_prefill_ms,
+                "rag_decode_ms": rag_decode_ms,
+                "rag_total_ms": rag_prefill_ms + rag_decode_ms,
+                "rag_total_sec": (rag_prefill_ms + rag_decode_ms) / 1000,
+                "short_answer_ms": (200 / decode_for_quant) * 1000 if decode_for_quant > 0 else 0,
+            }
+
+        tier_projections[tier] = {
+            "tier": tier,
+            "bus": actuals["bus"],
+            "reference_decode_tok_s_Q4_K_M": decode_tok_s,
+            "reference_ttft_1k_sec": ttft_1k_sec,
+            "per_quant": per_quant_tier,
+        }
+
     return {
-        "projections": proj,
+        "projections": proj,                         # BW-only scaling (5090-derived, kept as reference)
+        "tier_projections": tier_projections,        # vendor-actual NPU Low/Mid/High
         "bw_ratio_edge_vs_5090": bw_ratio,
         "edge_effective_bw_gb_s": edge_bw / 1e9,
         "ref_effective_bw_gb_s": ref_bw / 1e9,
         "method": (
-            "LLM edge projection. Decode tok/s = bandwidth / (active_params * "
-            "bytes_per_param), scaled by measured 5090 efficiency. MoE active "
-            "params = 3B (Qwen3-30B-A3B). Prefill tok/s linearly scaled by "
-            "bandwidth ratio (approximation — true prefill has a compute "
-            "component, but on inference-optimized NPUs decode dominates edge BW)."
+            "LLM projections come in two flavors: (a) BW-only scaling from 5090 "
+            "measurements using llama.cpp efficiency — reference only, known "
+            "2.3× pessimistic; (b) per-NPU-tier actuals from vendor benchmarks "
+            "at Qwen3-30B-A3B Q4_K_M (1K prompt, short response). TTFT is "
+            "compute-bound and scales with compute; decode tok/s is bandwidth-"
+            "bound and scales with memory BW × 1/(bytes_per_param). Tier "
+            "projections apply these rules to produce per-quant numbers for "
+            "NPU Low / Mid / High."
         ),
     }
 
