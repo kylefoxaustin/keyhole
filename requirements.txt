@@ -51,6 +51,24 @@ open-clip-torch>=3.0.0
 nvidia-ml-py>=12.0.0
 psutil>=5.9.0
 
+# Deck + XLSX export (build_deck.py + export_results.py)
+python-pptx>=1.0.0
+matplotlib>=3.8.0
+pandas>=2.2.0
+openpyxl>=3.1.0
+
+# ONNX export + TensorRT engine building (bakeoff_trt_yolo.py + bakeoff_trt_clip.py)
+# NOTE: TensorRT must be installed manually — `pip install tensorrt` with the
+# cu13 wheels matching your CUDA toolkit version. See REPRODUCE.md.
+onnx>=1.18.0
+onnxslim>=0.1.9
+onnxscript>=0.6.0
+
+# LLM bake-off (bakeoff_llm.py)
+# NOTE: llama-cpp-python must be installed manually with CUDA build flags —
+# see REPRODUCE.md.
+huggingface-hub>=0.35.0
+
 # Dev / Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
