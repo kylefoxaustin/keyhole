@@ -298,6 +298,11 @@ specific benchmark in ~5 min of work.
   abstraction — add a new `HardwareSpec`, reuse the rest of the
   measurement pipeline.
 - Want to play with the assumptions interactively rather than editing
-  scripts? See the upcoming `keyhole-sizer` repo (separate Streamlit
-  app) for a UI where you can tweak edge NPU BW / bus width / model
-  choice / workload mix and see projected FPS & tok/s live.
+  scripts? See
+  [`kylefoxaustin/keyhole-sizer`](https://github.com/kylefoxaustin/keyhole-sizer)
+  — a separate Streamlit app that wraps the measured bake-off numbers
+  in tunable sliders (NPU preset or custom bus/BW/TOPS, pipeline
+  choice, concurrent stream count, LLM co-exist toggle). Install with
+  `pip install -r requirements.txt && streamlit run app.py`; no GPU
+  required (pure projection math on top of the already-measured
+  numbers).
