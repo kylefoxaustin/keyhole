@@ -710,6 +710,104 @@ def slide_title(prs: Presentation):
                  font_size=12, color=C.TEXT_DIM, alignment=PP_ALIGN.CENTER)
 
 
+def slide_exec_summary(prs: Presentation):
+    """The world's best single-slide summary: how to apply SAM 3-like
+    capabilities at the edge. Sits right after the title slide."""
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "How to Apply SAM 3-like Capabilities at the Edge",
+        "Conclusions from every bake-off in this deck, condensed onto one page",
+    )
+
+    # ── Hero stat band (3 cards) ───────────────────────────────────────────
+    card_y = 1.3
+    card_h = 0.95
+    card_w = (CONTENT_W - 0.5) / 3
+    cards = [
+        ("0.4 FPS",    "SAM 3 BF16 baseline",       "Bandwidth-bound on 134.4 GB/s — not feasible", C.ACCENT_RED),
+        ("36 FPS",     "Shipping stack (720p)",     "Hybrid V2 + YOLO-seg FP8 + CLIP FP8, all TensorRT",       C.ACCENT_GREEN),
+        ("90×",        "Edge FPS improvement",       "Architectural change — not just quantization",        C.ACCENT_INDIGO),
+    ]
+    for i, (big, label, note, col) in enumerate(cards):
+        x = CONTENT_LEFT + i * (card_w + 0.25)
+        shp = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                                      Inches(x), Inches(card_y),
+                                      Inches(card_w), Inches(card_h))
+        shp.fill.solid(); shp.fill.fore_color.rgb = C.BG_SLIDE
+        shp.line.color.rgb = col; shp.line.width = Pt(2)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.05),
+                     Inches(card_w), Inches(0.45),
+                     big, font_size=28, color=col, bold=True,
+                     alignment=PP_ALIGN.CENTER)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.5),
+                     Inches(card_w), Inches(0.25),
+                     label, font_size=11, color=C.TEXT_BRIGHT, bold=True,
+                     alignment=PP_ALIGN.CENTER)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.72),
+                     Inches(card_w), Inches(0.25),
+                     note, font_size=9, color=C.TEXT_DIM,
+                     alignment=PP_ALIGN.CENTER)
+
+    # ── Recipe line (the shipping stack as a pipeline strip) ───────────────
+    recipe_y = 2.4
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(recipe_y),
+                 Inches(CONTENT_W), Inches(0.25),
+                 "The shipping recipe",
+                 font_size=11, color=C.ACCENT_PURPLE, bold=True)
+    add_pipeline_strip(slide, [
+        ("FFmpeg ingest", False),
+        ("YOLO-seg FP8 (TRT)", True),
+        ("CLIP FP8 (TRT) @ 1 Hz", True),
+        ("SQLite + FTS5", False),
+        ("Qwen3-30B-A3B MoE", False),
+    ], top_in=recipe_y + 0.3)
+
+    # ── Two-column DO / DON'T ──────────────────────────────────────────────
+    col_top = 3.55
+    col_h = 2.5
+    col_w = (CONTENT_W - 0.25) / 2
+
+    add_bullet_box(slide, CONTENT_LEFT, col_top, col_w, col_h, [
+        ("DO — the full recipe", C.ACCENT_GREEN, True),
+        ("• Replace SAM 3 with Hybrid V2 = YOLO-seg-s (10M params, det + seg in one pass) + OpenCLIP ViT-B-32 (open-vocabulary tags)",),
+        ("• Compile BOTH halves with TensorRT FP8 on Blackwell-class NPU silicon. FP8 preserves quality (YOLO box recall 1.00, CLIP top-1 agree 0.96).",),
+        ("• Debounce CLIP to keyframes (N=30 → 1 Hz). Cheap headroom; not strictly required for real-time after TRT FP8.",),
+        ("• For multi-stream deployments, batch YOLO at B=N streams. 4 streams get 26 FPS each — not 9.",),
+        ("• Run a small MoE LLM (Qwen3-30B-A3B, 3B active) on the same NPU for natural-language queries — duty-cycle share works for short answers.",),
+    ], font_size=10)
+
+    add_bullet_box(slide, CONTENT_LEFT + col_w + 0.25, col_top, col_w, col_h, [
+        ("DON'T — ruled out by bake-off", C.ACCENT_RED, True),
+        ("• Run SAM 3 BF16 at 0.4 FPS and hope. Even with FP8 activations it caps ~1.2 FPS — still dead.",),
+        ("• Try INT8 weight-only quantization. It doesn't touch the bandwidth-bound activation traffic. Zero edge gain.",),
+        ("• Reduce SAM 3 input resolution or prompt count. RoPE is locked; helps desktop slightly; edge stays bandwidth-bound.",),
+        ("• Quantize Conv-only models (YOLO-seg) via torchao FP8. Tool-chain blocked — needs custom kernels or TensorRT.",),
+        ("• Run a generative LLM on the vision NPU during live 4-camera surveillance. RAG queries obliterate the pipeline.",),
+    ], font_size=10)
+
+    # ── NPU tier sizing ────────────────────────────────────────────────────
+    tier_y = 6.15
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(tier_y),
+                 Inches(CONTENT_W), Inches(0.25),
+                 "Buy the right NPU class for the job",
+                 font_size=11, color=C.ACCENT_INDIGO, bold=True)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(tier_y + 0.3),
+                     Inches(CONTENT_W), Inches(0.8),
+                     ["NPU tier", "Memory bus", "Vision (1-stream)", "Vision (4-stream, batch=4)",
+                      "LLM Q4_K_M decode", "Good for"],
+                     [
+                         ["NPU Low",  "64-bit LPDDR4 @ 4.0 GT/s",    "~9 FPS",   "~6 FPS each",
+                          "29 tok/s",  "Batch analysis, single low-res stream"],
+                         ["NPU Mid",  "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
+                          "38 tok/s",  "Live multi-stream + occasional LLM"],
+                         ["NPU High", "high-bin LPDDR5X",            "~48 FPS",  "~35 FPS each",
+                          "50 tok/s",  "Live vision + sustained LLM"],
+                     ],
+                     highlight_rows=[2],   # NPU Mid — the shipping target
+                     font_size=9, header_font_size=10)
+
+
 def slide_architecture(prs: Presentation):
     """Slide 2: Pipeline architecture diagram."""
     slide = new_slide(prs)
@@ -2321,7 +2419,12 @@ def build_deck(output, runs_dir, data_dir):
     console.print("  Building: Title slide")
     slide_title(prs)
 
-    # Slide 2: Platform specs (read live from /proc, /sys, nvidia-smi, torch)
+    # Slide 2: Executive summary — the world's best single slide
+    # (If you read nothing else, read this one)
+    console.print("  Building: Executive summary (front of deck)")
+    slide_exec_summary(prs)
+
+    # Slide 3: Platform specs (read live from /proc, /sys, nvidia-smi, torch)
     console.print("  Building: Platform specs")
     slide_platform_specs(prs)
 
