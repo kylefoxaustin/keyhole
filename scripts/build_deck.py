@@ -266,16 +266,22 @@ def add_bullet_box(slide, left, top, width, height, items,
     return txBox
 
 
-def add_pipeline_strip(slide, stages: list[str | tuple[str, bool]], top_in: float = 1.2):
+def add_pipeline_strip(slide, stages: list[str | tuple[str, bool]], top_in: float = 1.2,
+                        accent_color=None):
     """Compact 5-stage pipeline state strip for bake-off slides.
 
     stages: list of 5 entries — either a plain string (normal/dim), or
     a tuple (label, True) for a highlighted box (what changed on this slide).
     Used to orient the reader on which component the slide is swapping.
 
+    accent_color: override the highlight color (defaults to indigo). Pass
+    C.ACCENT_RED on a "before" pipe to flag what got replaced, C.ACCENT_GREEN
+    for an "after" emphasis, etc.
+
     Occupies vertical band [top_in, top_in + 0.55] in. Bake-off slides should
     push their main content_top to ~1.85 in to make room.
     """
+    accent = accent_color if accent_color is not None else C.ACCENT_INDIGO
     total_w = CONTENT_W
     n = len(stages)
     gap = 0.12
@@ -295,8 +301,8 @@ def add_pipeline_strip(slide, stages: list[str | tuple[str, bool]], top_in: floa
             Inches(x), Inches(top_in), Inches(box_w), Inches(box_h),
         )
         if highlighted:
-            shp.fill.solid(); shp.fill.fore_color.rgb = C.ACCENT_INDIGO
-            shp.line.color.rgb = C.ACCENT_INDIGO
+            shp.fill.solid(); shp.fill.fore_color.rgb = accent
+            shp.line.color.rgb = accent
             text_color = C.TEXT_WHITE
             bold = True
         else:
@@ -749,42 +755,55 @@ def slide_exec_summary(prs: Presentation):
                      note, font_size=9, color=C.TEXT_DIM,
                      alignment=PP_ALIGN.CENTER)
 
-    # ── Recipe line (the shipping stack as a pipeline strip) ───────────────
-    recipe_y = 2.4
-    add_text_box(slide, Inches(CONTENT_LEFT), Inches(recipe_y),
-                 Inches(CONTENT_W), Inches(0.25),
-                 "The shipping recipe",
-                 font_size=11, color=C.ACCENT_PURPLE, bold=True)
+    # ── Two pipeline strips: BEFORE (target) vs AFTER (shipping) ───────────
+    # BEFORE — SAM 3 highlighted red as the dropped component
+    before_label_y = 2.4
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(before_label_y),
+                 Inches(CONTENT_W), Inches(0.22),
+                 "BEFORE — target pipeline (SAM 3 BF16 baseline, 0.4 FPS)",
+                 font_size=10, color=C.ACCENT_RED, bold=True)
+    add_pipeline_strip(slide, [
+        ("FFmpeg ingest", False),
+        ("YOLO 11x", False),
+        ("SAM 3 BF16", True),
+        ("SQLite + FTS5", False),
+        ("NLQ / LLM", False),
+    ], top_in=before_label_y + 0.25, accent_color=C.ACCENT_RED)
+
+    # AFTER — shipping recipe with TRT-compiled halves highlighted indigo
+    after_label_y = 3.4
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(after_label_y),
+                 Inches(CONTENT_W), Inches(0.22),
+                 "AFTER — shipping recipe (36 FPS, 90× edge FPS, real-time)",
+                 font_size=10, color=C.ACCENT_GREEN, bold=True)
     add_pipeline_strip(slide, [
         ("FFmpeg ingest", False),
         ("YOLO-seg FP8 (TRT)", True),
         ("CLIP FP8 (TRT) @ 1 Hz", True),
         ("SQLite + FTS5", False),
         ("Qwen3-30B-A3B MoE", False),
-    ], top_in=recipe_y + 0.3)
+    ], top_in=after_label_y + 0.25)
 
     # ── Two-column DO / DON'T ──────────────────────────────────────────────
-    col_top = 3.55
-    col_h = 2.5
+    col_top = 4.5
+    col_h = 1.55
     col_w = (CONTENT_W - 0.25) / 2
 
     add_bullet_box(slide, CONTENT_LEFT, col_top, col_w, col_h, [
         ("DO — the full recipe", C.ACCENT_GREEN, True),
-        ("• Replace SAM 3 with Hybrid V2 = YOLO-seg-s (10M params, det + seg in one pass) + OpenCLIP ViT-B-32 (open-vocabulary tags)",),
-        ("• Compile BOTH halves with TensorRT FP8 on Blackwell-class NPU silicon. FP8 preserves quality (YOLO box recall 1.00, CLIP top-1 agree 0.96).",),
-        ("• Debounce CLIP to keyframes (N=30 → 1 Hz). Cheap headroom; not strictly required for real-time after TRT FP8.",),
-        ("• For multi-stream deployments, batch YOLO at B=N streams. 4 streams get 26 FPS each — not 9.",),
-        ("• Run a small MoE LLM (Qwen3-30B-A3B, 3B active) on the same NPU for natural-language queries — duty-cycle share works for short answers.",),
-    ], font_size=10)
+        ("• Replace SAM 3 with Hybrid V2 — YOLO-seg-s (det+seg, 10M) + OpenCLIP ViT-B-32 (open-vocab tags)",),
+        ("• Compile BOTH halves with TensorRT FP8 on Blackwell-class silicon (recall 1.00 / top-1 agree 0.96)",),
+        ("• Debounce CLIP at 1 Hz — cheap headroom; multi-stream: YOLO batch=N (4 streams → 26 FPS each)",),
+        ("• Co-host Qwen3-30B-A3B MoE (3B active) on the NPU for NLQ — duty-cycle share for short answers",),
+    ], font_size=9)
 
     add_bullet_box(slide, CONTENT_LEFT + col_w + 0.25, col_top, col_w, col_h, [
         ("DON'T — ruled out by bake-off", C.ACCENT_RED, True),
-        ("• Run SAM 3 BF16 at 0.4 FPS and hope. Even with FP8 activations it caps ~1.2 FPS — still dead.",),
-        ("• Try INT8 weight-only quantization. It doesn't touch the bandwidth-bound activation traffic. Zero edge gain.",),
-        ("• Reduce SAM 3 input resolution or prompt count. RoPE is locked; helps desktop slightly; edge stays bandwidth-bound.",),
-        ("• Quantize Conv-only models (YOLO-seg) via torchao FP8. Tool-chain blocked — needs custom kernels or TensorRT.",),
-        ("• Run a generative LLM on the vision NPU during live 4-camera surveillance. RAG queries obliterate the pipeline.",),
-    ], font_size=10)
+        ("• Run SAM 3 BF16 and hope — 0.4 FPS, FP8 activations only get you to ~1.2 FPS, still dead",),
+        ("• INT8 weight-only quant — doesn't touch bandwidth-bound activation traffic, zero edge gain",),
+        ("• Cut SAM 3 resolution or prompts — RoPE locked, edge stays bandwidth-bound regardless",),
+        ("• torchao FP8 on Conv-only models, or generative LLM on a busy vision NPU (RAG murders it)",),
+    ], font_size=9)
 
     # ── NPU tier sizing ────────────────────────────────────────────────────
     tier_y = 6.15
