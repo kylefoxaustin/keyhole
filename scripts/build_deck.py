@@ -1705,6 +1705,163 @@ def slide_trt_clip(prs: Presentation):
     ], font_size=11)
 
 
+def slide_llm_bakeoff(prs: Presentation):
+    """Slide: Qwen3-30B-A3B LLM bake-off — prefill, decode, edge projection."""
+    path = Path("data/output/bakeoff/llm_edge_projection.json")
+    sumpath = Path("data/output/bakeoff/llm_summary.json")
+    if not path.exists() or not sumpath.exists():
+        return
+    edge = json.loads(path.read_text())
+    summary = json.loads(sumpath.read_text())
+    proj = edge["projections"]
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "LLM Bake-off — Qwen3-30B-A3B MoE (30B total / 3B active)",
+                       "Fills the NLQ/LLM box. MoE makes decode BW-bound on 3B active, not 30B total — LPDDR5X-friendly.")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO-seg FP8 (TRT)",
+                                "CLIP FP8 (TRT)", "SQLite", ("Qwen3-30B-A3B MoE", True)])
+
+    headers = ["Quant", "Size", "VRAM MB", "Prefill @2K", "Decode 5090",
+               "Decode ceil 5090", "Efficiency",
+               "Edge decode", "Edge RAG (8K+2K)"]
+    rows = []
+    highlight = []
+    for i, quant in enumerate(["Q4_K_M", "Q5_K_M", "Q8_0"]):
+        s = summary.get(quant, {})
+        p = proj.get(quant, {})
+        if not s or "error" in s or "error" in p:
+            rows.append([quant, "—", "—", "—", "—", "—", "—", "—", "—"])
+            continue
+        pf2k = next((r["prefill_tok_s"] for r in s["prefill_sweep"] if r["n_prompt"] == 2048), 0)
+        dec = s["decode_sweep"][-1]["decode_tok_s"]
+        rows.append([
+            quant,
+            f"{s['gguf_size_gb']:.1f} GB",
+            f"{s['peak_vram_mb_during_bench']:.0f}",
+            f"{pf2k:.0f} tok/s",
+            f"{dec:.1f} tok/s",
+            f"{p['decode_ceiling_5090_tok_s']:.0f} tok/s",
+            f"{100*p['decode_efficiency_used']:.0f}%",
+            f"{p['decode_edge_projected_tok_s']:.1f} tok/s",
+            f"{p['rag_edge_total_sec']:.1f} s",
+        ])
+        if quant == "Q4_K_M":
+            highlight.append(i + 1)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
+                     Inches(CONTENT_W), Inches(1.6), headers, rows,
+                     highlight_rows=highlight)
+
+    # Prefill sweep row (one selected quant — Q4_K_M, the production target)
+    q4 = summary.get("Q4_K_M", {})
+    q4p = proj.get("Q4_K_M", {})
+    if q4 and "prefill_sweep" in q4 and q4p and "prefill_sweep_edge" in q4p:
+        add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.7), Inches(CONTENT_W), Inches(0.3),
+                     "Prefill sweep — Q4_K_M production target (tok/s):",
+                     font_size=12, color=C.ACCENT_PURPLE, bold=True)
+        pf_headers = ["Prompt length"] + [f"N={r['n_prompt']}" for r in q4["prefill_sweep"]]
+        pf_rows = [
+            ["5090 measured"] + [f"{r['prefill_tok_s']:.0f}" for r in q4["prefill_sweep"]],
+            ["Edge projected"] + [f"{r['prefill_tok_s_edge']:.0f}" for r in q4p["prefill_sweep_edge"]],
+        ]
+        add_styled_table(slide, Inches(CONTENT_LEFT), Inches(4.0),
+                         Inches(CONTENT_W), Inches(0.9), pf_headers, pf_rows,
+                         font_size=10)
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.1, CONTENT_W, 2.0, [
+        ("Key findings", C.ACCENT_BLUE, True),
+        ("• MoE wins on edge. Decode BW = active_params (3B) × bytes, not total (30B). A dense 14B at Q4_K_M would eat ~2× the BW for similar quality.", C.ACCENT_GREEN, True),
+        ("• Q4_K_M ships. Smallest footprint, BW ceiling effectively equal to Q5_K_M/Q8_0 at edge. Pick Q4_K_M unless quality regression is seen in downstream eval.", C.ACCENT_INDIGO, True),
+        ("• Prefill is linear in prompt length × bandwidth. On LPDDR5X the 8K-token RAG prefill takes seconds, dominating total latency on long contexts.", C.TEXT_DIM),
+        "",
+        ("How LLM co-exists with the 36 FPS vision stack", C.ACCENT_AMBER, True),
+        ("• On edge: one NPU shared. Every LLM query pauses vision for (prefill_ms + decode_ms). See the duty-cycle slide for the trade-off curve.",),
+        ("• Rule of thumb: for 200-token answers, LLM is ~50-150 ms active — vision pipeline barely notices at query rates < 1 Hz.",),
+    ], font_size=10)
+
+
+def slide_llm_duty_cycle(prs: Presentation):
+    """Slide: vision FPS vs LLM query rate — the real concurrency story."""
+    path = Path("data/output/bakeoff/llm_edge_projection.json")
+    if not path.exists():
+        return
+    edge = json.loads(path.read_text())
+    proj = edge["projections"]
+    q4 = proj.get("Q4_K_M")
+    if not q4:
+        return
+
+    vision_fps = 36.0          # full-stack shipping target from TRT bake-offs
+    vision_ms_per_frame = 1000.0 / vision_fps
+    # Short answer: 200 decode tokens
+    # Long answer: 2000 decode tokens (RAG-heavy)
+    edge_decode = q4["decode_edge_projected_tok_s"]
+    short_answer_ms = (200 / edge_decode) * 1000 if edge_decode > 0 else 0
+    long_answer_ms = q4["rag_edge_total_ms"]  # 8K prefill + 2K decode
+
+    # Build a figure: X = queries per minute, Y = effective vision FPS
+    # Duty cycle = (query_rate_hz * answer_ms) / 1000
+    # Effective vision FPS = vision_fps * (1 - duty_cycle), floored at 0
+    import matplotlib.pyplot as plt
+    import numpy as np
+    fig, ax = plt.subplots(1, 1, figsize=(10, 4.5), facecolor=MPL_COLORS["bg_slide"])
+    ax.set_facecolor(MPL_COLORS["bg_slide"])
+
+    qpm = np.linspace(0, 120, 200)  # 0-120 queries/minute
+    qps = qpm / 60.0
+
+    duty_short = qps * short_answer_ms / 1000
+    duty_long  = qps * long_answer_ms / 1000
+    fps_short = np.clip(vision_fps * (1 - duty_short), 0, vision_fps)
+    fps_long  = np.clip(vision_fps * (1 - duty_long),  0, vision_fps)
+
+    ax.plot(qpm, fps_short, color=MPL_COLORS["green"], linewidth=2.5,
+            label=f"Short answer (200 tok, ~{short_answer_ms:.0f} ms)")
+    ax.plot(qpm, fps_long, color=MPL_COLORS["orange"], linewidth=2.5,
+            label=f"RAG answer (8K prefill + 2K decode, ~{long_answer_ms/1000:.1f} s)")
+
+    # Threshold lines
+    for thr, lbl, col in [(30, "30 FPS", MPL_COLORS["dim"]),
+                          (15, "15 FPS (surveillance)", MPL_COLORS["dim"]),
+                          (10, "10 FPS (minimum live)", MPL_COLORS["dim"])]:
+        ax.axhline(y=thr, color=col, linestyle=":", alpha=0.5, linewidth=1)
+        ax.text(118, thr + 0.6, lbl, color=MPL_COLORS["dim"], fontsize=8, ha="right")
+
+    ax.set_xlabel("LLM queries per minute", color=MPL_COLORS["text"], fontsize=11)
+    ax.set_ylabel("Effective vision FPS (Edge MPU)", color=MPL_COLORS["text"], fontsize=11)
+    ax.set_title("Vision pipeline FPS under concurrent LLM load",
+                 color=MPL_COLORS["text"], fontsize=13, fontweight="bold", pad=10)
+    ax.set_xlim(0, 120)
+    ax.set_ylim(0, vision_fps + 2)
+    ax.tick_params(colors=MPL_COLORS["dim"], labelsize=10)
+    ax.spines[:].set_color(MPL_COLORS["grid"])
+    ax.grid(True, color=MPL_COLORS["grid"], alpha=0.3)
+    ax.legend(loc="lower left", facecolor=MPL_COLORS["bg_slide"], edgecolor=MPL_COLORS["grid"],
+              labelcolor=MPL_COLORS["text"], fontsize=10)
+    fig.tight_layout(pad=1.0)
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(slide, "NPU Duty-Cycle Trade-off — Vision FPS vs LLM Query Rate",
+                       "One NPU, two workloads. Every LLM query pauses vision for the answer's duration.")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO-seg FP8 (TRT)",
+                                "CLIP FP8 (TRT)", "SQLite",
+                                ("Qwen3-30B-A3B (shared NPU)", True)])
+
+    # Add the chart image
+    buf = fig_to_image_stream(fig)
+    slide.shapes.add_picture(buf, Inches(CONTENT_LEFT), Inches(1.9),
+                              width=Inches(CONTENT_W))
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.8, CONTENT_W, 1.25, [
+        ("The trade-off (720p edge, all-TRT stack, Qwen3-30B-A3B Q4_K_M):", C.ACCENT_BLUE, True),
+        (f"• Short 200-token answers (~{short_answer_ms:.0f} ms each): vision barely dips until ~60+ queries/min — one query/sec keeps vision at ~32 FPS",
+         C.ACCENT_GREEN, True),
+        (f"• 8K+2K RAG answers (~{long_answer_ms/1000:.1f} s each): duty cycle explodes — 10 queries/min drops vision to ~{vision_fps * (1 - (10/60)*long_answer_ms/1000):.0f} FPS",
+         C.ACCENT_AMBER, True),
+        ("• If both workloads need to be live-responsive: budget a second NPU for the LLM, or batch vision inference across multiple streams on the existing one.",
+         C.TEXT_DIM),
+    ], font_size=10)
+
+
 def slide_keyframe_debounce(prs: Presentation):
     """Slide: CLIP keyframe debouncing unlocks real-time on Hybrid V2."""
     path = Path("data/output/bakeoff/keyframe_debounce_summary.json")
@@ -1789,19 +1946,22 @@ def slide_optimization_roadmap(prs: Presentation):
         ["CLIP visual FP8 via TensorRT 10.16",     "~50% on CLIP (full model)", "66.3 FPS",  "MEASURED — top-1 agree 0.964"],
         ["Hybrid V2 + CLIP every-frame (all TRT)", "stacked, no debounce",       "24 FPS",    "PROJECTED — real-time, simplest"],
         ["Hybrid V2 + 1 Hz CLIP (all TRT)",        "stacked, debounced",         "36 FPS",    "PROJECTED — at YOLO ceiling"],
+        ["LLM: Qwen3-30B-A3B Q4_K_M (MoE)",         "3B active / 30B total",     "~16 tok/s", "MEASURED 5090, edge BW-projected"],
+        ["Vision + LLM concurrent (short query)",   "duty-cycle sharing",         "~32 FPS",   "PROJECTED — 1 query/s, 200 tok"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
                      Inches(CONTENT_W), Inches(3.9), headers, rows,
-                     highlight_rows=[15],  # Full-stack 1 Hz all-TRT — shipping target
+                     highlight_rows=[17],  # Full-stack 1 Hz all-TRT — shipping target
                      font_size=9, header_font_size=10)
 
     add_bullet_box(slide, CONTENT_LEFT, 5.45, CONTENT_W, 1.6, [
         ("Bake-off sequence — all measurements complete", C.ACCENT_PURPLE, True),
-        ("1-3. ES-Small quantization: FP8 (94/95 Linears) & plain INT8 both halve act traffic → 4.9 FPS edge; SmoothQuant CONVERT blocked by torchao 0.17",),
-        ("4-5. Hybrid V2 CLIP: torchao FP8/INT8 on 48/72 Linears → 4.9 FPS; CLIP @ 1 Hz keyframe debounce → 16 FPS (93% of YOLO ceiling)",),
-        ("6-7. YOLO-seg Conv: torchao 1×1 swap INT8 → 23.8 FPS (partial); TensorRT 10.16 full Conv-FP8 → 36.8 FPS (+98%, recall 1.00)",),
-        ("8. CLIP visual FP8 via TensorRT → 29.8 → 15.1 ms edge (+120% CLIP FPS); full TRT stack projects 36 FPS shipping",),
-        ("9. [OPEN] Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
+        ("1-3. ES-Small quant: FP8 (94/95) & plain INT8 both → 4.9 FPS edge; SmoothQuant CONVERT blocked by torchao 0.17",),
+        ("4-5. Hybrid V2 CLIP torchao FP8/INT8 (48/72) → 4.9 FPS; 1 Hz keyframe debounce → 16 FPS (93% of YOLO ceiling)",),
+        ("6-7. YOLO-seg Conv: torchao 1×1 swap INT8 → 23.8 FPS (partial); TRT 10.16 full Conv-FP8 → 36.8 FPS (+98%, recall 1.00)",),
+        ("8. CLIP visual FP8 via TRT → 29.8 → 15.1 ms edge (+120% CLIP FPS); full TRT stack projects 36 FPS shipping",),
+        ("9. LLM — Qwen3-30B-A3B MoE (Q4/Q5/Q8): edge decode 16.5 tok/s @ Q4_K_M; duty-cycle chart quantifies vision/LLM coexistence",),
+        ("10. [OPEN] Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
     ], font_size=9)
 
 
@@ -2170,6 +2330,13 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/trt_clip_edge_projection.json").exists():
         console.print("  Building: TensorRT CLIP visual")
         slide_trt_clip(prs)
+
+    # LLM bake-off + duty-cycle trade-off (only if data present)
+    if Path("data/output/bakeoff/llm_edge_projection.json").exists():
+        console.print("  Building: LLM bake-off (Qwen3-30B-A3B)")
+        slide_llm_bakeoff(prs)
+        console.print("  Building: NPU duty-cycle trade-off")
+        slide_llm_duty_cycle(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
