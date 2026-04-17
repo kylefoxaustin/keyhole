@@ -86,6 +86,7 @@ def sheet_index() -> pd.DataFrame:
         {"Sheet": "CLIP keyframe debounce",   "Description": "Run CLIP every Nth frame — stability vs effective edge FPS"},
         {"Sheet": "YOLO conv quant torchao",  "Description": "swap_conv2d_1x1_to_linear + INT8 on YOLO-seg; FP8 blocked"},
         {"Sheet": "EfficientSAM3 SAM3 Lite",  "Description": "Apr 2026 community SAM 3 Lite (ES-EV-S): 5090 ms + NPU Mid projection + IoU vs SAM 3"},
+        {"Sheet": "YOLOE-26 one-model",       "Description": "Jan 2026 Ultralytics YOLOE-26 open-vocab: text-prompted vs prompt-free, 5090 ms + NPU Mid FPS + box recall"},
         {"Sheet": "TRT YOLO",                 "Description": "TensorRT FP16/INT8/FP8 on YOLO-seg — full Conv unblock on Blackwell"},
         {"Sheet": "TRT CLIP",                 "Description": "TensorRT FP16/FP8 on CLIP ViT-B-32 visual tower"},
         {"Sheet": "LLM Qwen3 5090",           "Description": "Qwen3-30B-A3B Q4_K_M/Q5_K_M/Q8_0 — prefill sweep, decode sweep, RAG"},
@@ -202,6 +203,38 @@ def sheet_hybrid_v2_clip() -> pd.DataFrame | None:
                 "Edge CLIP ms (proj)": round(p.get("projected_clip_ms_edge", 0), 1),
                 "Edge total ms (proj)": round(p.get("projected_total_ms_edge", 0), 1),
                 "Edge FPS (proj)": round(p.get("projected_fps_edge", 0), 2),
+            })
+    return pd.DataFrame(rows)
+
+
+def sheet_yoloe26() -> pd.DataFrame | None:
+    d = _load("yoloe26_summary.json")
+    if not d:
+        return None
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)
+    rows = []
+    for tag, v in d.get("variants", {}).items():
+        if "error" in v:
+            continue
+        for res, r in v.get("by_resolution", {}).items():
+            ms_5090 = r["per_frame_ms_5090"]["p50"]
+            ms_mid = ms_5090 * bw_ratio
+            rows.append({
+                "Variant":           tag,
+                "Weights":           v["weights"],
+                "Prompt free":       v["prompt_free"],
+                "Resolution":        res,
+                "Params (M)":        round(v["params_m"], 2),
+                "VRAM MB (5090)":    round(v["peak_vram_mb_5090"], 0),
+                "5090 mean ms":      round(r["per_frame_ms_5090"]["mean"], 2),
+                "5090 p50 ms":       round(r["per_frame_ms_5090"]["p50"], 2),
+                "5090 p95 ms":       round(r["per_frame_ms_5090"]["p95"], 2),
+                "NPU Mid ms (BW-scaled)": round(ms_mid, 1),
+                "NPU Mid FPS":       round(1000.0 / ms_mid, 2) if ms_mid > 0 else 0.0,
+                "N YOLOE boxes":     r["n_boxes_yoloe"],
+                "N ref YOLO11x boxes": r["n_boxes_reference_yolo11x"],
+                "N matched IoU≥0.5": r["n_matched_boxes_iou_ge_0.5"],
+                "Box recall":        round(r["box_recall_vs_yolo11x"], 3),
             })
     return pd.DataFrame(rows)
 
@@ -465,6 +498,7 @@ SHEETS = [
     ("CLIP keyframe debounce",   sheet_keyframe_debounce),
     ("YOLO conv quant torchao",  sheet_yolo_conv_quant),
     ("EfficientSAM3 SAM3 Lite",  sheet_efficientsam3),
+    ("YOLOE-26 one-model",       sheet_yoloe26),
     ("TRT YOLO",                 sheet_trt_yolo),
     ("TRT CLIP",                 sheet_trt_clip),
     ("LLM Qwen3 5090",           sheet_llm_qwen3_5090),

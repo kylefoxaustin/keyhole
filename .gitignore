@@ -11,6 +11,9 @@ venv/
 *.pth
 *.safetensors
 *.onnx
+# TorchScript weight blobs (e.g. mobileclip2_b.ts auto-downloaded by ultralytics YOLOE)
+mobileclip2_*.ts
+mobileclip_*.ts
 data/videos/*.mp4
 data/videos/*.avi
 data/videos/*.mkv

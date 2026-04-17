@@ -2126,6 +2126,100 @@ def slide_keyframe_debounce(prs: Presentation):
     ], font_size=11)
 
 
+def slide_yoloe26_onemodel(prs: Presentation):
+    """Slide: "Ultralytics YOLOE-26 — the one-model open-vocab alternative" — benches the
+    Jan 2026 YOLOE-26S-PF release against our two-stage YOLO-seg + CLIP shipping stack.
+
+    Post-ship watch on architectural simplification (Option B). YOLOE-26 collapses
+    detector + open-vocab labeler into a single model with 4585-class built-in vocab.
+    Worth benching as a pipeline-simplification story even though we ship something
+    faster with the two-stage TRT FP8 stack.
+    """
+    path = Path("data/output/bakeoff/yoloe26_summary.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Option-B watch: Ultralytics YOLOE-26 — one-model open-vocab",
+        "Single model replaces YOLO-seg + CLIP. 13 FPS NPU Mid @ 720p in PyTorch FP16 — 3× slower than our shipping stack, but 10× simpler.",
+    )
+    add_pipeline_strip(
+        slide,
+        ["FFmpeg", ("YOLOE-26S-PF  (one model)", True), "(no CLIP)", "SQLite", "NLQ / LLM"],
+        accent_color=C.ACCENT_AMBER,
+    )
+
+    # Per-variant, per-resolution numbers
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # 14.17×
+    headers = ["Variant", "Res", "Params",
+                "5090 ms (p50)", "NPU Mid ms (BW-scaled)", "NPU Mid FPS",
+                "Box recall vs YOLO11x"]
+    rows = []
+    tag_display = {
+        "text_prompt_s":  "YOLOE-26S (text prompts: 20 concepts)",
+        "prompt_free_s":  "YOLOE-26S-PF (prompt-free, 4585 vocab)",
+    }
+    for tag in ["text_prompt_s", "prompt_free_s"]:
+        v = data["variants"].get(tag)
+        if not v or "error" in v:
+            continue
+        for res in ["720p", "1080p", "4K"]:
+            r = v["by_resolution"].get(res)
+            if not r:
+                continue
+            ms_5090 = r["per_frame_ms_5090"]["p50"]
+            ms_mid = ms_5090 * bw_ratio
+            rows.append([
+                tag_display[tag] if res == "720p" else "",
+                res,
+                f"{v['params_m']:.1f}M" if res == "720p" else "",
+                f"{ms_5090:.2f} ms",
+                f"{ms_mid:.1f} ms",
+                f"{1000/ms_mid:.2f} FPS",
+                f"{r['box_recall_vs_yolo11x']:.3f}",
+            ])
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.9),
+        Inches(CONTENT_W), Inches(2.2), headers, rows,
+        font_size=9,
+    )
+
+    # Head-to-head at 720p NPU Mid
+    comp_headers = ["Architecture", "NPU Mid FPS @ 720p", "Models on the NPU", "Note"]
+    comp_rows = [
+        ["SAM 3 BF16",                           "0.40 FPS",  "1 (SAM 3)",           "Dead-on-arrival baseline."],
+        ["EfficientSAM3 ES-EV-S BF16 (Apr 2026)", "2.59 FPS",  "1 (community lite)",  "Community SAM 3 Lite, open-vocab preserved."],
+        ["YOLOE-26S-PF FP16 (Jan 2026)",          "13.25 FPS", "1 (one-model)",       "Replaces YOLO-seg + CLIP. Simplest stack."],
+        ["Keyhole shipping (TRT FP8 + 1 Hz CLIP)", "36.1 FPS",  "2 (YOLO-seg + CLIP)", "Our optimized two-stage pipeline."],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(4.3),
+        Inches(CONTENT_W), Inches(1.3), comp_headers, comp_rows,
+        highlight_rows=[4],
+        font_size=10,
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.7, CONTENT_W, 1.7, [
+        ("Why this matters: architectural simplification", C.ACCENT_BLUE, True),
+        ("• One model vs two. No CLIP pass, no two-stage orchestration, no separate keyframe-debounce logic. "
+         "Same output shape as YOLO-seg today: boxes + masks + labels per frame.", C.TEXT_BRIGHT),
+        ("• Recall vs our YOLO11x prompt boxes: 65% @ 720p, 86% @ 1080p, 81% @ 4K (prompt-free variant). "
+         "Text-prompted with our 20-concept SAM 3 list: lower recall at 720p (0.60) but comparable at higher resolutions.",
+         C.TEXT_DIM),
+        "",
+        ("What's missing vs shipping", C.ACCENT_ORANGE, True),
+        ("• No TRT/FP8 path explored yet — this is plain PyTorch FP16. TRT FP8 would potentially close most of the gap to 36 FPS.",
+         C.TEXT_BRIGHT),
+        ("• License is AGPL-3.0 (same as ultralytics itself). Commercial licensing via Ultralytics if needed for a proprietary product.",
+         C.TEXT_DIM),
+        ("• Accuracy tradeoff: 65-86% recall depending on resolution — acceptable for a research demo; would need validation against Keyhole's actual use cases before any production swap.",
+         C.ACCENT_AMBER),
+    ], font_size=10)
+
+
 def slide_efficientsam3_community(prs: Presentation):
     """Slide: "The community finally shipped a SAM 3 Lite" — EfficientSAM3 ES-EV-S benched against our shipping stack.
 
@@ -2648,6 +2742,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/efficientsam3_summary.json").exists():
         console.print("  Building: EfficientSAM3 community bake-off (SAM 3 Lite watch)")
         slide_efficientsam3_community(prs)
+
+    # YOLOE-26 one-model open-vocab (Option B watch)
+    if Path("data/output/bakeoff/yoloe26_summary.json").exists():
+        console.print("  Building: YOLOE-26 one-model open-vocab (Option B watch)")
+        slide_yoloe26_onemodel(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
