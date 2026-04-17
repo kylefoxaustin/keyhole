@@ -86,6 +86,7 @@ def sheet_index() -> pd.DataFrame:
         {"Sheet": "CLIP keyframe debounce",   "Description": "Run CLIP every Nth frame — stability vs effective edge FPS"},
         {"Sheet": "YOLO conv quant torchao",  "Description": "swap_conv2d_1x1_to_linear + INT8 on YOLO-seg; FP8 blocked"},
         {"Sheet": "EfficientSAM3 SAM3 Lite",  "Description": "Apr 2026 community SAM 3 Lite (ES-EV-S): 5090 ms + NPU Mid projection + IoU vs SAM 3"},
+        {"Sheet": "EfficientSAM3.1 text-prompt", "Description": "SAM 3.1 student (106M, 4× smaller than Option A): text-prompt latency at n=1/5/20 concepts"},
         {"Sheet": "YOLOE-26 one-model",       "Description": "Jan 2026 Ultralytics YOLOE-26 open-vocab: text-prompted vs prompt-free, 5090 ms + NPU Mid FPS + box recall"},
         {"Sheet": "TRT YOLO",                 "Description": "TensorRT FP16/INT8/FP8 on YOLO-seg — full Conv unblock on Blackwell"},
         {"Sheet": "TRT CLIP",                 "Description": "TensorRT FP16/FP8 on CLIP ViT-B-32 visual tower"},
@@ -203,6 +204,29 @@ def sheet_hybrid_v2_clip() -> pd.DataFrame | None:
                 "Edge CLIP ms (proj)": round(p.get("projected_clip_ms_edge", 0), 1),
                 "Edge total ms (proj)": round(p.get("projected_total_ms_edge", 0), 1),
                 "Edge FPS (proj)": round(p.get("projected_fps_edge", 0), 2),
+            })
+    return pd.DataFrame(rows)
+
+
+def sheet_efficientsam3p1() -> pd.DataFrame | None:
+    d = _load("efficientsam3p1_summary.json")
+    if not d:
+        return None
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)
+    rows = []
+    for res, r in d.get("by_resolution", {}).items():
+        for n in [1, 5, 20]:
+            key = {1: "n_1_concept", 5: "n_5_concepts", 20: "n_20_concepts_exhaustive"}[n]
+            ms_5090 = r["per_frame_5090_ms"][key]
+            ms_mid = ms_5090 * bw_ratio
+            rows.append({
+                "Resolution":        res,
+                "N concepts":        n,
+                "set_image p50 (5090)": round(r["set_image_5090_p50_ms"], 2),
+                "per-prompt p50 (5090)": round(r["per_prompt_5090_p50_ms"], 2),
+                "Total 5090 ms":     round(ms_5090, 2),
+                "NPU Mid ms (BW-scaled)": round(ms_mid, 1),
+                "NPU Mid FPS":       round(1000.0 / ms_mid, 3) if ms_mid > 0 else 0.0,
             })
     return pd.DataFrame(rows)
 
@@ -498,6 +522,7 @@ SHEETS = [
     ("CLIP keyframe debounce",   sheet_keyframe_debounce),
     ("YOLO conv quant torchao",  sheet_yolo_conv_quant),
     ("EfficientSAM3 SAM3 Lite",  sheet_efficientsam3),
+    ("EfficientSAM3.1 text-prompt", sheet_efficientsam3p1),
     ("YOLOE-26 one-model",       sheet_yoloe26),
     ("TRT YOLO",                 sheet_trt_yolo),
     ("TRT CLIP",                 sheet_trt_clip),

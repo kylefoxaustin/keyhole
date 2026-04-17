@@ -2126,6 +2126,91 @@ def slide_keyframe_debounce(prs: Presentation):
     ], font_size=11)
 
 
+def slide_efficientsam3p1_textprompt(prs: Presentation):
+    """Slide: "EfficientSAM3.1 — the text-prompt-capable smaller variant" — SAM 3.1 student."""
+    path = Path("data/output/bakeoff/efficientsam3p1_summary.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+    by_res = data["by_resolution"]
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "EfficientSAM3.1 ES-EV-S — text-prompt-capable smaller variant",
+        "SAM 3.1 distilled student: 106M params (4× smaller than Option A). Keeps SAM 3's text-concept prompting natively.",
+    )
+    add_pipeline_strip(
+        slide,
+        ["FFmpeg", "(text concept prompt)", ("EfficientSAM3.1 ES-EV-S BF16", True), "SQLite", "NLQ / LLM"],
+        accent_color=C.ACCENT_PURPLE,
+    )
+
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # 14.17×
+
+    # Primary table: per-resolution 5090 cost split + NPU Mid totals for n=1/5/20
+    headers = ["Resolution",
+                "set_image ms (5090)",
+                "per-prompt ms (5090)",
+                "n=1 5090 ms",
+                "n=5 5090 ms",
+                "n=20 5090 ms",
+                "n=1 NPU Mid FPS",
+                "n=5 NPU Mid FPS"]
+    rows = []
+    for res in ["720p", "1080p", "4K"]:
+        if res not in by_res:
+            continue
+        r = by_res[res]
+        n1 = r["per_frame_5090_ms"]["n_1_concept"]
+        n5 = r["per_frame_5090_ms"]["n_5_concepts"]
+        n20 = r["per_frame_5090_ms"]["n_20_concepts_exhaustive"]
+        fps_n1_mid  = 1000.0 / (n1 * bw_ratio)
+        fps_n5_mid  = 1000.0 / (n5 * bw_ratio)
+        rows.append([
+            res,
+            f"{r['set_image_5090_p50_ms']:.1f} ms",
+            f"{r['per_prompt_5090_p50_ms']:.1f} ms",
+            f"{n1:.1f}", f"{n5:.1f}", f"{n20:.1f}",
+            f"{fps_n1_mid:.2f}", f"{fps_n5_mid:.2f}",
+        ])
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
+                      Inches(CONTENT_W), Inches(1.8), headers, rows,
+                      font_size=9, header_font_size=10)
+
+    # Comparison row
+    comp_headers = ["Variant", "Total params", "Path", "720p NPU Mid (best-case)"]
+    comp_rows = [
+        ["SAM 3 BF16 (baseline)",                       "840M", "text-concept (native)",    "0.40 FPS"],
+        ["EfficientSAM3 ES-EV-S BF16 (Option A)",       "424M", "box-prompt (batched)",     "2.59 FPS (18 boxes)"],
+        ["EfficientSAM3.1 ES-EV-S BF16 (SAM3.1 student)", "106M", "text-concept (native)",  "2.33 FPS (1 concept)"],
+        ["Keyhole shipping (TRT FP8 + 1 Hz CLIP)",       "~40M total two-stage", "detector + CLIP tagger", "36.1 FPS"],
+    ]
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.9),
+                      Inches(CONTENT_W), Inches(1.3), comp_headers, comp_rows,
+                      highlight_rows=[3, 4],  # Option A-smaller + shipping
+                      font_size=10)
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.3, CONTENT_W, 2.1, [
+        ("What's new vs Option A", C.ACCENT_BLUE, True),
+        ("• 4× fewer params (106M vs 424M). Vision encoder 31M (EfficientViT-S), text encoder 43M (MobileCLIP-S0 ctx=16) — both distilled. "
+         "Peak VRAM on 5090: 1.8 GB (vs 3.0 GB for Option A).", C.TEXT_BRIGHT),
+        ("• Lives on the upstream `stage1_sam3.1` branch with new arg convention: "
+         "`model_name='s'`, `text_encoder_type='mobileclip-s0'`. The main-branch builder silently produces a "
+         "state_dict mismatch if loaded the old way. That's why we deferred it — now unblocked.",
+         C.TEXT_DIM),
+        "",
+        ("Workload shape matters", C.ACCENT_ORANGE, True),
+        ("• Text-prompt latency is set_image (~10 ms, amortized) + 20 ms per concept. For 1-concept queries matches "
+         "Option A's box-prompt throughput (2.3 vs 2.6 FPS). For 5-concept queries drops to 0.6 FPS; for exhaustive "
+         "20-concept sweeps, 0.2 FPS — text-prompting is a linear-in-N cost, not free.",
+         C.TEXT_BRIGHT),
+        ("• Right shape for: 'find me all people' (1 concept) or 'find people and cars' (2 concepts). Wrong shape "
+         "for exhaustive label-all-objects scans — our TRT-shipping stack does that at 36 FPS by using CLIP on "
+         "detected crops, not by re-running the mask model per concept.", C.ACCENT_GREEN),
+    ], font_size=10)
+
+
 def slide_yoloe26_onemodel(prs: Presentation):
     """Slide: "Ultralytics YOLOE-26 — the one-model open-vocab alternative" — benches the
     Jan 2026 YOLOE-26S-PF release against our two-stage YOLO-seg + CLIP shipping stack.
@@ -2742,6 +2827,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/efficientsam3_summary.json").exists():
         console.print("  Building: EfficientSAM3 community bake-off (SAM 3 Lite watch)")
         slide_efficientsam3_community(prs)
+
+    # EfficientSAM3.1 text-prompt-capable smaller variant (SAM 3.1 student)
+    if Path("data/output/bakeoff/efficientsam3p1_summary.json").exists():
+        console.print("  Building: EfficientSAM3.1 text-prompt variant (SAM 3.1 student)")
+        slide_efficientsam3p1_textprompt(prs)
 
     # YOLOE-26 one-model open-vocab (Option B watch)
     if Path("data/output/bakeoff/yoloe26_summary.json").exists():
