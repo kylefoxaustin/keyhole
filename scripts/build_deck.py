@@ -2126,6 +2126,92 @@ def slide_keyframe_debounce(prs: Presentation):
     ], font_size=11)
 
 
+def slide_efficientsam3_community(prs: Presentation):
+    """Slide: "The community finally shipped a SAM 3 Lite" — EfficientSAM3 ES-EV-S benched against our shipping stack.
+
+    Post-ship watch on roadmap item #9 (SAM 3 Lite). As of April 2026 the
+    community has released EfficientSAM3 (ES-EV-S, Apache-2.0, ~424M total /
+    26M vision backbone). We bench it against cached frames + YOLO prompt
+    boxes + SAM 3 reference masks from our existing bake-off to check whether
+    the community caught up.
+    """
+    path = Path("data/output/bakeoff/efficientsam3_summary.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Post-ship watch: the community finally shipped a SAM 3 Lite",
+        "EfficientSAM3 ES-EV-S (Apr 2026, Apache-2.0) — 6.5× faster than SAM 3, still 13× behind our shipping stack.",
+    )
+    add_pipeline_strip(
+        slide,
+        ["FFmpeg", "YOLO 11x", ("EfficientSAM3 ES-EV-S BF16", True), "SQLite", "NLQ / LLM"],
+        accent_color=C.ACCENT_PURPLE,
+    )
+
+    # Per-resolution measured + projected numbers
+    by_res = data["by_resolution"]
+    headers = ["Resolution", "5090 ms (p50)", "NPU Mid ms (BW-scaled)",
+                "NPU Mid FPS", "Mean IoU vs SAM 3", "VRAM"]
+    rows = []
+    for res in ["720p", "1080p", "4K"]:
+        if res not in by_res:
+            continue
+        r = by_res[res]
+        ms_5090 = r["per_frame_ms_5090"]["p50"]
+        # Bandwidth ratio from npu_model.py (5090 effective BW ÷ NPU Mid effective BW)
+        bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # = 14.17x
+        ms_mid = ms_5090 * bw_ratio
+        fps_mid = 1000.0 / ms_mid if ms_mid > 0 else 0.0
+        iou = r["iou_vs_sam3"]["mean"]
+        rows.append([
+            res,
+            f"{ms_5090:.1f} ms",
+            f"{ms_mid:.0f} ms",
+            f"{fps_mid:.2f} FPS",
+            f"{iou:.3f}",
+            f"{data['peak_vram_mb_5090']:.0f} MB (5090 BF16)" if res == "720p" else "—",
+        ])
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.9),
+        Inches(CONTENT_W), Inches(1.8), headers, rows,
+    )
+
+    # Head-to-head comparison at 720p NPU Mid
+    comp_headers = ["Model / stack", "NPU Mid FPS @ 720p", "Note"]
+    comp_rows = [
+        ["SAM 3 BF16 (Meta baseline)",    "0.40 FPS",  "The thing we are replacing — DOA at the edge."],
+        ["EfficientSAM3 ES-EV-S (BF16)",  "2.59 FPS",  "Community lite, Apr 2026. 6.5× over SAM 3."],
+        ["EfficientSAM-Small FP8 (ours)", "4.93 FPS",  "Mask-only, SAM 1/2 era model + FP8 quant."],
+        ["Keyhole shipping (TRT FP8, 1 Hz CLIP)", "36.1 FPS", "YOLO-seg FP8 + CLIP FP8, both on TensorRT."],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(4.0),
+        Inches(CONTENT_W), Inches(1.5), comp_headers, comp_rows,
+        highlight_rows=[4],   # shipping stack
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.9, CONTENT_W, 1.7, [
+        ("What just happened", C.ACCENT_BLUE, True),
+        ("• ES-EV-S (EfficientViT-B0 vision backbone, distilled from SAM 3's 462M encoder to 26M) dropped on HF + GitHub "
+         "mid-April 2026, with Apache-2.0 licensing and preserved text-concept prompting.", C.TEXT_BRIGHT),
+        ("• We benched it in a separate Python 3.12 / uv venv against our existing cached frames + YOLO prompt boxes — "
+         "no re-extraction needed. IoU vs SAM 3 = 0.575 (moderate mask agreement). 5090 BF16, BW-scaled to NPU Mid.",
+         C.TEXT_DIM),
+        "",
+        ("Why we still ship YOLO-seg FP8 TRT + CLIP FP8 TRT", C.ACCENT_INDIGO, True),
+        ("• ES-EV-S is 6.5× faster than SAM 3 but 13× slower than our shipping stack. It has no TRT path, no FP8 path, "
+         "and the vision backbone is only 6% of the total 424M params — the rest is text encoder + segmentation head.",
+         C.TEXT_BRIGHT),
+        ("• Takeaway: even when the community ships a credible SAM 3 Lite, an optimized two-stage pipeline (detector + "
+         "open-vocab CLIP) on edge-native kernels beats a monolithic open-vocab SAM by an order of magnitude.",
+         C.ACCENT_GREEN),
+    ], font_size=10)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = new_slide(prs)
@@ -2171,7 +2257,7 @@ def slide_optimization_roadmap(prs: Presentation):
         ("8. CLIP visual FP8 via TRT → 29.8 → 15.1 ms edge (+120% CLIP FPS); full TRT stack projects 36 FPS shipping",),
         ("9. LLM — Qwen3-30B-A3B MoE (Q4/Q5/Q8): NPU Low/Mid/High vendor actuals: 29 / 38 / 50 tok/s Q4_K_M; duty-cycle chart quantifies vision+LLM coexistence",),
         ("10. Multi-stream concurrency — TRT YOLO dynamic-batch: 4 streams @ 26 FPS each (not 9), 8 @ 15, batching amortizes kernel overhead",),
-        ("11. [OPEN] Monitor Meta for an official quantized SAM 3 / SAM 3 Lite release",),
+        ("11. [PARTIAL] SAM 3 Lite watch — community shipped EfficientSAM3 ES-EV-S Apr 2026; benched at 2.59 FPS @ 720p NPU Mid (6.5× over SAM 3, still 13× behind our shipping stack). Meta SAM 3.1 / distillations still data-center-only.",),
     ], font_size=9)
 
 
@@ -2557,6 +2643,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/concurrency_edge_projection.json").exists():
         console.print("  Building: Multi-stream concurrency")
         slide_concurrency(prs)
+
+    # Community SAM 3 Lite post-ship watch (roadmap #9)
+    if Path("data/output/bakeoff/efficientsam3_summary.json").exists():
+        console.print("  Building: EfficientSAM3 community bake-off (SAM 3 Lite watch)")
+        slide_efficientsam3_community(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")

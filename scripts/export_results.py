@@ -85,6 +85,7 @@ def sheet_index() -> pd.DataFrame:
         {"Sheet": "Hybrid V2 CLIP quant",     "Description": "CLIP FP8/INT8 on Hybrid V2 (YOLO-seg + CLIP) — concept tag stability"},
         {"Sheet": "CLIP keyframe debounce",   "Description": "Run CLIP every Nth frame — stability vs effective edge FPS"},
         {"Sheet": "YOLO conv quant torchao",  "Description": "swap_conv2d_1x1_to_linear + INT8 on YOLO-seg; FP8 blocked"},
+        {"Sheet": "EfficientSAM3 SAM3 Lite",  "Description": "Apr 2026 community SAM 3 Lite (ES-EV-S): 5090 ms + NPU Mid projection + IoU vs SAM 3"},
         {"Sheet": "TRT YOLO",                 "Description": "TensorRT FP16/INT8/FP8 on YOLO-seg — full Conv unblock on Blackwell"},
         {"Sheet": "TRT CLIP",                 "Description": "TensorRT FP16/FP8 on CLIP ViT-B-32 visual tower"},
         {"Sheet": "LLM Qwen3 5090",           "Description": "Qwen3-30B-A3B Q4_K_M/Q5_K_M/Q8_0 — prefill sweep, decode sweep, RAG"},
@@ -202,6 +203,32 @@ def sheet_hybrid_v2_clip() -> pd.DataFrame | None:
                 "Edge total ms (proj)": round(p.get("projected_total_ms_edge", 0), 1),
                 "Edge FPS (proj)": round(p.get("projected_fps_edge", 0), 2),
             })
+    return pd.DataFrame(rows)
+
+
+def sheet_efficientsam3() -> pd.DataFrame | None:
+    d = _load("efficientsam3_summary.json")
+    if not d:
+        return None
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # 5090 eff / NPU Mid eff ≈ 14.17
+    rows = []
+    for res, r in d.get("by_resolution", {}).items():
+        ms_5090 = r["per_frame_ms_5090"]["p50"]
+        ms_mid = ms_5090 * bw_ratio
+        rows.append({
+            "Resolution":        res,
+            "Clip":              r["clip"],
+            "N frames timed":    r["n_frames_timed"],
+            "N boxes (total)":   r["n_boxes_total"],
+            "5090 mean ms":      round(r["per_frame_ms_5090"]["mean"], 1),
+            "5090 p50 ms":       round(r["per_frame_ms_5090"]["p50"], 1),
+            "5090 p95 ms":       round(r["per_frame_ms_5090"]["p95"], 1),
+            "NPU Mid ms (BW-scaled)": round(ms_mid, 0),
+            "NPU Mid FPS (proj)": round(1000.0 / ms_mid, 2) if ms_mid > 0 else 0.0,
+            "Mean IoU vs SAM 3": round(r["iou_vs_sam3"]["mean"], 3),
+            "Median IoU vs SAM 3": round(r["iou_vs_sam3"]["median"], 3),
+            "IoU sample count":  r["iou_vs_sam3"]["n"],
+        })
     return pd.DataFrame(rows)
 
 
@@ -437,6 +464,7 @@ SHEETS = [
     ("Hybrid V2 CLIP quant",     sheet_hybrid_v2_clip),
     ("CLIP keyframe debounce",   sheet_keyframe_debounce),
     ("YOLO conv quant torchao",  sheet_yolo_conv_quant),
+    ("EfficientSAM3 SAM3 Lite",  sheet_efficientsam3),
     ("TRT YOLO",                 sheet_trt_yolo),
     ("TRT CLIP",                 sheet_trt_clip),
     ("LLM Qwen3 5090",           sheet_llm_qwen3_5090),
