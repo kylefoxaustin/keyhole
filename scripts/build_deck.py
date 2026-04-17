@@ -1956,11 +1956,11 @@ def slide_llm_bakeoff(prs: Presentation):
 
     add_bullet_box(slide, CONTENT_LEFT, 5.55, CONTENT_W, 1.6, [
         ("Key findings", C.ACCENT_BLUE, True),
-        ("• MoE wins on edge. Decode BW = active_params (3B) × bytes, not total (30B). A dense 14B at Q4_K_M would eat ~2× the BW for similar quality.", C.ACCENT_GREEN, True),
-        ("• Vendor actuals beat our BW-only projection by ~2.3×. Edge NPUs are purpose-built for LLM — better memory controllers, expert routing, tiling than a desktop GPU running llama.cpp.", C.ACCENT_AMBER, True),
-        ("• NPU Mid (the 128-bit LPDDR5X edge target): 5.3 s for a 200-tok answer, 57 s for an 8K+2K RAG turn. NPU High cuts that ~25% further.", C.ACCENT_INDIGO, True),
-        ("• Q4_K_M is the shipping quant. Q8_0 runs with ~half the tok/s (more bytes/param), so only worth it if downstream quality eval demands it.", C.TEXT_DIM),
-    ], font_size=10)
+        ("• MoE wins on bandwidth. Cross-reference from a Kyle-merged production Q4_K_M of the same model on the same 5090 host: 155 tok/s sustained / 192 peak (Prometheus, prod traffic) — within 3% of our synthetic 159 tok/s RAG decode. Synthetic numbers generalize.", C.ACCENT_GREEN, True),
+        ("• MoE 30B/3B-active beats dense Qwen 2.5 14B Q4_K_M on the same 5090 by ~25-40% decode (155 vs 85-140 tok/s) despite 2× total params — the 3B active footprint is what BW sees per token.", C.ACCENT_AMBER, True),
+        ("• Vendor NPU actuals beat our BW-only edge projection by ~2.3×. Purpose-built LLM silicon (memory controllers, expert routing, tiling) > llama.cpp on a desktop GPU.", C.ACCENT_INDIGO, True),
+        ("• NPU Mid: 5.3 s for 200-tok answer / 57 s for RAG 8K+2K. NPU High ~25% better. Q4_K_M is the shipping quant.", C.TEXT_DIM),
+    ], font_size=9)
 
 
 def slide_llm_duty_cycle(prs: Presentation):
