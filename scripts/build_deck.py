@@ -2211,6 +2211,93 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
     ], font_size=10)
 
 
+def slide_trt_yoloe26(prs: Presentation):
+    """Slide: "Does TRT FP8 close the YOLOE-26 gap?" — negative result, structural gap."""
+    path = Path("data/output/bakeoff/trt_yoloe26_summary.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+    recipes = data["recipes"]
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Does TRT FP8 close the one-model gap? — The honest answer: no.",
+        "YOLOE-26S-PF → TRT FP8 gives ~17% speedup, not 3×. Gap to shipping is structural.",
+    )
+    add_pipeline_strip(
+        slide,
+        ["FFmpeg", ("YOLOE-26S-PF TRT FP8", True), "(no CLIP)", "SQLite", "NLQ / LLM"],
+        accent_color=C.ACCENT_AMBER,
+    )
+
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # 14.17×
+
+    # Per-recipe per-resolution table
+    headers = ["Recipe", "720p 5090 (p50)", "1080p 5090", "4K 5090",
+                "720p NPU Mid FPS", "VRAM (5090)", "Speedup vs PT"]
+    rows = []
+    pt_ref_720 = recipes.get("pytorch_fp16", {}).get("by_resolution", {}).get("720p", {}).get("per_frame_ms_5090", {}).get("p50", 0)
+    for tag in ["pytorch_fp16", "trt_fp16", "trt_fp8"]:
+        r = recipes.get(tag)
+        if not r:
+            continue
+        def ms(res): return r["by_resolution"].get(res, {}).get("per_frame_ms_5090", {}).get("p50", 0)
+        p50_720 = ms("720p")
+        ms_mid = p50_720 * bw_ratio
+        fps_mid = 1000.0 / ms_mid if ms_mid > 0 else 0
+        speedup = pt_ref_720 / p50_720 if p50_720 > 0 else 0
+        rows.append([
+            tag.replace("_", " "),
+            f"{p50_720:.2f} ms",
+            f"{ms('1080p'):.2f} ms",
+            f"{ms('4K'):.2f} ms",
+            f"{fps_mid:.2f} FPS",
+            f"{r['peak_vram_mb_5090']:.0f} MB",
+            f"{speedup:.2f}×" if tag != "pytorch_fp16" else "baseline",
+        ])
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
+                      Inches(CONTENT_W), Inches(1.6), headers, rows,
+                      highlight_rows=[3],   # TRT FP8 row
+                      font_size=10)
+
+    # Context: where YOLOE-26 TRT FP8 slots in the progression
+    comp_headers = ["Stack", "720p NPU Mid FPS", "Note"]
+    comp_rows = [
+        ["SAM 3 BF16 (baseline)",                    "0.40 FPS",  "Dead-on-arrival."],
+        ["EfficientSAM3 ES-EV-S BF16 (Apr 2026)",     "2.59 FPS",  "Community lite; box-prompt."],
+        ["EfficientSAM3.1 ES-EV-S (SAM 3.1 student)", "2.33 FPS",  "Text-prompt; 1 concept."],
+        ["YOLOE-26S-PF PyTorch FP16",                 "13.25 FPS", "Plain PyTorch, one model."],
+        ["YOLOE-26S-PF TRT FP8 (optimized ceiling)",  "14.36 FPS", "One model fully optimized."],
+        ["Keyhole shipping (TRT FP8 + 1 Hz CLIP)",    "36.10 FPS", "Two-stage, CLIP 1/30 frames."],
+    ]
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.7),
+                      Inches(CONTENT_W), Inches(1.7), comp_headers, comp_rows,
+                      highlight_rows=[5, 6],
+                      font_size=10)
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.5, CONTENT_W, 1.9, [
+        ("Why TRT FP8 helped so little", C.ACCENT_BLUE, True),
+        ("• YOLOE-26 is 16M params. At that size, on a 5090, the bottleneck is **kernel launch overhead**, "
+         "not tensor compute — FP8 matmul speedup doesn't help when matmul isn't the bottleneck.",
+         C.TEXT_BRIGHT),
+        ("• Compare to YOLO-seg FP8 TRT (our shipping Conv-unblock): that went 4.9 -> 36.8 FPS edge (+98%), "
+         "because YOLO-seg's Conv-heavy graph does benefit from FP8 in TRT. Different architecture, different bottleneck.",
+         C.TEXT_DIM),
+        "",
+        ("The REAL TRT win: 73% VRAM reduction (360 -> 99 MB)", C.ACCENT_GREEN, True),
+        ("• Latency gain is modest but VRAM footprint drops dramatically. If NPU memory is tight and you're "
+         "running concurrent streams, TRT is still worth it — just not for speed.",
+         C.TEXT_BRIGHT),
+        "",
+        ("Takeaway: the gap to shipping is STRUCTURAL, not optimization", C.ACCENT_ORANGE, True),
+        ("• Our two-stage stack runs YOLO-seg every frame + CLIP every 30th. YOLOE-26 runs the whole "
+         "open-vocab head every frame. That design choice is the 2.4× gap — no amount of kernel "
+         "optimization on YOLOE-26 will close it without a similar keyframe-debounce trick.",
+         C.ACCENT_AMBER),
+    ], font_size=10)
+
+
 def slide_yoloe26_onemodel(prs: Presentation):
     """Slide: "Ultralytics YOLOE-26 — the one-model open-vocab alternative" — benches the
     Jan 2026 YOLOE-26S-PF release against our two-stage YOLO-seg + CLIP shipping stack.
@@ -2837,6 +2924,11 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/yoloe26_summary.json").exists():
         console.print("  Building: YOLOE-26 one-model open-vocab (Option B watch)")
         slide_yoloe26_onemodel(prs)
+
+    # TRT YOLOE-26 — does FP8 close the gap? (negative result)
+    if Path("data/output/bakeoff/trt_yoloe26_summary.json").exists():
+        console.print("  Building: TRT YOLOE-26 — does FP8 close the gap?")
+        slide_trt_yoloe26(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
