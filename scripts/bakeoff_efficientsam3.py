@@ -40,6 +40,9 @@ log = logging.getLogger("bakeoff_es3")
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "third_party" / "efficientsam3"))
+# Repo root on path so `from src.profiling.nvtx_helpers import ...` resolves
+# when this script is run from the .venv-es3 interpreter.
+sys.path.insert(0, str(REPO_ROOT))
 
 import cv2
 import numpy as np
