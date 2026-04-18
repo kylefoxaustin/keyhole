@@ -145,6 +145,7 @@ def run_variant(variant_tag: str, model_name: str, prompt_free: bool,
         ordered = sorted(f for f in refs if refs[f] and (frames_dir / f"frame_{f:06d}.png").exists())
 
         rep = ResolutionReport(resolution=res_label, clip=clip_stem)
+        from src.profiling.nvtx_helpers import nvtx_range
         to_run = ordered[: WARMUP_FRAMES + MAX_FRAMES]
 
         for i, fid in enumerate(to_run):
@@ -152,7 +153,8 @@ def run_variant(variant_tag: str, model_name: str, prompt_free: bool,
             img = cv2.imread(str(frames_dir / f"frame_{fid:06d}.png"))
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            r = model.predict(img, verbose=False)
+            with nvtx_range(f"yoloe26_{variant_tag}"):
+                r = model.predict(img, verbose=False)
             torch.cuda.synchronize()
             ms = (time.perf_counter() - t0) * 1000
 

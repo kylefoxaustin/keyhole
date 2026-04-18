@@ -148,13 +148,15 @@ def run_resolution(model, processor, resolution: str, clip_stem: str) -> Resolut
         ps = prompts[fid]
         boxes = np.array([p["box"] for p in ps], dtype=np.float32)
 
+        from src.profiling.nvtx_helpers import nvtx_range
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        state = processor.set_image(img_pil)
-        masks, scores, _ = model.predict_inst(
-            state, point_coords=None, point_labels=None,
-            box=boxes, multimask_output=False,
-        )
+        with nvtx_range("efficientsam3_es_ev_s"):
+            state = processor.set_image(img_pil)
+            masks, scores, _ = model.predict_inst(
+                state, point_coords=None, point_labels=None,
+                box=boxes, multimask_output=False,
+            )
         torch.cuda.synchronize()
         ms = (time.perf_counter() - t0) * 1000
 

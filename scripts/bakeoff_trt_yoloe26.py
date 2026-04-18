@@ -98,13 +98,15 @@ def bench_one(model_path: str, recipe_tag: str) -> Report:
         total_ref = 0
         total_det = 0
 
+        from src.profiling.nvtx_helpers import nvtx_range
         to_run = ordered[: WARMUP + TIMED]
         for i, fid in enumerate(to_run):
             is_warmup = i < WARMUP
             img = cv2.imread(str(frames_dir / f"frame_{fid:06d}.png"))
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            r = model.predict(img, verbose=False)
+            with nvtx_range(f"yoloe26_{recipe_tag}"):
+                r = model.predict(img, verbose=False)
             torch.cuda.synchronize()
             ms = (time.perf_counter() - t0) * 1000
 

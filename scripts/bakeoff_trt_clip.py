@@ -132,6 +132,8 @@ def build_engine(out_path: Path, flags: set[int]):
 
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 2 << 30)
+    # Embed ONNX-node-derived kernel names for readable Nsight profiling.
+    config.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
     for fl in flags:
         config.set_flag(fl)
 
@@ -343,7 +345,8 @@ def run_trt(frames_data: list[dict], engine, text_cache: dict) -> dict:
             in_buf[:bsz].copy_(chunk.to(in_buf.dtype))
             ctx.set_tensor_address(input_name, int(in_buf.data_ptr()))
             ctx.set_tensor_address(output_name, int(out_buf.data_ptr()))
-            with torch.cuda.stream(stream):
+            from src.profiling.nvtx_helpers import nvtx_range
+            with torch.cuda.stream(stream), nvtx_range("clip_trt"):
                 ctx.execute_async_v3(stream.cuda_stream)
             stream.synchronize()
             feats_all[offset:offset + bsz].copy_(out_buf[:bsz])

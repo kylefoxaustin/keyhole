@@ -132,6 +132,9 @@ def build_engine(onnx_path: Path, out_path: Path, flags: set[int],
 
     config = builder.create_builder_config()
     config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 2 << 30)  # 2 GB
+    # Embed ONNX-node-derived kernel names into the engine so Nsight Compute /
+    # Nsight Systems profilers produce readable per-layer breakdowns.
+    config.profiling_verbosity = trt.ProfilingVerbosity.DETAILED
     for f in flags:
         config.set_flag(f)
     if calibrator is not None:
@@ -167,8 +170,16 @@ def load_engine(path: Path):
 
 # ---------- inference ----------
 
-def run_inference(engine, clip_stem: str) -> dict:
-    """Run the TRT engine across cached bake-off frames and postprocess detections."""
+def run_inference(engine, clip_stem: str, nvtx_label: str = "yolo_seg_trt") -> dict:
+    """Run the TRT engine across cached bake-off frames and postprocess detections.
+
+    `nvtx_label` is pushed as an NVTX range around each engine execution so that
+    when this script is run under `scripts/profile_ncu.py`, the kernels the TRT
+    engine launches get attributed to a named stage. Default covers the common
+    case (YOLO-seg); callers should pass a more specific label like
+    'yolo_seg_fp8_trt' / 'yolo_seg_fp16_trt' for per-recipe breakdowns.
+    """
+    from src.profiling.nvtx_helpers import nvtx_range
     clip_dir = BAKEOFF_DIR / clip_stem
     frames_meta = json.loads((clip_dir / "frames.json").read_text())
 
@@ -199,7 +210,7 @@ def run_inference(engine, clip_stem: str) -> dict:
 
     stream = torch.cuda.Stream()
 
-    # Warmup
+    # Warmup (not NVTX-labeled — profilers should skip this)
     img0 = cv2.imread(str(clip_dir / frames_meta[0]["path"]))
     x = preprocess(img0)
     if in_dtype == np.float16:
@@ -222,7 +233,7 @@ def run_inference(engine, clip_stem: str) -> dict:
 
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        with torch.cuda.stream(stream):
+        with torch.cuda.stream(stream), nvtx_range(nvtx_label):
             ctx.execute_async_v3(stream.cuda_stream)
         stream.synchronize()
         ms = (time.perf_counter() - t0) * 1000
@@ -427,7 +438,8 @@ def main():
                 continue
             try:
                 eng = load_engine(engine_path)
-                run = run_inference(eng, clip_stem)
+                run = run_inference(eng, clip_stem,
+                                     nvtx_label=f"yolo_seg_{recipe}_trt")
                 del eng
                 torch.cuda.empty_cache()
                 all_results[res][recipe] = run

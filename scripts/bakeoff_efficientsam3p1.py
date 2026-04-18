@@ -112,9 +112,11 @@ def run_resolution(model, proc, resolution: str, clip_stem: str) -> ResolutionRe
         img = Image.fromarray(cv2.cvtColor(cv2.imread(str(frame_path)), cv2.COLOR_BGR2RGB))
 
         # Time set_image
+        from src.profiling.nvtx_helpers import nvtx_range
         torch.cuda.synchronize()
         t0 = time.perf_counter()
-        state = proc.set_image(img)
+        with nvtx_range("efficientsam3p1_es_ev_s__set_image"):
+            state = proc.set_image(img)
         torch.cuda.synchronize()
         set_image_ms = (time.perf_counter() - t0) * 1000
 
@@ -124,7 +126,8 @@ def run_resolution(model, proc, resolution: str, clip_stem: str) -> ResolutionRe
             proc.reset_all_prompts(state)
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-            state = proc.set_text_prompt(state=state, prompt=concept)
+            with nvtx_range("efficientsam3p1_es_ev_s__text_prompt"):
+                state = proc.set_text_prompt(state=state, prompt=concept)
             torch.cuda.synchronize()
             prompt_times.append((time.perf_counter() - t0) * 1000)
 

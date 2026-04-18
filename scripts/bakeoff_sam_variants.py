@@ -233,13 +233,15 @@ def generate_refs(
     det.load_model()
 
     result: dict[int, list[RefMask]] = {}
+    from src.profiling.nvtx_helpers import nvtx_range
     for f in frames:
         img = cv2.imread(str(out_dir / f.path))
         ef = ExtractedFrame(
             frame_number=f.idx, timestamp_sec=f.timestamp_sec,
             image=img, source_video=str(out_dir),
         )
-        enriched = det.detect_frame(ef)
+        with nvtx_range("sam3_bf16_reference"):
+            enriched = det.detect_frame(ef)
 
         # Collect all SAM 3 detections that have masks
         sam3_dets: list[tuple[list[float], np.ndarray]] = []
@@ -569,7 +571,9 @@ def run_contestant(
             ))
             continue
 
-        masks, latency_ms = contestant.infer_frame(img, boxes)
+        from src.profiling.nvtx_helpers import nvtx_range
+        with nvtx_range(contestant.name):
+            masks, latency_ms = contestant.infer_frame(img, boxes)
         per_box_ms = latency_ms / max(1, len(boxes))
 
         # Build ref lookup by prompt_idx

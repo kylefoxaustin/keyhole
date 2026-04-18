@@ -106,12 +106,14 @@ def make_synthetic_tokens(llm, n: int) -> list[int]:
 
 def measure_prefill(llm, n_tokens: int) -> dict:
     """Time a single full prefill of n_tokens. Does NOT sample."""
+    from src.profiling.nvtx_helpers import nvtx_range
     tokens = make_synthetic_tokens(llm, n_tokens)
     llm.reset()
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     t0 = time.perf_counter()
-    llm.eval(tokens)
+    with nvtx_range(f"llm_prefill_n{n_tokens}"):
+        llm.eval(tokens)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     ms = (time.perf_counter() - t0) * 1000
@@ -124,6 +126,7 @@ def measure_prefill(llm, n_tokens: int) -> dict:
 
 def measure_decode(llm, n_decode: int, warm_prompt_len: int = 128) -> dict:
     """Time generation of n_decode tokens after a short warm prefill."""
+    from src.profiling.nvtx_helpers import nvtx_range
     warm = make_synthetic_tokens(llm, warm_prompt_len)
     llm.reset()
     llm.eval(warm)
@@ -131,9 +134,10 @@ def measure_decode(llm, n_decode: int, warm_prompt_len: int = 128) -> dict:
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     t0 = time.perf_counter()
-    for _ in range(n_decode):
-        tok = llm.sample(temp=0.0, top_k=1)  # deterministic, minimal sampling cost
-        llm.eval([tok])
+    with nvtx_range(f"llm_decode_n{n_decode}"):
+        for _ in range(n_decode):
+            tok = llm.sample(temp=0.0, top_k=1)  # deterministic, minimal sampling cost
+            llm.eval([tok])
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     ms = (time.perf_counter() - t0) * 1000
