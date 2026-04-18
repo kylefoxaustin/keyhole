@@ -531,7 +531,10 @@ def run_contestant(
     results_dir = out_dir / "results"
     results_dir.mkdir(parents=True, exist_ok=True)
     out_path = results_dir / f"{contestant.name}.json"
-    if out_path.exists():
+    # Honor KEYHOLE_FORCE_RERUN=1 so the ncu profiling sweep can force a fresh
+    # GPU run for kernel attribution (the cache short-circuit would skip
+    # kernel launches and ncu would get nothing).
+    if out_path.exists() and not os.environ.get("KEYHOLE_FORCE_RERUN"):
         log.info("Reusing cached results for %s", contestant.name)
         data = json.loads(out_path.read_text())
         return ContestantReport(

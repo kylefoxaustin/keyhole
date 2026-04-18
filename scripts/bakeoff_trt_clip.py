@@ -414,10 +414,15 @@ def main():
         all_results[res] = {}
         frames_data = load_crops_and_classes(clip_stem)
 
+        # KEYHOLE_FORCE_RERUN=1 bypasses cached JSON so ncu can profile actual
+        # GPU kernel launches (cache short-circuit would skip the work).
+        import os as _os
+        _force = bool(_os.environ.get("KEYHOLE_FORCE_RERUN"))
+
         # Torch BF16 reference
         out_path = OUT_DIR / clip_stem / "bf16_torch.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        if out_path.exists():
+        if out_path.exists() and not _force:
             all_results[res]["bf16_torch"] = json.loads(out_path.read_text())
         else:
             r = run_torch_bf16(frames_data, m_ref, tokenizer)
@@ -433,7 +438,7 @@ def main():
                 all_results[res][recipe] = {"error": "engine not built"}
                 continue
             out_path = OUT_DIR / clip_stem / f"{recipe}.json"
-            if out_path.exists():
+            if out_path.exists() and not _force:
                 all_results[res][recipe] = json.loads(out_path.read_text())
             else:
                 eng = load_engine(engine_path)

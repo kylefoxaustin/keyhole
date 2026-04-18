@@ -75,10 +75,27 @@ METRICS = [
 
 
 def _find_ncu() -> str:
-    """Locate the ncu binary. Prefer whatever's on PATH; fall back to CUDA 12.6."""
-    for candidate in ("ncu", "/usr/local/cuda/bin/ncu",
-                       "/usr/local/cuda-12.6/bin/ncu",
-                       "/usr/local/cuda-13.0/bin/ncu"):
+    """Locate the ncu binary. Prefer newest available; fall back to older ones.
+
+    The CUDA 13 driver (580.x) requires Nsight Compute 2025+ — older ncu builds
+    fail with 'Failed to load Nsight Compute CUDA modules'. Install newer ncu
+    via `sudo apt-get install nsight-compute-2026.1.1` (or newer).
+    """
+    candidates = [
+        # 2026+ standalone installs (preferred on CUDA 13 driver)
+        "/opt/nvidia/nsight-compute/2026.1.1/ncu",
+        "/opt/nvidia/nsight-compute/2026.1.0/ncu",
+        "/opt/nvidia/nsight-compute/2025.4.1/ncu",
+        "/opt/nvidia/nsight-compute/2025.4.0/ncu",
+        "/opt/nvidia/nsight-compute/2025.3.1/ncu",
+        # Whatever's on PATH
+        "ncu",
+        # CUDA-toolkit-bundled fallbacks (only work on matching driver)
+        "/usr/local/cuda/bin/ncu",
+        "/usr/local/cuda-13.0/bin/ncu",
+        "/usr/local/cuda-12.6/bin/ncu",
+    ]
+    for candidate in candidates:
         try:
             r = subprocess.run([candidate, "--version"],
                                capture_output=True, text=True, timeout=5)
@@ -87,7 +104,8 @@ def _find_ncu() -> str:
         except (FileNotFoundError, subprocess.TimeoutExpired):
             continue
     raise SystemExit(
-        "ncu (Nsight Compute) not found. Install with CUDA toolkit or add to PATH."
+        "ncu (Nsight Compute) not found. Install with "
+        "`sudo apt-get install -y nsight-compute-2026.1.1` (or newer)."
     )
 
 

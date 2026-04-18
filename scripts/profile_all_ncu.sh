@@ -31,6 +31,11 @@ cd "$ROOT"
 OUT_DIR="$ROOT/data/output/ncu"
 mkdir -p "$OUT_DIR"
 
+# Force fresh GPU runs so ncu actually sees kernel launches. Without this,
+# bakeoff_trt_yolo.py / bakeoff_sam_variants.py / bakeoff_trt_clip.py short-
+# circuit on cached JSON and the profiler gets nothing to attribute.
+export KEYHOLE_FORCE_RERUN=1
+
 KEYHOLE_PY="${KEYHOLE_PY:-$HOME/.virtualenvs/keyhole/bin/python}"
 ES3_PY="$ROOT/.venv-es3/bin/python"
 CLIP_ENTRY="data/videos/720p_EW_clip.mp4"

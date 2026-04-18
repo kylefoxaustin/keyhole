@@ -432,7 +432,11 @@ def main():
                 continue
             out_path = OUT_DIR / clip_stem / f"{recipe}.json"
             out_path.parent.mkdir(parents=True, exist_ok=True)
-            if out_path.exists():
+            # Honor KEYHOLE_FORCE_RERUN=1 so `scripts/profile_all_ncu.sh` can
+            # force a fresh GPU run (the cached-JSON short-circuit would otherwise
+            # skip kernel launches, giving ncu nothing to profile).
+            import os as _os
+            if out_path.exists() and not _os.environ.get("KEYHOLE_FORCE_RERUN"):
                 all_results[res][recipe] = json.loads(out_path.read_text())
                 log.info("Reusing %s", out_path)
                 continue
