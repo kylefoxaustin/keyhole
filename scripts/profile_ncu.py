@@ -52,6 +52,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
+import re
 import shlex
 import subprocess
 import sys
@@ -59,6 +61,26 @@ import tempfile
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+# ncu 2026+ emits the NVTX Push/Pop payload as a colon-delimited structure
+# prefixed by the PID and wrapped in its own quotes, e.g.
+#   '97844  "<default domain>:warmup:none:none:none:none:none:none"'
+# Extract the label sitting between the domain and the first PL_Type field.
+_NVTX_LABEL_RE = re.compile(r"<[^>]+>:([^:]+):")
+
+# ncu metric names look like 'smsp__inst_executed.sum' or
+# 'sm__inst_executed_pipe_tensor.sum' — snake_case with dots, no whitespace
+# or quotes. Reject anything else (e.g. diagnostic JSON fragments).
+_VALID_METRIC_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_.]*$")
+
+
+def _extract_nvtx_label(cell: str) -> str:
+    """Pull the NVTX range label out of an ncu CSV Push/Pop_Range cell."""
+    if not cell:
+        return ""
+    m = _NVTX_LABEL_RE.search(cell)
+    return m.group(1).strip() if m else ""
 
 
 # Targeted metric list — keeps ncu overhead to ~2-5x. Enough for the
@@ -111,6 +133,14 @@ def _find_ncu() -> str:
 
 def _run_ncu(cmd: list[str], csv_path: Path, nvtx_include: str | None = None) -> None:
     ncu = _find_ncu()
+    # Replay strategy:
+    #   - 'application' (default) with --app-replay-mode relaxed: ncu re-runs
+    #     the whole app once per metric group and matches kernels by name
+    #     across passes, tolerating variation in count/order (TRT autotuning,
+    #     NMS dynamic sizes). Fast (~app wall-clock × N_metric_groups).
+    #   - 'kernel' (override via KEYHOLE_NCU_REPLAY=kernel): save/restore GPU
+    #     state per-kernel, immune to non-determinism but 10-20x slower.
+    replay_mode = os.environ.get("KEYHOLE_NCU_REPLAY", "application")
     ncu_cmd = [
         ncu,
         "--csv",
@@ -118,10 +148,15 @@ def _run_ncu(cmd: list[str], csv_path: Path, nvtx_include: str | None = None) ->
         "--target-processes", "application-only",
         "--nvtx",
         "--metrics", ",".join(METRICS),
-        "--replay-mode", "application",   # full replay of the app per metric set
+        "--replay-mode", replay_mode,
         "--kernel-name-base", "function",  # use demangled function names
         "--print-summary", "none",         # we parse the CSV ourselves
     ]
+    if replay_mode == "application":
+        # 'relaxed' drops unmatched kernels across passes; 'name' matches by
+        # kernel name alone (loosest — tolerates grid/block variation from
+        # NMS dynamic output sizes, TRT autotune, etc).
+        ncu_cmd += ["--app-replay-mode", "relaxed", "--app-replay-match", "name"]
     if nvtx_include:
         ncu_cmd += ["--nvtx-include", nvtx_include]
     ncu_cmd += cmd
@@ -154,8 +189,19 @@ def _parse_csv(csv_path: Path) -> dict:
     reader = csv.DictReader(lines)
     # Different ncu versions use slightly different column names. Probe:
     cols = reader.fieldnames or []
-    # Common variants:
-    nvtx_col = next((c for c in cols if c.lower().startswith("nvtx")), None)
+    # NVTX columns in ncu 2026+ look like
+    #   'thread Domain:Push/Pop_Range:PL_Type:PL_Value:CLR_Type:Color:Msg_Type:Msg'
+    #   'Id:Domain:Start/Stop_Range:PL_Type:PL_Value:CLR_Type:Color:Msg_Type:Msg'
+    # Prefer Push/Pop (torch.cuda.nvtx.range_push/pop uses it); fall back to
+    # Start/Stop. Older ncu versions used a column starting with 'NVTX'.
+    def _find_nvtx(pattern: str) -> str | None:
+        for c in cols:
+            if pattern.lower() in c.lower():
+                return c
+        return None
+    nvtx_pp_col = _find_nvtx("push/pop_range")
+    nvtx_ss_col = _find_nvtx("start/stop_range")
+    nvtx_legacy_col = next((c for c in cols if c.lower().startswith("nvtx")), None)
     kernel_col = next((c for c in cols if "kernel" in c.lower() and "name" in c.lower()), None)
     metric_name_col = next((c for c in cols if c.lower() in ("metric name", "metricname")), None)
     metric_value_col = next((c for c in cols if c.lower() in ("metric value", "metricvalue")), None)
@@ -173,8 +219,22 @@ def _parse_csv(csv_path: Path) -> dict:
     prev_kernel_key = None
 
     for row in reader:
-        label = (row.get(nvtx_col or "", "") or "[unattributed]").strip() or "[unattributed]"
+        label = ""
+        if nvtx_pp_col:
+            label = _extract_nvtx_label(row.get(nvtx_pp_col, "") or "")
+        if not label and nvtx_ss_col:
+            label = _extract_nvtx_label(row.get(nvtx_ss_col, "") or "")
+        if not label and nvtx_legacy_col:
+            label = (row.get(nvtx_legacy_col, "") or "").strip()
+        if not label:
+            label = "[unattributed]"
         metric = row[metric_name_col].strip()
+        # ncu interleaves per-kernel error/diagnostic rows (e.g. INT8 TRT
+        # kernels that hit instrumentation errors) and the CSV parser sees
+        # their embedded JSON fragments as metric names. Skip any metric
+        # name that isn't a plausible ncu metric identifier.
+        if not _VALID_METRIC_RE.match(metric):
+            continue
         raw_val = (row[metric_value_col] or "0").replace(",", "").strip()
         try:
             value = float(raw_val)
@@ -245,6 +305,17 @@ def main():
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(out, indent=2))
+    # Under sudo, the process runs as root and would leave files root-owned,
+    # blocking subsequent user-owned rewrites. Hand ownership back to the
+    # invoking user.
+    sudo_user = os.environ.get("SUDO_USER")
+    sudo_uid = os.environ.get("SUDO_UID")
+    sudo_gid = os.environ.get("SUDO_GID")
+    if sudo_uid and sudo_gid and os.geteuid() == 0:
+        try:
+            os.chown(args.out, int(sudo_uid), int(sudo_gid))
+        except (OSError, ValueError):
+            pass
     print(f"[profile_ncu] Wrote {args.out}", file=sys.stderr)
 
     # Human summary

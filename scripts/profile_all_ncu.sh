@@ -36,7 +36,16 @@ mkdir -p "$OUT_DIR"
 # circuit on cached JSON and the profiler gets nothing to attribute.
 export KEYHOLE_FORCE_RERUN=1
 
-KEYHOLE_PY="${KEYHOLE_PY:-$HOME/.virtualenvs/keyhole/bin/python}"
+# When invoked via `sudo` (required for ncu GPU perf counters unless
+# NVreg_RestrictProfilingToAdminUsers=0 is set), $HOME becomes /root. Resolve
+# the user's venv relative to SUDO_USER's home so the script works unchanged
+# under `sudo bash scripts/profile_all_ncu.sh`.
+if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+    USER_HOME="$(getent passwd "$SUDO_USER" | cut -d: -f6)"
+else
+    USER_HOME="$HOME"
+fi
+KEYHOLE_PY="${KEYHOLE_PY:-$USER_HOME/.virtualenvs/keyhole/bin/python}"
 ES3_PY="$ROOT/.venv-es3/bin/python"
 CLIP_ENTRY="data/videos/720p_EW_clip.mp4"
 
@@ -47,21 +56,27 @@ TARGETS=(${TARGETS[@]})
 
 has() { for t in "${TARGETS[@]}"; do [[ "$t" == "$1" ]] && return 0; done; return 1; }
 
+# Expand to `--keep-csv` when KEYHOLE_NCU_KEEP_CSV is set. Used on first-run
+# sweeps so we can re-parse the raw ncu CSVs without re-profiling if the JSON
+# comes back wrong.
+KEEP_CSV_FLAG="${KEYHOLE_NCU_KEEP_CSV:+--keep-csv}"
+
 echo "Output dir: $OUT_DIR"
 echo "Targets: ${TARGETS[*]}"
+[[ -n "$KEEP_CSV_FLAG" ]] && echo "Keeping intermediate ncu CSVs (KEYHOLE_NCU_KEEP_CSV is set)"
 echo
 
 if has trt_yolo; then
     echo "==== [trt_yolo] YOLO-seg FP16 / INT8 / FP8 TensorRT ===="
     "$KEYHOLE_PY" scripts/profile_ncu.py \
-        --out "$OUT_DIR/trt_yolo.json" \
+        --out "$OUT_DIR/trt_yolo.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_trt_yolo.py --clip "$CLIP_ENTRY"
 fi
 
 if has sam_variants; then
     echo "==== [sam_variants] SAM 3 ref + MobileSAM / EfficientSAM / YOLO-seg ===="
     "$KEYHOLE_PY" scripts/profile_ncu.py \
-        --out "$OUT_DIR/sam_variants.json" \
+        --out "$OUT_DIR/sam_variants.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_sam_variants.py --clip "$CLIP_ENTRY"
 fi
 
@@ -71,7 +86,7 @@ if has efficientsam3; then
         echo "  SKIP: .venv-es3/ not present. Create it first (see REPRODUCE.md)."
     else
         "$KEYHOLE_PY" scripts/profile_ncu.py \
-            --out "$OUT_DIR/efficientsam3.json" \
+            --out "$OUT_DIR/efficientsam3.json" $KEEP_CSV_FLAG \
             -- "$ES3_PY" scripts/bakeoff_efficientsam3.py
     fi
 fi
@@ -82,7 +97,7 @@ if has efficientsam3p1; then
         echo "  SKIP: .venv-es3/ not present."
     else
         "$KEYHOLE_PY" scripts/profile_ncu.py \
-            --out "$OUT_DIR/efficientsam3p1.json" \
+            --out "$OUT_DIR/efficientsam3p1.json" $KEEP_CSV_FLAG \
             -- "$ES3_PY" scripts/bakeoff_efficientsam3p1.py
     fi
 fi
@@ -90,28 +105,28 @@ fi
 if has trt_clip; then
     echo "==== [trt_clip] CLIP visual tower (TRT FP16/FP8) ===="
     "$KEYHOLE_PY" scripts/profile_ncu.py \
-        --out "$OUT_DIR/trt_clip.json" \
+        --out "$OUT_DIR/trt_clip.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_trt_clip.py
 fi
 
 if has trt_yoloe26; then
     echo "==== [trt_yoloe26] YOLOE-26S-PF FP16 / FP8 TRT ===="
     "$KEYHOLE_PY" scripts/profile_ncu.py \
-        --out "$OUT_DIR/trt_yoloe26.json" \
+        --out "$OUT_DIR/trt_yoloe26.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_trt_yoloe26.py
 fi
 
 if has yoloe26; then
     echo "==== [yoloe26] YOLOE-26S (PyTorch, text-prompt + prompt-free) ===="
     "$KEYHOLE_PY" scripts/profile_ncu.py \
-        --out "$OUT_DIR/yoloe26.json" \
+        --out "$OUT_DIR/yoloe26.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_yoloe26.py
 fi
 
 if has llm; then
     echo "==== [llm] Qwen3-30B-A3B Q4/Q5/Q8 — prefill + decode ===="
     "$KEYHOLE_PY" scripts/profile_ncu.py \
-        --out "$OUT_DIR/llm.json" \
+        --out "$OUT_DIR/llm.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_llm.py --quants Q4_K_M
 fi
 
