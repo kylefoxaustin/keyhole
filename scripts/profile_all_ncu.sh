@@ -50,7 +50,7 @@ ES3_PY="$ROOT/.venv-es3/bin/python"
 CLIP_ENTRY="data/videos/720p_EW_clip.mp4"
 
 # Pick which targets to run. Default = all. Pass names as args to filter.
-TARGETS=("${@:-trt_yolo sam_variants efficientsam3 efficientsam3p1 trt_clip trt_yoloe26 yoloe26 llm}")
+TARGETS=("${@:-trt_yolo sam_variants efficientsam3 efficientsam3p1 trt_clip trt_yoloe26 yoloe26 llm sam3_refs}")
 # shellcheck disable=SC2206
 TARGETS=(${TARGETS[@]})
 
@@ -78,6 +78,27 @@ if has sam_variants; then
     "$KEYHOLE_PY" scripts/profile_ncu.py \
         --out "$OUT_DIR/sam_variants.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_sam_variants.py --clip "$CLIP_ENTRY"
+fi
+
+if has sam3_refs; then
+    # Surgical: capture ONLY the SAM 3 BF16 reference inference range.
+    # Under app-replay-match=name the SAM 3 kernel set varied across passes
+    # and was dropped — kernel-replay bypasses that. To avoid re-measuring
+    # the other 4 contestants (expensive under kernel-replay), we clear
+    # the refs cache (so SAM 3 runs) and lean on existing contestant
+    # JSONs (which short-circuit when KEYHOLE_FORCE_RERUN is NOT set).
+    echo "==== [sam3_refs] SAM 3 BF16 reference only (surgical kernel-replay) ===="
+    REFS_DIR="$ROOT/data/output/bakeoff/720p_EW_clip/refs"
+    REFS_META="$ROOT/data/output/bakeoff/720p_EW_clip/refs_meta.json"
+    if [[ -d "$REFS_DIR" ]] || [[ -f "$REFS_META" ]]; then
+        echo "  Clearing refs cache at $REFS_DIR / $REFS_META"
+        rm -rf "$REFS_DIR" "$REFS_META"
+    fi
+    (unset KEYHOLE_FORCE_RERUN
+     "$KEYHOLE_PY" scripts/profile_ncu.py \
+        --out "$OUT_DIR/sam3_bf16_refs.json" $KEEP_CSV_FLAG \
+        -- "$KEYHOLE_PY" scripts/bakeoff_sam_variants.py \
+           --clip "$CLIP_ENTRY" --contestants mobilesam)
 fi
 
 if has efficientsam3; then

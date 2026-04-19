@@ -66,10 +66,18 @@ NVTX_DIVISORS: dict[str, dict[str, int]] = {
     "efficientsam_tiny":   {"source": "sam_variants",   "n_forwards": 14},
     "efficientsam_small":  {"source": "sam_variants",   "n_forwards": 14},
     "yolo_seg":            {"source": "sam_variants",   "n_forwards": 14},
-    # Dropped by relaxed-name matching: sam3_bf16_reference (see § 9 of
-    # NCU_EXPLAINED.md). We don't have data for it.
+    # ─── sam3_refs (surgical kernel-replay target): SAM 3 BF16 reference
+    # inference on 14 sampled frames of the 720p clip. One NVTX push per
+    # frame → n_forwards = 14. Written to sam3_bf16_refs.json by the
+    # sam3_refs branch of profile_all_ncu.sh.
+    "sam3_bf16_reference": {"source": "sam3_refs",       "n_forwards": 14},
     # ─── efficientsam3: 3 res × (2 WARMUP + 10 MAX) = 36 frames, 1 range ─
     "efficientsam3_es_ev_s": {"source": "efficientsam3", "n_forwards": 36},
+    # ─── efficientsam3p1: 3 res × (2 WARMUP + 8 MAX) = 30 frames, 2 ranges ─
+    # set_image wraps the ViT encoder; text_prompt wraps the decoder pass.
+    # Each range gets 30 pushes. Sizer sums both for per-frame DRAM.
+    "efficientsam3p1_es_ev_s__set_image":    {"source": "efficientsam3p1", "n_forwards": 30},
+    "efficientsam3p1_es_ev_s__text_prompt":  {"source": "efficientsam3p1", "n_forwards": 30},
     # ─── yoloe26: 3 res × (2 WARMUP + 10 MAX) = 36 per variant ───────
     "yoloe26_text_prompt_s":  {"source": "yoloe26",     "n_forwards": 36},
     "yoloe26_prompt_free_s":  {"source": "yoloe26",     "n_forwards": 36},
@@ -217,8 +225,6 @@ def build_bundle(ncu_dir: Path) -> dict:
         "workloads":   entries,
         "missing_from_ncu": missing_from_ncu,
         "known_gaps": [
-            "sam3_bf16_reference: dropped by ncu --app-replay-match name "
-            "(SAM 3's kernel set varied across passes).",
             "efficientsam3p1: target SIGKILL'd on app-replay pass 2; "
             "retry with kernel-replay if needed.",
             "llm: skipped for this sweep (Qwen3-30B-A3B under kernel-replay "
