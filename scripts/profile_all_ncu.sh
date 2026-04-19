@@ -49,6 +49,23 @@ KEYHOLE_PY="${KEYHOLE_PY:-$USER_HOME/.virtualenvs/keyhole/bin/python}"
 ES3_PY="$ROOT/.venv-es3/bin/python"
 CLIP_ENTRY="data/videos/720p_EW_clip.mp4"
 
+# Under sudo, HOME becomes /root and huggingface_hub fails to find Kyle's
+# cached token and gated-repo snapshots (facebook/sam3 etc.). Re-point HOME
+# + HF cache dirs at the invoking user's home so gated repo loads succeed
+# from cache without re-authenticating.
+export HOME="$USER_HOME"
+export HF_HOME="${HF_HOME:-$USER_HOME/.cache/huggingface}"
+export HUGGINGFACE_HUB_CACHE="${HUGGINGFACE_HUB_CACHE:-$HF_HOME/hub}"
+
+# PyTorch 2.11 + CUDA 13 wheel in .venv-es3/ ships libnvrtc-builtins.so.13.0
+# under nvidia/cu13/lib/, but that path isn't on the loader's search list by
+# default. Without it, any nvrtc JIT compile (e.g. torch.compile fused ops
+# inside EfficientSAM3's encoder) fails with "failed to open libnvrtc-
+# builtins.so.13.0". Prepend the cu13 lib dir so the loader finds it.
+ES3_CU13_LIB="$ROOT/.venv-es3/lib/python3.12/site-packages/nvidia/cu13/lib"
+KEYHOLE_CU13_LIB="$USER_HOME/.virtualenvs/keyhole/lib/python3.10/site-packages/nvidia/cu13/lib"
+export LD_LIBRARY_PATH="$ES3_CU13_LIB:$KEYHOLE_CU13_LIB:${LD_LIBRARY_PATH:-}"
+
 # Pick which targets to run. Default = all. Pass names as args to filter.
 TARGETS=("${@:-trt_yolo sam_variants efficientsam3 efficientsam3p1 trt_clip trt_yoloe26 yoloe26 llm sam3_refs}")
 # shellcheck disable=SC2206
