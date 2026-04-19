@@ -826,6 +826,13 @@ def slide_exec_summary(prs: Presentation):
                      highlight_rows=[2],   # NPU Mid — the shipping target
                      font_size=9, header_font_size=10)
 
+    # ── Footer assumption note ─────────────────────────────────────────
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(7.25),
+                 Inches(CONTENT_W), Inches(0.2),
+                 "Assumes vision/LLM time-slice on the NPU",
+                 font_size=8, color=C.TEXT_DIM,
+                 alignment=PP_ALIGN.CENTER)
+
 
 def slide_architecture(prs: Presentation):
     """Slide 2: Pipeline architecture diagram."""
