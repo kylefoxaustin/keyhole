@@ -234,7 +234,28 @@ Aggregated across the full bake-off run (totals, not per-forward — see
    Real vendor NPU numbers may differ by ±30%; treat the sizer as a
    well-informed estimate, not procurement-grade spec.
 
-## 10. How to regenerate
+## 10. Bridge to the sizer
+
+`scripts/export_ncu_for_sizer.py` consolidates the 6 raw ncu JSONs +
+applies per-bake-off divisors → emits **`data/output/ncu/sizer_bundle.json`**:
+
+```bash
+python scripts/export_ncu_for_sizer.py
+```
+
+That single file is what the sizer's `platform_budget.py` should
+consume (vendor it into `sizer/measured/` or fetch raw from GitHub).
+Each entry has both totals and per-forward numbers, plus a BW-bound
+edge projection on NPU Mid for quick reading. The sizer can recompute
+projections for any tier from `per_forward.dram_bytes` alone.
+
+**Caveat:** `bw_bound_fps_max` is exactly that — the upper bound from
+DRAM bandwidth alone. Real edge FPS = min(bw_bound_fps, compute_bound_fps).
+For compute-heavy vision transformers (EfficientSAM-Small etc.), the
+real number is significantly lower; cross-check against the
+non-profiled bake-off's measured 5090 ms × edge-scaling factor.
+
+## 11. How to regenerate
 
 ```
 sudo -E HOME=$HOME KEYHOLE_NCU_KEEP_CSV=1 KEYHOLE_NCU_REPLAY=application \

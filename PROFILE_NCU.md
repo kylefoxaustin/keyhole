@@ -275,10 +275,13 @@ Good enough for BW-bound edge models, but imprecise (e.g., YOLO-seg at
    `ncu_source_file = "approximated"`. Lets the spreadsheet progress
    incrementally as we profile more targets.
 
-**One-time work in this repo:** add `scripts/export_ncu_for_sizer.py`
-that reads `data/output/ncu/*.json` + the bake-off summaries, normalizes
-to per-forward, and emits a single consolidated JSON that the sizer
-repo can pull from (or vendor directly into `sizer/measured/`).
+**Bridge script (DONE):** `scripts/export_ncu_for_sizer.py` reads the
+6 ncu JSONs and emits `data/output/ncu/sizer_bundle.json` — one entry
+per NVTX range with totals, per-forward normalization (using documented
+divisors), and BW-bound edge projections precomputed for NPU Mid. Run
+`python scripts/export_ncu_for_sizer.py` after any new sweep. The
+sizer repo can vendor this file directly into `sizer/measured/` or
+fetch via raw github URL.
 
 ## Known gotchas
 
