@@ -171,6 +171,115 @@ If you have an already-built engine from before this change, delete the
 engine file (`data/trt_engines/<name>.*.engine`) and re-run the
 bake-off — it'll rebuild with the new profiling verbosity.
 
+## Host CPU utilization
+
+Observed during the 2026-04-18 full sweep: one Python thread pegged at
+~98% CPU, 31 other cores idle — overall **~3% system CPU utilization**
+on a 32-core host. This is inherent to the pipeline, not a ncu artifact:
+Python GIL + synchronous CUDA per thread means a single thread drives
+the GPU, and the rest of the CPU sits unused. Multi-core CPU work is
+limited to ffmpeg frame decode (brief) and TRT's tiny kernel-dispatch
+thread pool.
+
+**Edge takeaway:** the companion NPU doesn't need a beefy host CPU. A
+single Cortex-A78-class core is enough to drive the whole vision +
+(optional) LLM pipeline. All the parallelism lives on the NPU.
+
+## Transferability to edge NPUs
+
+The collected metrics split into two classes by how they generalize:
+
+**Hardware-neutral — use as absolute edge projections**
+- `dram__bytes_read/write/sum` — **property of the workload, not the
+  device.** A CLIP ViT-B/32 forward that reads ~180 MB of weights on
+  the 5090 will read approximately the same on an edge NPU (same
+  model, same quant). This is the gold column: feeds the sizer's
+  bandwidth-bound minimum latency: `latency_ms ≥ dram_bytes / npu_gbps`.
+
+**5090-specific — use as relative comparisons or sanity checks only**
+- `sm__inst_executed_pipe_tensor.sum` — Blackwell HMMA/BMMA/IMMA op
+  count. Edge NPUs have totally different matrix engines (FP8/INT8
+  MAC arrays, different widths). Use as *ratio between workloads*
+  rather than as absolutes.
+- `smsp__inst_executed.sum`, `sm__sass_thread_inst_executed.sum` —
+  NVIDIA SASS instruction counts. Same caveat: relative only.
+- `gpu__time_duration.sum` — literally 5090 wall-clock. Useless for
+  edge projection, good as a measurement sanity baseline.
+
+**How the sizer applies this:**
+1. Take `dram__bytes.sum` per inference → bandwidth-bound floor.
+2. Compute compute-bound floor from model FLOPs / NPU TOPS spec.
+3. Real edge latency ≈ max(bandwidth-bound, compute-bound).
+4. Compare against vendor-reported NPU benchmarks for cross-check.
+
+## Sizer integration plan (WIP — to land after first clean sweep)
+
+`keyhole-sizer/sizer/platform_budget.py` currently approximates the
+additive columns:
+
+```python
+# Current (approximate) values in vision_workload_row / llm_workload_row:
+ss_ddr_gbs_avg = hw.effective_bandwidth_gbs * duty_cycle_frac   # saturation
+ss_tops_avg    = (hw.peak_tops_fp8 * hw.compute_efficiency) * duty_cycle_frac
+```
+
+This assumes every workload saturates the bus during its duty cycle.
+Good enough for BW-bound edge models, but imprecise (e.g., YOLO-seg at
+36 FPS may only pull 40 GB/s on NPU Mid, not all 100 GB/s).
+
+**Replacement using ncu JSONs:**
+
+1. **Map NVTX range → sizer pipeline stage.** Static dict in
+   `sizer/ncu_lookup.py`:
+   ```python
+   NCU_RANGE_TO_PIPELINE = {
+       "yolo_seg_fp8_trt":          ("hybrid_v2_fp8",  "detect"),
+       "clip_trt":                  ("hybrid_v2_fp8",  "enrich"),
+       "yoloe26_prompt_free_s":     ("yoloe26_pf",     "detect_enrich"),
+       "efficientsam3_es_ev_s":     ("efficientsam3",  "sam_alt"),
+       # etc.
+   }
+   ```
+
+2. **Normalize per-forward.** Each ncu JSON reports *summed* metrics
+   over the bake-off run. Divide by `n_frames × n_recipes_per_frame`
+   (from the bake-off's own summary JSON) to get per-forward numbers:
+   ```python
+   bytes_per_forward = ncu["by_range"][name]["metrics"]["dram__bytes.sum"] / n_forwards
+   tc_ops_per_forward = ncu["by_range"][name]["metrics"]["sm__inst_executed_pipe_tensor.sum"] / n_forwards
+   ```
+
+3. **Edge projection (bandwidth-bound path).** DRAM bytes are
+   hardware-neutral — use them directly against NPU tier bandwidth:
+   ```python
+   min_latency_ms = (bytes_per_forward / 1e9) / hw.effective_bandwidth_gbs * 1000
+   ss_ddr_gbs_avg_measured = bytes_per_forward * fps / 1e9   # GB/s at target rate
+   ```
+
+4. **Edge projection (compute-bound path) — approximate.** Blackwell
+   HMMA ops don't map 1:1 to NPU MAC ops, but a precision-aware TOPS
+   ratio works as a first-order estimate:
+   ```python
+   tops_per_forward = tc_ops_per_forward * 2 / 1e12   # HMMA 16×16×16 = 256 MAC ≈ 512 ops
+   ss_tops_avg_measured = tops_per_forward * fps
+   ```
+
+5. **Schema addition.** Extend CSV_COLUMNS in `platform_budget.py`:
+   - `ss_ddr_gbs_avg_measured` (replaces/augments the approximate one)
+   - `ss_tops_avg_measured`
+   - `ncu_source_file` (provenance: which trt_yolo.json fed this row)
+   - `ncu_n_forwards` (how many forward passes were averaged)
+
+6. **Fallback.** If the ncu JSON is missing or the NVTX range isn't
+   mapped, fall back to the current approximation and set
+   `ncu_source_file = "approximated"`. Lets the spreadsheet progress
+   incrementally as we profile more targets.
+
+**One-time work in this repo:** add `scripts/export_ncu_for_sizer.py`
+that reads `data/output/ncu/*.json` + the bake-off summaries, normalizes
+to per-forward, and emits a single consolidated JSON that the sizer
+repo can pull from (or vendor directly into `sizer/measured/`).
+
 ## Known gotchas
 
 - **LLM server conflict.** Running `python3 llm_server.py` in another
