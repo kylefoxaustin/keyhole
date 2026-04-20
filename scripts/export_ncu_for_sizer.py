@@ -73,11 +73,13 @@ NVTX_DIVISORS: dict[str, dict[str, int]] = {
     "sam3_bf16_reference": {"source": "sam3_refs",       "n_forwards": 14},
     # ─── efficientsam3: 3 res × (2 WARMUP + 10 MAX) = 36 frames, 1 range ─
     "efficientsam3_es_ev_s": {"source": "efficientsam3", "n_forwards": 36},
-    # ─── efficientsam3p1: 3 res × (2 WARMUP + 8 MAX) = 30 frames, 2 ranges ─
-    # set_image wraps the ViT encoder; text_prompt wraps the decoder pass.
-    # Each range gets 30 pushes. Sizer sums both for per-frame DRAM.
-    "efficientsam3p1_es_ev_s__set_image":    {"source": "efficientsam3p1", "n_forwards": 30},
-    "efficientsam3p1_es_ev_s__text_prompt":  {"source": "efficientsam3p1", "n_forwards": 30},
+    # ─── efficientsam3p1: 720p-only kernel-replay sweep. 1 res × (2 WARMUP
+    # + 8 MAX) = 10 frames. set_image pushes once per frame; text_prompt
+    # pushes 5 times per frame (per-prompt timing). See notes in
+    # bakeoff_efficientsam3p1.py for the sampling strategy.
+    # Sizer sums both ranges for per-frame DRAM.
+    "efficientsam3p1_es_ev_s__set_image":    {"source": "efficientsam3p1", "n_forwards": 10},
+    "efficientsam3p1_es_ev_s__text_prompt":  {"source": "efficientsam3p1", "n_forwards": 50},
     # ─── yoloe26: 3 res × (2 WARMUP + 10 MAX) = 36 per variant ───────
     "yoloe26_text_prompt_s":  {"source": "yoloe26",     "n_forwards": 36},
     "yoloe26_prompt_free_s":  {"source": "yoloe26",     "n_forwards": 36},

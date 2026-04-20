@@ -156,6 +156,18 @@ def run_resolution(model, proc, resolution: str, clip_stem: str) -> ResolutionRe
 
 
 def main():
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument(
+        "--resolutions", nargs="+",
+        choices=list(RESOLUTION_CLIPS.keys()),
+        default=list(RESOLUTION_CLIPS.keys()),
+        help="Resolutions to benchmark (default: all). Use --resolutions 720p "
+             "to restrict heavy profiling runs (ncu kernel-replay) to one pass.",
+    )
+    args = ap.parse_args()
+    selected_res = {r: RESOLUTION_CLIPS[r] for r in args.resolutions}
+
     if not CKPT.exists():
         raise SystemExit(f"Checkpoint missing: {CKPT}")
 
@@ -191,7 +203,7 @@ def main():
     torch.cuda.reset_peak_memory_stats()
 
     reports: dict[str, ResolutionReport] = {}
-    for res, clip_stem in RESOLUTION_CLIPS.items():
+    for res, clip_stem in selected_res.items():
         if not (BAKEOFF_DIR / clip_stem / "frames").exists():
             log.warning("[%s] No frame cache — skipping", res)
             continue

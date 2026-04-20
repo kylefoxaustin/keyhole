@@ -130,13 +130,17 @@ if has efficientsam3; then
 fi
 
 if has efficientsam3p1; then
-    echo "==== [efficientsam3p1] EfficientSAM3.1 ES-EV-S (SAM 3.1 student) ===="
+    # Kernel-replay on EfficientSAM3.1 is exceptionally slow (~36 min/frame
+    # × 30 frames = 18 hrs for the full 3-resolution sweep). The sizer only
+    # needs ONE bandwidth measurement per pipeline, so restrict to 720p —
+    # saves ~12 hrs while producing the same DRAM-per-forward number.
+    echo "==== [efficientsam3p1] EfficientSAM3.1 ES-EV-S (720p only, kernel-replay) ===="
     if [[ ! -x "$ES3_PY" ]]; then
         echo "  SKIP: .venv-es3/ not present."
     else
         "$KEYHOLE_PY" scripts/profile_ncu.py \
             --out "$OUT_DIR/efficientsam3p1.json" $KEEP_CSV_FLAG \
-            -- "$ES3_PY" scripts/bakeoff_efficientsam3p1.py
+            -- "$ES3_PY" scripts/bakeoff_efficientsam3p1.py --resolutions 720p
     fi
 fi
 
