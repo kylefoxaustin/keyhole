@@ -111,11 +111,15 @@ if has sam3_refs; then
         echo "  Clearing refs cache at $REFS_DIR / $REFS_META"
         rm -rf "$REFS_DIR" "$REFS_META"
     fi
+    # Guard: --contestants mobilesam rewrites summary.json with only one contestant; back up and restore.
+    SUMMARY_720P="$ROOT/data/output/bakeoff/720p_EW_clip/summary.json"
+    [[ -f "$SUMMARY_720P" ]] && cp -a "$SUMMARY_720P" "$SUMMARY_720P.bak"
     (unset KEYHOLE_FORCE_RERUN
      "$KEYHOLE_PY" scripts/profile_ncu.py \
         --out "$OUT_DIR/sam3_bf16_refs.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_sam_variants.py \
            --clip "$CLIP_ENTRY" --contestants mobilesam)
+    [[ -f "$SUMMARY_720P.bak" ]] && mv -f "$SUMMARY_720P.bak" "$SUMMARY_720P"
 fi
 
 if has efficientsam3; then
