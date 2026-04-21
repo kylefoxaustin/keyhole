@@ -51,11 +51,27 @@ CLIPS = {
     "4K":    "embedded_world_clip",
 }
 TRT_DIR = REPO_ROOT / "data" / "trt_engines"
-ONNX_PATH = TRT_DIR / "yolo11s-seg.onnx"
-FP16_ENGINE = TRT_DIR / "yolo11s-seg.fp16.engine"
-INT8_ENGINE = TRT_DIR / "yolo11s-seg.int8.engine"
-FP8_ENGINE = TRT_DIR / "yolo11s-seg.fp8.engine"
-OUT_DIR = BAKEOFF_DIR / "trt_yolo"
+
+# Default YOLO-seg variant. Overridable via env var KEYHOLE_YOLO_VARIANT so
+# profile_all_ncu.sh and other wrappers can switch without editing the script.
+# Supported: "yolo11s-seg" (original shipping), "yolov8n-seg" (nano, cross-ref
+# against real-silicon benchmarks).
+import os as _os
+DEFAULT_VARIANT = "yolo11s-seg"
+YOLO_VARIANT = _os.environ.get("KEYHOLE_YOLO_VARIANT", DEFAULT_VARIANT)
+
+
+def _variant_slug(variant: str) -> str:
+    """Non-empty suffix only for non-default variants (keeps yolo11s-seg paths stable)."""
+    return "" if variant == DEFAULT_VARIANT else f"_{variant}"
+
+
+VARIANT_SLUG = _variant_slug(YOLO_VARIANT)
+ONNX_PATH = TRT_DIR / f"{YOLO_VARIANT}.onnx"
+FP16_ENGINE = TRT_DIR / f"{YOLO_VARIANT}.fp16.engine"
+INT8_ENGINE = TRT_DIR / f"{YOLO_VARIANT}.int8.engine"
+FP8_ENGINE = TRT_DIR / f"{YOLO_VARIANT}.fp8.engine"
+OUT_DIR = BAKEOFF_DIR / f"trt_yolo{VARIANT_SLUG}"
 IMGSZ = 640
 CONF_THRESHOLD = 0.35
 IOU_MATCH_THRESHOLD = 0.5
@@ -442,8 +458,12 @@ def main():
                 continue
             try:
                 eng = load_engine(engine_path)
-                run = run_inference(eng, clip_stem,
-                                     nvtx_label=f"yolo_seg_{recipe}_trt")
+                # NVTX label ties measured kernels to the variant for ncu — keeps
+                # the default yolo11s-seg label unchanged (ncu regression-free) but
+                # produces distinct ranges for yolov8n-seg and future variants.
+                nvtx = f"yolo_seg_{recipe}_trt" if YOLO_VARIANT == DEFAULT_VARIANT \
+                    else f"yolo_seg_{YOLO_VARIANT}_{recipe}_trt"
+                run = run_inference(eng, clip_stem, nvtx_label=nvtx)
                 del eng
                 torch.cuda.empty_cache()
                 all_results[res][recipe] = run
@@ -472,8 +492,9 @@ def main():
                 continue
             quality[res][recipe] = detection_stability(ref["frames"], var["frames"])
 
-    summary = {"results": all_results, "quality": quality, "fp8_built": fp8_ok}
-    (BAKEOFF_DIR / "trt_yolo_summary.json").write_text(json.dumps(summary, indent=2))
+    summary = {"results": all_results, "quality": quality, "fp8_built": fp8_ok,
+                "yolo_variant": YOLO_VARIANT}
+    (BAKEOFF_DIR / f"trt_yolo{VARIANT_SLUG}_summary.json").write_text(json.dumps(summary, indent=2))
 
     # Edge projection — use BF16 baseline from prior bake-off as reference;
     # halve activation bytes on the quantized fraction (1.0 for INT8/FP8 full-model).
@@ -508,8 +529,9 @@ def main():
                 "bandwidth_limited_ms": bw_bf16 * bw_mul,
                 **q,
             }
-    (BAKEOFF_DIR / "trt_yolo_edge_projection.json").write_text(
+    (BAKEOFF_DIR / f"trt_yolo{VARIANT_SLUG}_edge_projection.json").write_text(
         json.dumps({"projections": proj,
+                    "yolo_variant": YOLO_VARIANT,
                     "method": ("TensorRT engines built from same ONNX. INT8 uses "
                                "Int8EntropyCalibrator2 on 20 bake-off frames. FP8 "
                                "uses BuilderFlag.FP8 + FP16 (mixed precision; TRT "
@@ -519,7 +541,7 @@ def main():
                                "scaled by 0.5 for INT8/FP8 (full-model half bytes), "
                                "1.0 for FP16 (same activation bytes as BF16)."),
                     "fp8_built": fp8_ok}, indent=2))
-    log.info("Wrote trt_yolo_{summary,edge_projection}.json")
+    log.info("Wrote trt_yolo%s_{summary,edge_projection}.json", VARIANT_SLUG)
 
     # Pretty print
     print()

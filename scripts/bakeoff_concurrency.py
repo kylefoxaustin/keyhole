@@ -45,11 +45,17 @@ log = logging.getLogger("concurrency")
 TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
 
 TRT_DIR = REPO_ROOT / "data" / "trt_engines"
-OUT_DIR = REPO_ROOT / "data" / "output" / "bakeoff" / "concurrency"
 BAKEOFF_DIR = REPO_ROOT / "data" / "output" / "bakeoff"
 
-# Use FP8 engine — our shipping YOLO recipe.
-ENGINE_PATH = TRT_DIR / "yolo11s-seg.dynbatch.fp8.engine"
+import os as _os
+DEFAULT_VARIANT = "yolo11s-seg"
+YOLO_VARIANT = _os.environ.get("KEYHOLE_YOLO_VARIANT", DEFAULT_VARIANT)
+VARIANT_SLUG = "" if YOLO_VARIANT == DEFAULT_VARIANT else f"_{YOLO_VARIANT}"
+
+OUT_DIR = REPO_ROOT / "data" / "output" / "bakeoff" / f"concurrency{VARIANT_SLUG}"
+
+# FP8 dynbatch engine for whichever variant is active.
+ENGINE_PATH = TRT_DIR / f"{YOLO_VARIANT}.dynbatch.fp8.engine"
 
 BATCH_SIZES = [1, 2, 4, 8, 16]
 IMGSZ = 640
@@ -136,9 +142,13 @@ def compute_edge_batch_scaling(batch_5090: list[dict]) -> list[dict]:
     slide — bottleneck is bandwidth, not compute). The per-batch kernel
     overhead scales with compute ratio but is small vs the BW portion.
     """
-    # Infer a scaling factor from the single-stream case:
-    #   5090 ms at batch=1 → edge ms at batch=1 (YOLO_EDGE_MS_B1)
-    scale = YOLO_EDGE_MS_B1 / batch_5090[0]["mean_ms"] if batch_5090[0]["mean_ms"] > 0 else 1.0
+    # Scale 5090 ms → edge ms by the effective-BW ratio (NPU Mid at 0.70
+    # efficiency uniform across tiers). This is variant-agnostic — yolo11s-seg
+    # B=1 (≈ 1.68 ms) × 16.19 lands at 27.2 ms edge as before, and yolov8n-seg
+    # (≈ 0.54 ms) scales to its own ~8.7 ms edge without being pinned to the
+    # larger model's reference.
+    BW_RATIO = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19×, matches deck/sizer
+    scale = BW_RATIO
     out = []
     for row in batch_5090:
         edge_ms = row["mean_ms"] * scale
@@ -268,9 +278,10 @@ def main():
             "LLM duty-cycle interference based on the Q4_K_M llm_edge_projection."
         ),
     }
+    summary["yolo_variant"] = YOLO_VARIANT
     (OUT_DIR / "summary.json").write_text(json.dumps(summary, indent=2))
-    (BAKEOFF_DIR / "concurrency_edge_projection.json").write_text(json.dumps(summary, indent=2))
-    log.info("Wrote concurrency_edge_projection.json")
+    (BAKEOFF_DIR / f"concurrency{VARIANT_SLUG}_edge_projection.json").write_text(json.dumps(summary, indent=2))
+    log.info("Wrote concurrency%s_edge_projection.json", VARIANT_SLUG)
 
     # Pretty print
     print()
