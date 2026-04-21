@@ -53,6 +53,12 @@ NVTX_DIVISORS: dict[str, dict[str, int]] = {
     # Each of {fp16, int8, fp8} gets its own range. INT8 dropped by ncu.
     "yolo_seg_fp16_trt":   {"source": "trt_yolo",       "n_forwards": 42},
     "yolo_seg_fp8_trt":    {"source": "trt_yolo",       "n_forwards": 42},
+    # ─── trt_yolo with yolov8n-seg variant: same 14 × 3 = 42 convention,
+    # NVTX label prefixed with "yolo_seg_yolov8n-seg_". Profiled via
+    # KEYHOLE_YOLO_VARIANT=yolov8n-seg (added 2026-04-21 for cross-silicon
+    # comparison against real-NPU yolov8n-seg benchmarks).
+    "yolo_seg_yolov8n-seg_fp16_trt":   {"source": "trt_yolo_yolov8n-seg", "n_forwards": 42},
+    "yolo_seg_yolov8n-seg_fp8_trt":    {"source": "trt_yolo_yolov8n-seg", "n_forwards": 42},
     # ─── trt_clip: 14 frames × 3 res × 2 NVTX-wrapped recipes (FP16 + FP8) ─
     # = 84. BF16 torch path has no NVTX. Single "clip_trt" range covers
     # both quants. Each frame typically fits in one TRT batch

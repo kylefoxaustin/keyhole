@@ -84,9 +84,17 @@ echo "Targets: ${TARGETS[*]}"
 echo
 
 if has trt_yolo; then
-    echo "==== [trt_yolo] YOLO-seg FP16 / INT8 / FP8 TensorRT ===="
+    # Default variant (yolo11s-seg) → trt_yolo.json; other variants → trt_yolo_{variant}.json.
+    # Honors KEYHOLE_YOLO_VARIANT so caller can switch without editing this file.
+    VARIANT="${KEYHOLE_YOLO_VARIANT:-yolo11s-seg}"
+    if [[ "$VARIANT" == "yolo11s-seg" ]]; then
+        NCU_OUT="$OUT_DIR/trt_yolo.json"
+    else
+        NCU_OUT="$OUT_DIR/trt_yolo_${VARIANT}.json"
+    fi
+    echo "==== [trt_yolo] YOLO-seg (${VARIANT}) FP16 / INT8 / FP8 TensorRT → $(basename "$NCU_OUT") ===="
     "$KEYHOLE_PY" scripts/profile_ncu.py \
-        --out "$OUT_DIR/trt_yolo.json" $KEEP_CSV_FLAG \
+        --out "$NCU_OUT" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_trt_yolo.py --clip "$CLIP_ENTRY"
 fi
 
