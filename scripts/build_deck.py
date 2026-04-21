@@ -2485,6 +2485,245 @@ def slide_efficientsam3_community(prs: Presentation):
     ], font_size=10)
 
 
+def _load_ncu_bundle() -> Optional[dict]:
+    """Load the vendored ncu sizer bundle (16 workloads) if present."""
+    path = Path("data/output/ncu/sizer_bundle.json")
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def _ncu_family(workload_id: str) -> str:
+    """Group workloads by pipeline family for the table."""
+    if workload_id.startswith("sam3_bf16"):
+        return "Reference (what we replaced)"
+    if workload_id.startswith("efficientsam3p1"):
+        return "Community SAM 3.1 Lite"
+    if workload_id.startswith("efficientsam3"):
+        return "Community SAM 3 Lite"
+    if workload_id in {"mobilesam", "efficientsam_tiny", "efficientsam_small"}:
+        return "Mask-model bake-off"
+    if workload_id in {"yolo_seg", "yolo_seg_fp16_trt", "yolo_seg_fp8_trt", "clip_trt"}:
+        return "Shipping (TRT two-stage)"
+    if workload_id.startswith("yoloe26"):
+        return "YOLOE-26 one-model"
+    return "Other"
+
+
+def build_ncu_headline_chart(bundle: dict):
+    """Horizontal log-scale bar chart of per-forward DRAM MB for headline workloads.
+
+    Orders workloads worst → best so the 515× SAM3 → shipping gap reads top-to-bottom.
+    """
+    # Hand-picked representatives so the chart isn't overcrowded.
+    picks = [
+        ("sam3_bf16_reference",           "SAM 3 BF16 (reference)",                 MPL_COLORS["red"]),
+        ("efficientsam_small",            "EfficientSAM-Small (bake-off)",          MPL_COLORS["orange"]),
+        ("efficientsam3_es_ev_s",         "EfficientSAM3 ES-EV-S (Community Lite)", MPL_COLORS["orange"]),
+        ("mobilesam",                     "MobileSAM (bake-off)",                   MPL_COLORS["orange"]),
+        ("efficientsam3p1_es_ev_s__set_image", "EfficientSAM3.1 ES-EV-S (SAM3.1 student)", MPL_COLORS["orange"]),
+        ("yoloe26_pytorch_fp16",          "YOLOE-26S-PF PyTorch FP16",              MPL_COLORS["purple"]),
+        ("yoloe26_trt_fp8",               "YOLOE-26S-PF TRT FP8",                   MPL_COLORS["purple"]),
+        ("yolo_seg",                      "YOLO11s-seg PyTorch FP32",               MPL_COLORS["blue"]),
+        ("clip_trt",                      "OpenCLIP visual TRT",                    MPL_COLORS["blue"]),
+        ("yolo_seg_fp8_trt",              "YOLO11s-seg TRT FP8 (SHIPPING)",         MPL_COLORS["green"]),
+    ]
+    by_id = {w["workload_id"]: w for w in bundle["workloads"]}
+
+    labels, mbs, colors = [], [], []
+    for wid, label, color in picks:
+        if wid not in by_id:
+            continue
+        labels.append(label)
+        mbs.append(by_id[wid]["per_forward"]["dram_mb"])
+        colors.append(color)
+
+    fig, ax = plt.subplots(1, 1, figsize=(11, 4.4), facecolor=MPL_COLORS["bg_slide"])
+    ax.set_facecolor(MPL_COLORS["bg_slide"])
+
+    # Reverse so shipping lands at the top of the chart (best first)
+    y_pos = np.arange(len(labels))
+    bars = ax.barh(y_pos[::-1], mbs, color=colors, edgecolor="none", height=0.65)
+
+    ax.set_yticks(y_pos[::-1])
+    ax.set_yticklabels(labels, color=MPL_COLORS["text"], fontsize=9)
+    ax.set_xscale("log")
+    ax.set_xlabel("DRAM bytes moved per forward pass (MB, log scale)",
+                  color=MPL_COLORS["text"], fontsize=10)
+    ax.set_xlim(100, 300000)
+    ax.tick_params(colors=MPL_COLORS["dim"])
+    for spine in ("top", "right"):
+        ax.spines[spine].set_visible(False)
+    for spine in ("left", "bottom"):
+        ax.spines[spine].set_color(MPL_COLORS["dim"])
+    ax.grid(True, axis="x", which="both", alpha=0.15, color=MPL_COLORS["grid"])
+
+    # Value labels on each bar
+    for bar, mb in zip(bars, mbs):
+        x = bar.get_width()
+        y = bar.get_y() + bar.get_height() / 2
+        if mb >= 1000:
+            txt = f"{mb/1000:,.1f} GB"
+        else:
+            txt = f"{mb:,.0f} MB"
+        ax.text(x * 1.15, y, txt, va="center", ha="left",
+                fontsize=8, color=MPL_COLORS["text"])
+
+    # Annotate the 515× gap
+    ship_mb = by_id["yolo_seg_fp8_trt"]["per_forward"]["dram_mb"] + \
+              by_id["clip_trt"]["per_forward"]["dram_mb"] / 30.0  # CLIP runs at 1 Hz, 30 fps video
+    sam3_mb = by_id["sam3_bf16_reference"]["per_forward"]["dram_mb"]
+    ratio = sam3_mb / ship_mb
+    ax.set_title(
+        f"SAM 3 reference moves {sam3_mb/1000:,.0f} GB/frame — "
+        f"shipping TRT FP8 + 1 Hz CLIP moves ~{ship_mb:.0f} MB/frame → {ratio:,.0f}× lighter",
+        color=MPL_COLORS["text"], fontsize=11, fontweight="bold", pad=10,
+    )
+    fig.tight_layout(pad=1.0)
+    return fig
+
+
+def slide_ncu_headline(prs: Presentation):
+    """Slide: Nsight Compute measured DRAM bandwidth — the 515× gap."""
+    bundle = _load_ncu_bundle()
+    if bundle is None:
+        return
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Measured DRAM bandwidth — how the shipping pipeline actually moves memory",
+        f"Nsight Compute 2026 per-kernel bytes × NVTX per-workload, {bundle['n_workloads']} workloads on RTX 5090",
+    )
+    add_pipeline_strip(
+        slide,
+        [("FFmpeg", False), ("YOLO-seg FP8 TRT", True), ("CLIP FP8 TRT @ 1 Hz", True),
+         ("SQLite", False), ("NLQ / LLM", False)],
+        accent_color=C.ACCENT_GREEN,
+    )
+
+    fig = build_ncu_headline_chart(bundle)
+    img = fig_to_image_stream(fig)
+    slide.shapes.add_picture(img, Inches(CONTENT_LEFT), Inches(1.9),
+                              width=Inches(9.0))
+
+    # Right-side callout column
+    add_text_box(slide, Inches(9.8), Inches(1.95), Inches(3.4), Inches(0.35),
+                 "NPU Mid budget", font_size=12, color=C.ACCENT_INDIGO, bold=True)
+    add_text_box(slide, Inches(9.8), Inches(2.25), Inches(3.4), Inches(1.2),
+                 "128-bit LPDDR5X @ 8.4 GT/s\n"
+                 "= 134.4 GB/s theoretical\n"
+                 "= 100.8 GB/s effective (75%)",
+                 font_size=10, color=C.TEXT_BRIGHT)
+
+    add_text_box(slide, Inches(9.8), Inches(3.35), Inches(3.4), Inches(0.35),
+                 "Shipping @ 30 fps, 1 stream", font_size=12, color=C.ACCENT_GREEN, bold=True)
+    add_text_box(slide, Inches(9.8), Inches(3.65), Inches(3.4), Inches(1.0),
+                 "≈ 8.3 GB/s actual DRAM\n"
+                 "(8% of budget — 92% headroom\n"
+                 "for concurrent LLM + streams)",
+                 font_size=10, color=C.TEXT_BRIGHT)
+
+    add_text_box(slide, Inches(9.8), Inches(4.65), Inches(3.4), Inches(0.35),
+                 "Shipping × 4 streams", font_size=12, color=C.ACCENT_AMBER, bold=True)
+    add_text_box(slide, Inches(9.8), Inches(4.95), Inches(3.4), Inches(1.0),
+                 "≈ 23 GB/s actual DRAM\n"
+                 "(23% of budget — still leaves\n"
+                 "~77 GB/s for LLM duty-cycling)",
+                 font_size=10, color=C.TEXT_BRIGHT)
+
+    add_bullet_box(slide, CONTENT_LEFT, 6.3, CONTENT_W, 0.85, [
+        ("Why this matters", C.ACCENT_BLUE, True),
+        ("• Before ncu, the sizer assumed every pipeline saturates the bus. Measured bytes show "
+         "the shipping stack runs at 8% of NPU Mid — the engineering win is real, with massive headroom.", C.ACCENT_GREEN),
+        ("• Conversely, EfficientSAM-Small and the community SAM 3 Lites physically cannot fit: per-forward "
+         "DRAM already exceeds what the bus can deliver per second at any usable FPS.", C.ACCENT_RED),
+    ], font_size=10)
+
+
+def slide_ncu_workload_table(prs: Presentation):
+    """Slide: Full per-workload table — measured DRAM and BW-bound FPS ceilings."""
+    bundle = _load_ncu_bundle()
+    if bundle is None:
+        return
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        f"All {bundle['n_workloads']} measured workloads — per-forward DRAM and NPU Mid ceiling",
+        "Nsight Compute bytes ÷ NVTX-bounded forwards. FPS ceiling = 100.8 GB/s ÷ MB/forward (BW-bound only).",
+    )
+
+    # Order by family, best-case first within each family (low MB = good)
+    rank_family = {
+        "Reference (what we replaced)": 0,
+        "Mask-model bake-off":          1,
+        "Community SAM 3 Lite":         2,
+        "Community SAM 3.1 Lite":       3,
+        "YOLOE-26 one-model":           4,
+        "Shipping (TRT two-stage)":     5,
+        "Other":                        6,
+    }
+    rows_raw = []
+    for w in bundle["workloads"]:
+        wid = w["workload_id"]
+        fam = _ncu_family(wid)
+        rows_raw.append((
+            rank_family[fam], fam, wid,
+            w["n_kernels_total"],
+            w["per_forward"]["dram_mb"],
+            w["edge_projection_npu_mid"]["bw_bound_fps_max"],
+        ))
+    rows_raw.sort(key=lambda r: (r[0], r[4]))
+
+    # Pretty-print labels + highlight shipping row
+    pretty = {
+        "sam3_bf16_reference":                  "SAM 3 reference (BF16)",
+        "mobilesam":                            "MobileSAM",
+        "efficientsam_tiny":                    "EfficientSAM Tiny",
+        "efficientsam_small":                   "EfficientSAM Small",
+        "efficientsam3_es_ev_s":                "EfficientSAM3 ES-EV-S",
+        "efficientsam3p1_es_ev_s__set_image":   "EfficientSAM3.1 set_image",
+        "efficientsam3p1_es_ev_s__text_prompt": "EfficientSAM3.1 text_prompt",
+        "yoloe26_pytorch_fp16":                 "YOLOE-26S-PF PyTorch FP16",
+        "yoloe26_text_prompt_s":                "YOLOE-26S text_prompt",
+        "yoloe26_prompt_free_s":                "YOLOE-26S prompt_free",
+        "yoloe26_trt_fp16":                     "YOLOE-26S-PF TRT FP16",
+        "yoloe26_trt_fp8":                      "YOLOE-26S-PF TRT FP8",
+        "yolo_seg":                             "YOLO11s-seg PyTorch FP32",
+        "yolo_seg_fp16_trt":                    "YOLO11s-seg TRT FP16",
+        "yolo_seg_fp8_trt":                     "YOLO11s-seg TRT FP8 ★ shipping",
+        "clip_trt":                             "OpenCLIP visual TRT ★ shipping",
+    }
+
+    headers = ["Family", "Workload", "Kernels", "DRAM / forward", "BW-bound FPS ceiling"]
+    rows = []
+    highlight_rows = []
+    for i, (_, fam, wid, k, mb, fps) in enumerate(rows_raw):
+        label = pretty.get(wid, wid)
+        mb_str = f"{mb/1000:,.1f} GB" if mb >= 1000 else f"{mb:,.1f} MB"
+        fps_str = f"{fps:,.1f}" if fps >= 10 else f"{fps:,.2f}"
+        rows.append([fam, label, f"{k:,}", mb_str, fps_str])
+        if "★ shipping" in label:
+            highlight_rows.append(i + 1)
+
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.75),
+        Inches(CONTENT_W), Inches(4.6), headers, rows,
+        highlight_rows=highlight_rows, font_size=9, header_font_size=10,
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 6.45, CONTENT_W, 0.85, [
+        ("Reading the ceiling column", C.ACCENT_BLUE, True),
+        ("• BW-bound FPS is the best case — compute may cut it further. For shipping TRT FP8 the two numbers "
+         "agree: YOLO @ 465 ceiling vs ~140 measured, CLIP @ 232 ceiling at 1 Hz — either way 30 fps fits "
+         "with headroom. For SAM 3 the ceiling is 0.8 FPS: there is no CPU-side optimization that gets past it.",
+         C.ACCENT_GREEN),
+        ("• Source: data/output/ncu/sizer_bundle.json (vendored to keyhole-sizer/sizer/). Regenerate with "
+         "scripts/export_ncu_for_sizer.py after any ncu re-run.", C.TEXT_DIM),
+    ], font_size=10)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = new_slide(prs)
@@ -2936,6 +3175,13 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/trt_yoloe26_summary.json").exists():
         console.print("  Building: TRT YOLOE-26 — does FP8 close the gap?")
         slide_trt_yoloe26(prs)
+
+    # Nsight Compute measured DRAM bandwidth (16 workloads)
+    if Path("data/output/ncu/sizer_bundle.json").exists():
+        console.print("  Building: ncu measured DRAM — headline 515× gap")
+        slide_ncu_headline(prs)
+        console.print("  Building: ncu measured DRAM — full workload table")
+        slide_ncu_workload_table(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")
