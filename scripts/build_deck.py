@@ -1763,17 +1763,18 @@ def slide_trt_yolo(prs: Presentation):
                      Inches(CONTENT_W), Inches(3.1), headers, rows,
                      highlight_rows=highlight)
 
-    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.85, [
+    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.75, [
         ("Key findings", C.ACCENT_BLUE, True),
-        ("• FP8 on YOLO-seg WORKS via TRT 10.16 on Blackwell (SM 12.0). The earlier torchao block was a tool-chain gap, not a fundamental one.", C.ACCENT_GREEN, True),
-        ("• FP8 quality is essentially perfect — 100% box recall, matched IoU 0.998, detections indistinguishable from FP16.", C.ACCENT_GREEN, True),
-        ("• Edge FPS 720p: 18.6 FP16 → 36.8 FP8 (+98%) — nearly doubles; full-model activation halving vs torchao 1×1-only (+27%).",),
-        ("• INT8 via TRT ships too (36.8 FPS) but drops some low-confidence boxes (87-92% recall). FP8's wider range wins on the detection head's logits.", C.ACCENT_AMBER, True),
-        "",
-        ("New full-stack projection (720p Edge MPU)", C.ACCENT_INDIGO, True),
-        ("• Hybrid V2 + 1 Hz CLIP + YOLO-FP8 = 27.2 ms YOLO + 4.9 ms CLIP amortized = ~31 FPS edge  (prior target: 20 FPS — nearly 2×)",),
-        ("• Ceiling now set by CLIP keyframe rate. Push CLIP to lower N (e.g. 2 Hz) → ~30 FPS; push CLIP itself through TRT → higher still.", C.TEXT_DIM),
-    ], font_size=11)
+        ("• FP8 on YOLO-seg WORKS via TRT 10.16 on Blackwell (SM 12.0). Earlier torchao block was a tool-chain gap, not a fundamental one.", C.ACCENT_GREEN, True),
+        ("• FP8 quality essentially perfect — 100% box recall, matched IoU 0.998, indistinguishable from FP16.", C.ACCENT_GREEN, True),
+        ("• Edge FPS 720p: 18.6 FP16 → 36.8 FP8 (+98%). Full-stack = Hybrid V2 + 1 Hz CLIP + YOLO-FP8 ≈ 36 FPS edge (prior target 20, nearly 2×).", C.ACCENT_INDIGO, True),
+        ("• INT8 ships too but drops low-confidence boxes (87-92% recall). FP8's wider range wins on detection-head logits.", C.ACCENT_AMBER, True),
+        ("Preprocessing: 640×640 letterbox runs on CPU, not GPU/NPU (not included in the ms/frame above).", C.ACCENT_ORANGE, True),
+        ("• Measured on 5090 host (i9-14900KF, cv2.resize bilinear, 1 thread): 0.17 / 0.32 / 0.33 ms at 720p / 1080p / 4K — ~0.5–1% of one core at 30 fps. Flat across source res (output size dominates).",
+         C.TEXT_BRIGHT),
+        ("• Edge ARM (Cortex-A55 ≈ 10× slower single-thread) → ~2–3 ms/frame, ~6–10% of one edge core at 30 fps. SoCs with a fixed-function ISP / 2D GPU (Qualcomm, MediaTek, NXP, Ambarella, Hailo) move this off-CPU entirely; pure-NPU boards (Coral) pay the full cost.",
+         C.TEXT_DIM),
+    ], font_size=9)
 
 
 def slide_trt_clip(prs: Presentation):
