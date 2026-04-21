@@ -50,9 +50,14 @@ CLIPS = {
     "1080p": "embedded_world_clip_1080p",
     "4K":    "embedded_world_clip",
 }
-OUT_DIR = BAKEOFF_DIR / "hybrid_v2"
+import os as _os
+_DEFAULT_YOLO = "yolo11s-seg"
+_YOLO_VAR = _os.environ.get("KEYHOLE_YOLO_VARIANT", _DEFAULT_YOLO)
+_VARIANT_SLUG = "" if _YOLO_VAR == _DEFAULT_YOLO else f"_{_YOLO_VAR}"
+
+OUT_DIR = BAKEOFF_DIR / f"hybrid_v2{_VARIANT_SLUG}"
 RECIPES = ["bf16", "fp8", "int8"]
-YOLO_SEG_VARIANT = "yolo11s-seg.pt"
+YOLO_SEG_VARIANT = f"{_YOLO_VAR}.pt"
 CLIP_VARIANT = "ViT-B-32"
 CLIP_PRETRAINED = "laion2b_s34b_b79k"
 
@@ -281,7 +286,7 @@ def project_edge(all_results: dict) -> dict:
         yolo_ms_bf16 = bf16_run["mean_yolo_ms"]
         yolo_wl = WorkloadProfile(
             stage_name="yolo_seg",
-            model_name="yolo11s-seg",
+            model_name=_YOLO_VAR,
             param_count=yolo_params,
             model_size_bytes=yolo_bytes_bf16,
             precision="bf16",
@@ -428,12 +433,12 @@ def main():
                     "n_agreement_total": total,
                 }
 
-    (BAKEOFF_DIR / "hybrid_v2_summary.json").write_text(json.dumps(all_results, indent=2))
-    log.info("Wrote hybrid_v2_summary.json")
+    (BAKEOFF_DIR / f"hybrid_v2{_VARIANT_SLUG}_summary.json").write_text(json.dumps(all_results, indent=2))
+    log.info("Wrote hybrid_v2%s_summary.json", _VARIANT_SLUG)
 
     proj = project_edge(all_results)
-    (BAKEOFF_DIR / "hybrid_v2_edge_projection.json").write_text(json.dumps(proj, indent=2))
-    log.info("Wrote hybrid_v2_edge_projection.json")
+    (BAKEOFF_DIR / f"hybrid_v2{_VARIANT_SLUG}_edge_projection.json").write_text(json.dumps(proj, indent=2))
+    log.info("Wrote hybrid_v2%s_edge_projection.json", _VARIANT_SLUG)
 
     # Pretty print
     print()

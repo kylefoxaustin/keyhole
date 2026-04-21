@@ -459,11 +459,19 @@ class EfficientSAMContestant(Contestant):
 
 
 class YoloSegContestant(Contestant):
+    """Note: `name` is a class attribute used as the output-file stem. For
+    non-default variants we override it in __init__ so the yolov8n-seg run
+    writes to yolo_seg_yolov8n-seg.json and doesn't clobber the yolo11s-seg
+    output. Default variant keeps name='yolo_seg' for backwards compat with
+    existing summaries and ncu NVTX labels."""
     name = "yolo_seg"
 
     def __init__(self, weights: str = "yolo11s-seg.pt", match_iou: float = 0.5):
         self.weights = weights
         self.match_iou = match_iou
+        # Variant-aware output stem: only non-default variants get a suffix.
+        variant = Path(weights).stem  # e.g. "yolov8n-seg"
+        self.name = "yolo_seg" if variant == "yolo11s-seg" else f"yolo_seg_{variant}"
 
     def load(self):
         from ultralytics import YOLO
@@ -637,7 +645,8 @@ CONTESTANT_REGISTRY = {
     "mobilesam": lambda: MobileSAMContestant(),
     "efficientsam_tiny": lambda: EfficientSAMContestant("tiny"),
     "efficientsam_small": lambda: EfficientSAMContestant("small"),
-    "yolo_seg": lambda: YoloSegContestant("yolo11s-seg.pt"),
+    "yolo_seg": lambda: YoloSegContestant(
+        f"{os.environ.get('KEYHOLE_YOLO_VARIANT', 'yolo11s-seg')}.pt"),
 }
 
 

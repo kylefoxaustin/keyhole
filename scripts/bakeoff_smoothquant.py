@@ -50,7 +50,10 @@ CLIPS = {
     "1080p": "embedded_world_clip_1080p",
     "4K":    "embedded_world_clip",
 }
-OUT_DIR = BAKEOFF_DIR / "smoothquant"
+import os as _os_sq
+_yv = _os_sq.environ.get("KEYHOLE_YOLO_VARIANT", "yolo11s-seg")
+_vs = "" if _yv == "yolo11s-seg" else f"_{_yv}"
+OUT_DIR = BAKEOFF_DIR / f"smoothquant{_vs}"
 CALIB_FRAMES = 5          # how many frames to calibrate on (SmoothQuant only)
 
 
@@ -346,7 +349,9 @@ def project_edge(all_results: dict) -> dict:
                    "Desktop latency is not predictive — edge silicon's native INT8 MMA "
                    "paths realize the bandwidth savings."),
     }
-    (BAKEOFF_DIR / "smoothquant_edge_projection.json").write_text(json.dumps(out, indent=2))
+    import os as _os
+    _vs = "" if _os.environ.get("KEYHOLE_YOLO_VARIANT", "yolo11s-seg") == "yolo11s-seg" else f"_{_os.environ['KEYHOLE_YOLO_VARIANT']}"
+    (BAKEOFF_DIR / f"smoothquant{_vs}_edge_projection.json").write_text(json.dumps(out, indent=2))
     return out
 
 
@@ -357,7 +362,8 @@ def main():
         all_results[res] = {}
         for name, builder in [
             ("efficientsam_small", lambda: EfficientSAMContestant("small")),
-            ("yolo_seg",           lambda: YoloSegContestant("yolo11s-seg.pt")),
+            ("yolo_seg",           lambda: YoloSegContestant(
+                f"{__import__('os').environ.get('KEYHOLE_YOLO_VARIANT', 'yolo11s-seg')}.pt")),
         ]:
             all_results[res][name] = {}
             for recipe in ["int8", "smoothquant"]:
@@ -368,7 +374,9 @@ def main():
                     log.error("%s/%s/%s failed: %s", name, recipe, res, e)
                     all_results[res][name][recipe] = {"error": str(e), "name": name}
 
-    (BAKEOFF_DIR / "smoothquant_summary.json").write_text(json.dumps(all_results, indent=2))
+    import os as _os2
+    _vs2 = "" if _os2.environ.get("KEYHOLE_YOLO_VARIANT", "yolo11s-seg") == "yolo11s-seg" else f"_{_os2.environ['KEYHOLE_YOLO_VARIANT']}"
+    (BAKEOFF_DIR / f"smoothquant{_vs2}_summary.json").write_text(json.dumps(all_results, indent=2))
     projections = project_edge(all_results)
 
     print()

@@ -46,7 +46,10 @@ CLIPS = {
     "1080p": "embedded_world_clip_1080p",
     "4K":    "embedded_world_clip",
 }
-OUT_DIR = BAKEOFF_DIR / "fp8"
+import os as _os_pf
+_yv = _os_pf.environ.get("KEYHOLE_YOLO_VARIANT", "yolo11s-seg")
+_vs = "" if _yv == "yolo11s-seg" else f"_{_yv}"
+OUT_DIR = BAKEOFF_DIR / f"fp8{_vs}"
 
 
 def fp8_quantize(model: torch.nn.Module) -> dict:
@@ -304,7 +307,9 @@ def project_edge_fp8(fp8_results: dict) -> dict:
                    "portion (act traffic halved). Desktop FP8 path is kernel-immature, "
                    "not predictive."),
     }
-    (BAKEOFF_DIR / "fp8_edge_projection.json").write_text(json.dumps(out, indent=2))
+    import os as _os
+    _vs = "" if _os.environ.get("KEYHOLE_YOLO_VARIANT", "yolo11s-seg") == "yolo11s-seg" else f"_{_os.environ['KEYHOLE_YOLO_VARIANT']}"
+    (BAKEOFF_DIR / f"fp8{_vs}_edge_projection.json").write_text(json.dumps(out, indent=2))
     return out
 
 
@@ -316,7 +321,8 @@ def main():
         all_results[res] = {}
         for name, build in [
             ("efficientsam_small", lambda: EfficientSAMContestant("small")),
-            ("yolo_seg",           lambda: YoloSegContestant("yolo11s-seg.pt")),
+            ("yolo_seg",           lambda: YoloSegContestant(
+                f"{__import__('os').environ.get('KEYHOLE_YOLO_VARIANT', 'yolo11s-seg')}.pt")),
         ]:
             try:
                 r = run_fp8_contestant(build(), name, clip_stem)
@@ -325,7 +331,9 @@ def main():
                 log.error("%s %s failed: %s", name, res, e)
                 all_results[res][name] = {"error": str(e), "name": name}
 
-    (BAKEOFF_DIR / "fp8_summary.json").write_text(json.dumps(all_results, indent=2))
+    import os as _os2
+    _vs2 = "" if _os2.environ.get("KEYHOLE_YOLO_VARIANT", "yolo11s-seg") == "yolo11s-seg" else f"_{_os2.environ['KEYHOLE_YOLO_VARIANT']}"
+    (BAKEOFF_DIR / f"fp8{_vs2}_summary.json").write_text(json.dumps(all_results, indent=2))
     log.info("Wrote FP8 summary")
 
     projections = project_edge_fp8(all_results)

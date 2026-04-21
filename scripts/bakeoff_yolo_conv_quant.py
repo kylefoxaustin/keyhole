@@ -58,8 +58,13 @@ CLIPS = {
     "1080p": "embedded_world_clip_1080p",
     "4K":    "embedded_world_clip",
 }
-OUT_DIR = BAKEOFF_DIR / "yolo_conv_quant"
-YOLO_MODEL = "yolo11s-seg.pt"
+import os as _os
+_DEFAULT_YOLO = "yolo11s-seg"
+_YOLO_VAR = _os.environ.get("KEYHOLE_YOLO_VARIANT", _DEFAULT_YOLO)
+_VARIANT_SLUG = "" if _YOLO_VAR == _DEFAULT_YOLO else f"_{_YOLO_VAR}"
+
+OUT_DIR = BAKEOFF_DIR / f"yolo_conv_quant{_VARIANT_SLUG}"
+YOLO_MODEL = f"{_YOLO_VAR}.pt"
 CONF_THRESHOLD = 0.35
 IOU_MATCH_THRESHOLD = 0.5
 
@@ -273,7 +278,7 @@ def project_edge(all_results: dict) -> dict:
 
         wl = WorkloadProfile(
             stage_name="yolo_seg",
-            model_name="yolo11s-seg",
+            model_name=_YOLO_VAR,
             param_count=params,
             model_size_bytes=model_bytes_bf16,
             precision="bf16",
@@ -421,12 +426,12 @@ def main():
                 all_results[res]["_quality"][recipe] = detection_stability(
                     bf16_run["frames"], var["frames"])
 
-    (BAKEOFF_DIR / "yolo_conv_quant_summary.json").write_text(
+    (BAKEOFF_DIR / f"yolo_conv_quant{_VARIANT_SLUG}_summary.json").write_text(
         json.dumps(all_results, indent=2))
     log.info("Wrote yolo_conv_quant_summary.json")
 
     proj = project_edge(all_results)
-    (BAKEOFF_DIR / "yolo_conv_quant_edge_projection.json").write_text(
+    (BAKEOFF_DIR / f"yolo_conv_quant{_VARIANT_SLUG}_edge_projection.json").write_text(
         json.dumps(proj, indent=2))
     log.info("Wrote yolo_conv_quant_edge_projection.json")
 
