@@ -94,7 +94,7 @@ NVTX_DIVISORS: dict[str, dict[str, int]] = {
 # Kyle-supplied authoritative NPU vendor numbers. See
 # memory/project_current_state.md § NPU tier actuals.
 
-NPU_MID_EFFECTIVE_GBS = 100.8  # 134.4 theoretical × 0.75 efficiency
+NPU_MID_EFFECTIVE_GBS = 94.08  # 134.4 theoretical × 0.70 efficiency (tier-wide standardization)
 
 
 # ───────────────────────────── Builders ─────────────────────────────────
@@ -221,7 +221,7 @@ def build_bundle(ncu_dir: Path) -> dict:
             "bus":             "128-bit LPDDR5X @ 8.4 GT/s",
             "theoretical_gbs": 134.4,
             "effective_gbs":   NPU_MID_EFFECTIVE_GBS,
-            "efficiency_assumed": 0.75,
+            "efficiency_assumed": 0.70,
         },
         "n_workloads": len(entries),
         "workloads":   entries,

@@ -816,7 +816,7 @@ def slide_exec_summary(prs: Presentation):
                      ["NPU tier", "Memory bus", "Vision (1-stream)", "Vision (4-stream, batch=4)",
                       "LLM Q4_K_M decode", "Good for"],
                      [
-                         ["NPU Low",  "64-bit LPDDR4 @ 4.0 GT/s",    "~9 FPS",   "~6 FPS each",
+                         ["NPU Low-LP4",  "64-bit LPDDR4 @ 4.0 GT/s",    "~9 FPS",   "~6 FPS each",
                           "29 tok/s",  "Batch analysis, single low-res stream"],
                          ["NPU Mid",  "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
                           "38 tok/s",  "Live multi-stream + occasional LLM"],
@@ -1941,7 +1941,7 @@ def slide_llm_bakeoff(prs: Presentation):
                 "Short answer (200 tok)", "RAG (8K+2K)"]
     rows2 = []
     highlight = []
-    for i, tier in enumerate(("NPU Low", "NPU Mid", "NPU High")):
+    for i, tier in enumerate(("NPU Low-LP4", "NPU Mid", "NPU High")):
         tp = tier_proj.get(tier)
         if not tp:
             rows2.append([tier, "—", "—", "—", "—", "—"])
@@ -1984,7 +1984,7 @@ def slide_llm_duty_cycle(prs: Presentation):
 
     # Q4_K_M short-answer and RAG answer times per tier (milliseconds)
     tiers_data = {}
-    for tier in ("NPU Low", "NPU Mid", "NPU High"):
+    for tier in ("NPU Low-LP4", "NPU Mid", "NPU High"):
         tp = tier_proj.get(tier)
         if not tp:
             continue
@@ -2003,7 +2003,7 @@ def slide_llm_duty_cycle(prs: Presentation):
     qps = qpm / 60.0
 
     tier_colors = {
-        "NPU Low":  MPL_COLORS["red"],
+        "NPU Low-LP4":  MPL_COLORS["red"],
         "NPU Mid":  MPL_COLORS["orange"],
         "NPU High": MPL_COLORS["green"],
     }
@@ -2153,7 +2153,7 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
         accent_color=C.ACCENT_PURPLE,
     )
 
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # 14.17×
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19× (5090 eff BW ÷ NPU Mid eff BW, uniform 0.70 tier eff)
 
     # Primary table: per-resolution 5090 cost split + NPU Mid totals for n=1/5/20
     headers = ["Resolution",
@@ -2238,7 +2238,7 @@ def slide_trt_yoloe26(prs: Presentation):
         accent_color=C.ACCENT_AMBER,
     )
 
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # 14.17×
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19× (5090 eff BW ÷ NPU Mid eff BW, uniform 0.70 tier eff)
 
     # Per-recipe per-resolution table
     headers = ["Recipe", "720p 5090 (p50)", "1080p 5090", "4K 5090",
@@ -2332,7 +2332,7 @@ def slide_yoloe26_onemodel(prs: Presentation):
     )
 
     # Per-variant, per-resolution numbers
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # 14.17×
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19× (5090 eff BW ÷ NPU Mid eff BW, uniform 0.70 tier eff)
     headers = ["Variant", "Res", "Params",
                 "5090 ms (p50)", "NPU Mid ms (BW-scaled)", "NPU Mid FPS",
                 "Box recall vs YOLO11x"]
@@ -2436,7 +2436,7 @@ def slide_efficientsam3_community(prs: Presentation):
         r = by_res[res]
         ms_5090 = r["per_frame_ms_5090"]["p50"]
         # Bandwidth ratio from npu_model.py (5090 effective BW ÷ NPU Mid effective BW)
-        bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # = 14.17x
+        bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # = 16.19x (uniform 0.70 NPU tier efficiency)
         ms_mid = ms_5090 * bw_ratio
         fps_mid = 1000.0 / ms_mid if ms_mid > 0 else 0.0
         iou = r["iou_vs_sam3"]["mean"]
@@ -2613,14 +2613,14 @@ def slide_ncu_headline(prs: Presentation):
     add_text_box(slide, Inches(9.8), Inches(2.25), Inches(3.4), Inches(1.2),
                  "128-bit LPDDR5X @ 8.4 GT/s\n"
                  "= 134.4 GB/s theoretical\n"
-                 "= 100.8 GB/s effective (75%)",
+                 "= 94.1 GB/s effective (70%)",
                  font_size=10, color=C.TEXT_BRIGHT)
 
     add_text_box(slide, Inches(9.8), Inches(3.35), Inches(3.4), Inches(0.35),
                  "Shipping @ 30 fps, 1 stream", font_size=12, color=C.ACCENT_GREEN, bold=True)
     add_text_box(slide, Inches(9.8), Inches(3.65), Inches(3.4), Inches(1.0),
                  "≈ 8.3 GB/s actual DRAM\n"
-                 "(8% of budget — 92% headroom\n"
+                 "(9% of budget — 91% headroom\n"
                  "for concurrent LLM + streams)",
                  font_size=10, color=C.TEXT_BRIGHT)
 
@@ -2628,14 +2628,14 @@ def slide_ncu_headline(prs: Presentation):
                  "Shipping × 4 streams", font_size=12, color=C.ACCENT_AMBER, bold=True)
     add_text_box(slide, Inches(9.8), Inches(4.95), Inches(3.4), Inches(1.0),
                  "≈ 23 GB/s actual DRAM\n"
-                 "(23% of budget — still leaves\n"
-                 "~77 GB/s for LLM duty-cycling)",
+                 "(24% of budget — still leaves\n"
+                 "~71 GB/s for LLM duty-cycling)",
                  font_size=10, color=C.TEXT_BRIGHT)
 
     add_bullet_box(slide, CONTENT_LEFT, 6.3, CONTENT_W, 0.85, [
         ("Why this matters", C.ACCENT_BLUE, True),
         ("• Before ncu, the sizer assumed every pipeline saturates the bus. Measured bytes show "
-         "the shipping stack runs at 8% of NPU Mid — the engineering win is real, with massive headroom.", C.ACCENT_GREEN),
+         "the shipping stack runs at 9% of NPU Mid — the engineering win is real, with massive headroom.", C.ACCENT_GREEN),
         ("• Conversely, EfficientSAM-Small and the community SAM 3 Lites physically cannot fit: per-forward "
          "DRAM already exceeds what the bus can deliver per second at any usable FPS.", C.ACCENT_RED),
     ], font_size=10)
@@ -2651,7 +2651,7 @@ def slide_ncu_workload_table(prs: Presentation):
     add_title_subtitle(
         slide,
         f"All {bundle['n_workloads']} measured workloads — per-forward DRAM and NPU Mid ceiling",
-        "Nsight Compute bytes ÷ NVTX-bounded forwards. FPS ceiling = 100.8 GB/s ÷ MB/forward (BW-bound only).",
+        "Nsight Compute bytes ÷ NVTX-bounded forwards. FPS ceiling = 94.08 GB/s ÷ MB/forward (BW-bound only).",
     )
 
     # Order by family, best-case first within each family (low MB = good)
