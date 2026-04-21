@@ -2485,6 +2485,99 @@ def slide_efficientsam3_community(prs: Presentation):
     ], font_size=10)
 
 
+def slide_trt_takeaways(prs: Presentation):
+    """Slide: synthesize the 3 TRT bake-offs into one decision rule + compiler caveat.
+
+    Consumes existing bake-off JSONs — no new measurements required. The
+    numbers here must stay in sync with slides 43/44/51; if a bake-off is
+    re-run, this slide re-reads and updates automatically.
+    """
+    # Shipping YOLO-seg TRT FP8 vs FP16 at 720p
+    trt_yolo = Path("data/output/bakeoff/trt_yolo_edge_projection.json")
+    trt_clip = Path("data/output/bakeoff/trt_clip_edge_projection.json")
+    trt_e26  = Path("data/output/bakeoff/trt_yoloe26_summary.json")
+    if not (trt_yolo.exists() and trt_clip.exists() and trt_e26.exists()):
+        return
+
+    yolo_proj = json.loads(trt_yolo.read_text())["projections"]["720p"]
+    clip_proj = json.loads(trt_clip.read_text())["projections"]["720p"]
+    e26       = json.loads(trt_e26.read_text())["recipes"]
+
+    # FPS/ms headline numbers — all edge, NPU Mid
+    yolo_fp16_edge = yolo_proj.get("fp16", {}).get("projected_fps_edge", 0)
+    yolo_fp8_edge  = yolo_proj.get("fp8",  {}).get("projected_fps_edge", 0)
+    clip_bf16_edge_ms = clip_proj.get("bf16_torch", {}).get("projected_clip_ms_edge", 0)
+    clip_fp8_edge_ms  = clip_proj.get("fp8",        {}).get("projected_clip_ms_edge", 0)
+    pt16_720 = e26.get("pytorch_fp16", {}).get("by_resolution", {}).get("720p", {}).get("per_frame_ms_5090", {}).get("p50", 0)
+    tr16_720 = e26.get("trt_fp16",     {}).get("by_resolution", {}).get("720p", {}).get("per_frame_ms_5090", {}).get("p50", 0)
+    tr8_720  = e26.get("trt_fp8",      {}).get("by_resolution", {}).get("720p", {}).get("per_frame_ms_5090", {}).get("p50", 0)
+    e26_vram_pt = e26.get("pytorch_fp16", {}).get("peak_vram_mb_5090", 0)
+    e26_vram_fp8 = e26.get("trt_fp8",     {}).get("peak_vram_mb_5090", 0)
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "TensorRT — where it pays and where it doesn't",
+        "Three TRT FP8 bake-offs, one rule of thumb: optimization loves big per-kernel work.",
+    )
+    add_pipeline_strip(
+        slide,
+        ["FFmpeg", ("YOLO-seg FP8 TRT", True), ("CLIP FP8 TRT", True), "SQLite", "NLQ / LLM"],
+        accent_color=C.ACCENT_GREEN,
+    )
+
+    # Decision matrix table
+    headers = ["Model", "Arch / bottleneck", "TRT FP8 result (720p edge)", "Verdict"]
+    rows = [
+        ["YOLO-seg 11s (10M params)",
+         "Dense Conv backbone, matmul-bound",
+         f"{yolo_fp16_edge:.1f} FPS (FP16) → {yolo_fp8_edge:.1f} FPS (FP8), "
+         f"+{(yolo_fp8_edge/yolo_fp16_edge - 1)*100:.0f}% — full model activation halving works",
+         "SHIPS — the core FP8 unblock"],
+        ["OpenCLIP ViT-B-32 visual (88M params)",
+         "ViT attention + MLP, matmul-bound",
+         f"{clip_bf16_edge_ms:.1f} ms BF16 → {clip_fp8_edge_ms:.1f} ms FP8, "
+         f"{clip_bf16_edge_ms/clip_fp8_edge_ms:.1f}× faster — Top-1 agreement 0.964",
+         "SHIPS — halves CLIP cost"],
+        ["YOLOE-26S-PF (16M params)",
+         "Small model + complex open-vocab head, kernel-launch bound",
+         f"PT {pt16_720:.1f} ms → TRT FP16 {tr16_720:.1f} ms ({pt16_720/tr16_720:.2f}×); "
+         f"FP8 {tr8_720:.1f} ms — FP16→FP8 gains ~0% on the matmul",
+         "DOESN'T close gap to shipping"],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.9),
+        Inches(CONTENT_W), Inches(2.3), headers, rows,
+        highlight_rows=[1, 2], font_size=10, header_font_size=11,
+    )
+
+    # Takeaways
+    add_bullet_box(slide, CONTENT_LEFT, 4.35, CONTENT_W, 1.6, [
+        ("Rule of thumb: TRT FP8 pays off when the kernel is big", C.ACCENT_BLUE, True),
+        ("• WORKS: dense Conv (YOLO-seg), dense ViT (CLIP) — FP8 matmul throughput is the bottleneck, and TRT kernel fusion amortizes launch cost over real compute.",
+         C.ACCENT_GREEN),
+        ("• UNDERPERFORMS: small param-count models with complex graphs (YOLOE-26 open-vocab head). "
+         "At 16M params the kernel-launch tax dominates; FP8 can't help with work that isn't matmul.",
+         C.ACCENT_AMBER),
+        (f"• Orthogonal win: TRT FP8 still cuts VRAM ~{(1 - e26_vram_fp8/e26_vram_pt)*100:.0f}% on YOLOE-26 "
+         f"({e26_vram_pt:.0f} → {e26_vram_fp8:.0f} MB) — worth it for multi-stream even when latency gain is modest.",
+         C.TEXT_DIM),
+    ], font_size=10)
+
+    # Edge compiler caveat — mirrors the sizer's new slider
+    add_bullet_box(slide, CONTENT_LEFT, 6.05, CONTENT_W, 1.0, [
+        ("Reality check: these numbers came from NVIDIA TensorRT on 5090", C.ACCENT_ORANGE, True),
+        ("• All three bake-offs used TRT 10.16 — a best-in-class compiler on best-in-class silicon. "
+         "Vendor edge-NPU compilers (Qualcomm SNPE, MediaTek NeuroPilot, OpenVINO-NPU, Hailo SDK) typically "
+         "extract 50–75% of the same theoretical peak on first-gen toolchains.",
+         C.TEXT_BRIGHT),
+        ("• The sizer's “Edge compiler quality vs TensorRT” slider applies a 0–50% haircut to projected "
+         "vision FPS to model this gap. Default is 1.00 (parity, optimistic); set to 0.75 for a realistic "
+         "first-gen deployment plan.",
+         C.ACCENT_INDIGO),
+    ], font_size=10)
+
+
 def _load_ncu_bundle() -> Optional[dict]:
     """Load the vendored ncu sizer bundle (16 workloads) if present."""
     path = Path("data/output/ncu/sizer_bundle.json")
@@ -3175,6 +3268,13 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/trt_yoloe26_summary.json").exists():
         console.print("  Building: TRT YOLOE-26 — does FP8 close the gap?")
         slide_trt_yoloe26(prs)
+
+    # TRT takeaways — synthesize the 3 TRT bake-offs + edge-compiler caveat
+    if (Path("data/output/bakeoff/trt_yolo_edge_projection.json").exists()
+        and Path("data/output/bakeoff/trt_clip_edge_projection.json").exists()
+        and Path("data/output/bakeoff/trt_yoloe26_summary.json").exists()):
+        console.print("  Building: TRT takeaways — where it pays and where it doesn't")
+        slide_trt_takeaways(prs)
 
     # Nsight Compute measured DRAM bandwidth (16 workloads)
     if Path("data/output/ncu/sizer_bundle.json").exists():
