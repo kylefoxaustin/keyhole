@@ -830,7 +830,7 @@ def slide_exec_summary(prs: Presentation):
                      ["NPU tier", "Memory bus", "Vision (1-stream)", "Vision (4-stream, batch=4)",
                       "LLM Q4_K_M decode", "Good for"],
                      [
-                         ["NPU Low-LP5",  "64-bit LPDDR5 @ 6.4 GT/s",    "~15 FPS",  "~10 FPS each",
+                         ["NPU Low-LP5-64bit",  "64-bit LPDDR5 @ 6.4 GT/s",    "~15 FPS",  "~10 FPS each",
                           "29 tok/s",  "Dense INT8-only silicon (NXP Neutron class)"],
                          ["NPU Mid",  "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
                           "38 tok/s",  "Live multi-stream + occasional LLM"],
@@ -2093,7 +2093,7 @@ def slide_llm_bakeoff(prs: Presentation):
                 "Short answer (200 tok)", "RAG (8K+2K)"]
     rows2 = []
     highlight = []
-    for i, tier in enumerate(("NPU Low-LP5", "NPU Mid", "NPU High")):
+    for i, tier in enumerate(("NPU Low-LP5-64bit", "NPU Mid", "NPU High")):
         tp = tier_proj.get(tier)
         if not tp:
             rows2.append([tier, "—", "—", "—", "—", "—"])
@@ -2136,7 +2136,7 @@ def slide_llm_duty_cycle(prs: Presentation):
 
     # Q4_K_M short-answer and RAG answer times per tier (milliseconds)
     tiers_data = {}
-    for tier in ("NPU Low-LP5", "NPU Mid", "NPU High"):
+    for tier in ("NPU Low-LP5-64bit", "NPU Mid", "NPU High"):
         tp = tier_proj.get(tier)
         if not tp:
             continue
@@ -2155,7 +2155,7 @@ def slide_llm_duty_cycle(prs: Presentation):
     qps = qpm / 60.0
 
     tier_colors = {
-        "NPU Low-LP5":  MPL_COLORS["red"],
+        "NPU Low-LP5-64bit":  MPL_COLORS["red"],
         "NPU Mid":  MPL_COLORS["orange"],
         "NPU High": MPL_COLORS["green"],
     }
@@ -3137,40 +3137,39 @@ def slide_npu_tier_specs(prs: Presentation):
     headers = ["Tier", "Memory bus", "BW theoretical", "BW effective (70%)",
                "Tensor TOPS", "DRAM", "TDP", "LLM Q4 decode", "LLM TTFT @ 1K"]
     rows = [
-        ["NPU Low-LP5",  "64-bit LPDDR5 @ 6.4 GT/s",  "51.2 GB/s",  "35.84 GB/s",
-         "2 INT8 (dense)",                     "16 GB", "10 W", "29.27 tok/s", "1.67 s"],
-        ["NPU Low-LP5X", "64-bit LPDDR5X @ 8.4 GT/s", "67.2 GB/s",  "47.04 GB/s",
-         "50 BF16 / 100 INT8 / 100 FP8",       "16 GB", "10 W", "— (projected)", "— (projected)"],
-        ["NPU Mid",      "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s", "94.08 GB/s",
-         "200 BF16 / 400 INT8 / 400 FP8",      "24 GB", "25 W", "37.85 tok/s", "0.351 s"],
-        ["NPU High",     "128-bit LPDDR5X @ 11.2 GT/s","179.2 GB/s","125.44 GB/s",
-         "275 BF16 / 550 INT8 / 550 FP8",      "32 GB", "40 W", "50.46 tok/s", "0.176 s"],
+        ["NPU Low-LP5-32bit", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s",
+         "2 INT8 (dense)",                    "16 GB", "10 W", "— (projected)", "— (projected)"],
+        ["NPU Low-LP5-64bit", "64-bit LPDDR5 @ 6.4 GT/s", "51.2 GB/s", "35.84 GB/s",
+         "2 INT8 (dense)",                    "16 GB", "10 W", "29.27 tok/s",   "1.67 s"],
+        ["NPU Low-LP5X",      "64-bit LPDDR5X @ 8.4 GT/s","67.2 GB/s", "47.04 GB/s",
+         "50 BF16 / 100 INT8 / 100 FP8",      "16 GB", "10 W", "— (projected)", "— (projected)"],
+        ["NPU Mid",           "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s",
+         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "37.85 tok/s",   "0.351 s"],
+        ["NPU High",          "128-bit LPDDR5X @ 11.2 GT/s","179.2 GB/s","125.44 GB/s",
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "50.46 tok/s",   "0.176 s"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
-                     Inches(CONTENT_W), Inches(2.5), headers, rows,
-                     highlight_rows=[3],   # NPU Mid — recommended target
+                     Inches(CONTENT_W), Inches(2.6), headers, rows,
+                     highlight_rows=[4],   # NPU Mid — recommended target
                      font_size=10, header_font_size=11)
 
     # Context bullets + assumptions callout
-    add_bullet_box(slide, CONTENT_LEFT, 4.2, CONTENT_W, 2.6, [
+    add_bullet_box(slide, CONTENT_LEFT, 4.3, CONTENT_W, 2.6, [
         ("How edge FPS numbers in this deck are derived", C.ACCENT_BLUE, True),
         ("• Reference measurement happens on the RTX 5090 (1792 GB/s theo × 0.85 eff = 1523.2 GB/s realized). "
          "Edge ms projects via bandwidth ratio: edge_ms = 5090_ms × (5090_eff_bw / edge_eff_bw). "
          "No TOPS-based compute ceiling in the current math — every tier is treated as bandwidth-bound.",
          C.TEXT_BRIGHT),
-        ("• 70% bandwidth efficiency is uniform across all four edge tiers — removes tier-specific efficiency games so cross-tier comparisons reflect silicon differences, not modeling assumptions. "
+        ("• 70% bandwidth efficiency is uniform across all five edge tiers — removes tier-specific efficiency games so cross-tier comparisons reflect silicon differences, not modeling assumptions. "
          "Derived from published NPU vendor benchmarks on Qwen3-30B-A3B Q4_K_M (135 ms TTFT vs 1K prompt on Mid).",
          C.TEXT_DIM),
         "",
         ("Precision + silicon-class notes", C.ACCENT_BLUE, True),
-        ("• NPU Low-LP5 is INT8-ONLY silicon (NXP i.MX 95 Neutron N3-1024S class, 2 TOPS dense INT8). "
-         "Floating-point pipelines (BF16 / FP8) will either fail to load on this tier or fall back to CPU with catastrophic slowdown. "
-         "Real-world FP-pipeline comparison should target Low-LP5X and above.",
+        ("• NPU Low-LP5-32bit and -64bit are the SAME silicon class (INT8-only, 2 TOPS dense, NXP i.MX 95 Neutron N3-1024S family) paired with different memory bus widths. The 32-bit variant has half the bandwidth of the 64-bit. Floating-point pipelines (BF16 / FP8) will fail to load on either Low-LP5 tier and fall back to CPU at catastrophic slowdown.",
          C.ACCENT_AMBER),
         ("• NPU Low-LP5X through High have native BF16/FP8 tensor cores. Tensor TOPS column lists BF16 / INT8 / FP8 peaks per NVIDIA-class spec conventions.",
          C.TEXT_BRIGHT),
-        ("• LLM decode + TTFT are vendor-published measurements on Qwen3-30B-A3B Q4_K_M (1K prompt, short response). "
-         "Low-LP5X has no vendor LLM benchmark yet — sizer falls back to bandwidth-ratio projection from Low-LP5.",
+        ("• LLM decode + TTFT are vendor-published measurements on Qwen3-30B-A3B Q4_K_M (1K prompt, short response). Tiers without vendor benchmarks (Low-LP5-32bit, Low-LP5X) BW-project from adjacent measured tiers.",
          C.TEXT_DIM),
     ], font_size=10)
 
