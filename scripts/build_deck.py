@@ -746,7 +746,7 @@ def slide_exec_summary(prs: Presentation):
     card_w = (CONTENT_W - 0.5) / 3
     cards = [
         ("0.4 FPS",    "SAM 3 BF16 baseline",       "Bandwidth-bound on 134.4 GB/s — not feasible", C.ACCENT_RED),
-        ("36 FPS",     "Shipping stack (720p)",     "Hybrid V2 + YOLO-seg FP8 + CLIP FP8, all TensorRT",       C.ACCENT_GREEN),
+        ("36 FPS",     "Recommended stack (720p)",     "Hybrid V2 + YOLO-seg FP8 + CLIP FP8, all TensorRT",       C.ACCENT_GREEN),
         ("90×",        "Edge FPS improvement",       "Architectural change — not just quantization",        C.ACCENT_INDIGO),
     ]
     for i, (big, label, note, col) in enumerate(cards):
@@ -769,7 +769,7 @@ def slide_exec_summary(prs: Presentation):
                      note, font_size=9, color=C.TEXT_DIM,
                      alignment=PP_ALIGN.CENTER)
 
-    # ── Two pipeline strips: BEFORE (target) vs AFTER (shipping) ───────────
+    # ── Two pipeline strips: BEFORE (target) vs AFTER (recommended) ───────────
     # BEFORE — SAM 3 highlighted red as the dropped component
     before_label_y = 2.4
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(before_label_y),
@@ -784,11 +784,11 @@ def slide_exec_summary(prs: Presentation):
         ("NLQ / LLM", False),
     ], top_in=before_label_y + 0.25, accent_color=C.ACCENT_RED)
 
-    # AFTER — shipping recipe with TRT-compiled halves highlighted indigo
+    # AFTER — recommended recipe with TRT-compiled halves highlighted indigo
     after_label_y = 3.4
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(after_label_y),
                  Inches(CONTENT_W), Inches(0.22),
-                 "AFTER — shipping recipe (36 FPS, 90× edge FPS, real-time)",
+                 "AFTER — recommended recipe (36 FPS, 90× edge FPS, real-time)",
                  font_size=10, color=C.ACCENT_GREEN, bold=True)
     add_pipeline_strip(slide, [
         ("FFmpeg ingest", False),
@@ -837,7 +837,7 @@ def slide_exec_summary(prs: Presentation):
                          ["NPU High", "high-bin LPDDR5X",            "~48 FPS",  "~35 FPS each",
                           "50 tok/s",  "Live vision + sustained LLM"],
                      ],
-                     highlight_rows=[2],   # NPU Mid — the shipping target
+                     highlight_rows=[2],   # NPU Mid — the recommended target
                      font_size=9, header_font_size=10)
 
     # ── Footer assumption note ─────────────────────────────────────────
@@ -1782,7 +1782,7 @@ def slide_trt_yolo(prs: Presentation):
         ("• FP8 on YOLO-seg WORKS via TRT 10.16 on Blackwell (SM 12.0). Earlier torchao block was a tool-chain gap, not a fundamental one.", C.ACCENT_GREEN, True),
         ("• FP8 quality essentially perfect — 100% box recall, matched IoU 0.998, indistinguishable from FP16.", C.ACCENT_GREEN, True),
         ("• Edge FPS 720p: 18.6 FP16 → 36.8 FP8 (+98%). Full-stack = Hybrid V2 + 1 Hz CLIP + YOLO-FP8 ≈ 36 FPS edge (prior target 20, nearly 2×).", C.ACCENT_INDIGO, True),
-        ("• INT8 ships too but drops low-confidence boxes (87-92% recall). FP8's wider range wins on detection-head logits.", C.ACCENT_AMBER, True),
+        ("• INT8 is viable too but drops low-confidence boxes (87-92% recall). FP8's wider range wins on detection-head logits.", C.ACCENT_AMBER, True),
         ("Preprocessing: 640×640 letterbox runs on CPU, not GPU/NPU (not included in the ms/frame above).", C.ACCENT_ORANGE, True),
         ("• Measured on 5090 host (i9-14900KF, cv2.resize bilinear, 1 thread): 0.17 / 0.32 / 0.33 ms at 720p / 1080p / 4K — ~0.5–1% of one core at 30 fps. Flat across source res (output size dominates).",
          C.TEXT_BRIGHT),
@@ -1870,7 +1870,7 @@ def slide_yolov8n_comparison(prs: Presentation):
                     verdict = "ok"
             elif recipe == "fp8":
                 if rec == rec and rec >= 0.99:
-                    verdict = "shipping ✓"
+                    verdict = "recommended ✓"
                 else:
                     verdict = "check recall"
             rows.append([
@@ -1887,10 +1887,10 @@ def slide_yolov8n_comparison(prs: Presentation):
                      Inches(CONTENT_W), Inches(1.9), headers, rows,
                      highlight_rows=highlight, font_size=10, header_font_size=10)
 
-    # Table 2: concurrency — edge batch ms side by side (both at FP8 shipping)
+    # Table 2: concurrency — edge batch ms side by side (both at FP8 recommended)
     if conc8n_p.exists() and conc11_p.exists():
         add_text_box(slide, Inches(CONTENT_LEFT), Inches(4.25), Inches(CONTENT_W), Inches(0.3),
-                     "Multi-stream batching (FP8 shipping) — edge batch ms on NPU Mid",
+                     "Multi-stream batching (FP8 recommended) — edge batch ms on NPU Mid",
                      font_size=12, color=C.ACCENT_PURPLE, bold=True)
         c8 = json.loads(conc8n_p.read_text())["batches_edge"]
         c11 = json.loads(conc11_p.read_text())["batches_edge"]
@@ -2118,7 +2118,7 @@ def slide_llm_bakeoff(prs: Presentation):
         ("• MoE wins on bandwidth. Cross-reference from a Kyle-merged production Q4_K_M of the same model on the same 5090 host: 155 tok/s sustained / 192 peak (Prometheus, prod traffic) — within 3% of our synthetic 159 tok/s RAG decode. Synthetic numbers generalize.", C.ACCENT_GREEN, True),
         ("• MoE 30B/3B-active beats dense Qwen 2.5 14B Q4_K_M on the same 5090 by ~25-40% decode (155 vs 85-140 tok/s) despite 2× total params — the 3B active footprint is what BW sees per token.", C.ACCENT_AMBER, True),
         ("• Vendor NPU actuals beat our BW-only edge projection by ~2.3×. Purpose-built LLM silicon (memory controllers, expert routing, tiling) > llama.cpp on a desktop GPU.", C.ACCENT_INDIGO, True),
-        ("• NPU Mid: 5.3 s for 200-tok answer / 57 s for RAG 8K+2K. NPU High ~25% better. Q4_K_M is the shipping quant.", C.TEXT_DIM),
+        ("• NPU Mid: 5.3 s for 200-tok answer / 57 s for RAG 8K+2K. NPU High ~25% better. Q4_K_M is the recommended quant.", C.TEXT_DIM),
     ], font_size=9)
 
 
@@ -2132,7 +2132,7 @@ def slide_llm_duty_cycle(prs: Presentation):
     if not tier_proj:
         return
 
-    vision_fps = 36.0          # full-stack shipping target (720p Edge MPU = NPU Mid)
+    vision_fps = 36.0          # full-stack recommended target (720p Edge MPU = NPU Mid)
 
     # Q4_K_M short-answer and RAG answer times per tier (milliseconds)
     tiers_data = {}
@@ -2343,11 +2343,11 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
         ["SAM 3 BF16 (baseline)",                       "840M", "text-concept (native)",    "0.40 FPS"],
         ["EfficientSAM3 ES-EV-S BF16 (Option A)",       "424M", "box-prompt (batched)",     "2.59 FPS (18 boxes)"],
         ["EfficientSAM3.1 ES-EV-S BF16 (SAM3.1 student)", "106M", "text-concept (native)",  "2.33 FPS (1 concept)"],
-        ["Keyhole shipping (TRT FP8 + 1 Hz CLIP)",       "~40M total two-stage", "detector + CLIP tagger", "36.1 FPS"],
+        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)",       "~40M total two-stage", "detector + CLIP tagger", "36.1 FPS"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.9),
                       Inches(CONTENT_W), Inches(1.3), comp_headers, comp_rows,
-                      highlight_rows=[3, 4],  # Option A-smaller + shipping
+                      highlight_rows=[3, 4],  # Option A-smaller + recommended
                       font_size=10)
 
     add_bullet_box(slide, CONTENT_LEFT, 5.3, CONTENT_W, 2.1, [
@@ -2365,7 +2365,7 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
          "20-concept sweeps, 0.2 FPS — text-prompting is a linear-in-N cost, not free.",
          C.TEXT_BRIGHT),
         ("• Right shape for: 'find me all people' (1 concept) or 'find people and cars' (2 concepts). Wrong shape "
-         "for exhaustive label-all-objects scans — our TRT-shipping stack does that at 36 FPS by using CLIP on "
+         "for exhaustive label-all-objects scans — our recommended TRT stack does that at 36 FPS by using CLIP on "
          "detected crops, not by re-running the mask model per concept.", C.ACCENT_GREEN),
     ], font_size=10)
 
@@ -2382,7 +2382,7 @@ def slide_trt_yoloe26(prs: Presentation):
     add_title_subtitle(
         slide,
         "Does TRT FP8 close the one-model gap? — The honest answer: no.",
-        "YOLOE-26S-PF → TRT FP8 gives ~17% speedup, not 3×. Gap to shipping is structural.",
+        "YOLOE-26S-PF → TRT FP8 gives ~17% speedup, not 3×. Gap to recommended is structural.",
     )
     add_pipeline_strip(
         slide,
@@ -2428,7 +2428,7 @@ def slide_trt_yoloe26(prs: Presentation):
         ["EfficientSAM3.1 ES-EV-S (SAM 3.1 student)", "2.33 FPS",  "Text-prompt; 1 concept."],
         ["YOLOE-26S-PF PyTorch FP16",                 "13.25 FPS", "Plain PyTorch, one model."],
         ["YOLOE-26S-PF TRT FP8 (optimized ceiling)",  "14.36 FPS", "One model fully optimized."],
-        ["Keyhole shipping (TRT FP8 + 1 Hz CLIP)",    "36.10 FPS", "Two-stage, CLIP 1/30 frames."],
+        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)",    "36.10 FPS", "Two-stage, CLIP 1/30 frames."],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.7),
                       Inches(CONTENT_W), Inches(1.7), comp_headers, comp_rows,
@@ -2440,7 +2440,7 @@ def slide_trt_yoloe26(prs: Presentation):
         ("• YOLOE-26 is 16M params. At that size, on a 5090, the bottleneck is **kernel launch overhead**, "
          "not tensor compute — FP8 matmul speedup doesn't help when matmul isn't the bottleneck.",
          C.TEXT_BRIGHT),
-        ("• Compare to YOLO-seg FP8 TRT (our shipping Conv-unblock): that went 4.9 -> 36.8 FPS edge (+98%), "
+        ("• Compare to YOLO-seg FP8 TRT (our Conv-unblock recipe): that went 4.9 -> 36.8 FPS edge (+98%), "
          "because YOLO-seg's Conv-heavy graph does benefit from FP8 in TRT. Different architecture, different bottleneck.",
          C.TEXT_DIM),
         "",
@@ -2449,7 +2449,7 @@ def slide_trt_yoloe26(prs: Presentation):
          "running concurrent streams, TRT is still worth it — just not for speed.",
          C.TEXT_BRIGHT),
         "",
-        ("Takeaway: the gap to shipping is STRUCTURAL, not optimization", C.ACCENT_ORANGE, True),
+        ("Takeaway: the gap to recommended is STRUCTURAL, not optimization", C.ACCENT_ORANGE, True),
         ("• Our two-stage stack runs YOLO-seg every frame + CLIP every 30th. YOLOE-26 runs the whole "
          "open-vocab head every frame. That design choice is the 2.4× gap — no amount of kernel "
          "optimization on YOLOE-26 will close it without a similar keyframe-debounce trick.",
@@ -2459,7 +2459,7 @@ def slide_trt_yoloe26(prs: Presentation):
 
 def slide_yoloe26_onemodel(prs: Presentation):
     """Slide: "Ultralytics YOLOE-26 — the one-model open-vocab alternative" — benches the
-    Jan 2026 YOLOE-26S-PF release against our two-stage YOLO-seg + CLIP shipping stack.
+    Jan 2026 YOLOE-26S-PF release against our two-stage YOLO-seg + CLIP recommended stack.
 
     Post-ship watch on architectural simplification (Option B). YOLOE-26 collapses
     detector + open-vocab labeler into a single model with 4585-class built-in vocab.
@@ -2475,7 +2475,7 @@ def slide_yoloe26_onemodel(prs: Presentation):
     add_title_subtitle(
         slide,
         "Option-B watch: Ultralytics YOLOE-26 — one-model open-vocab",
-        "Single model replaces YOLO-seg + CLIP. 13 FPS NPU Mid @ 720p in PyTorch FP16 — 3× slower than our shipping stack, but 10× simpler.",
+        "Single model replaces YOLO-seg + CLIP. 13 FPS NPU Mid @ 720p in PyTorch FP16 — 3× slower than our recommended stack, but 10× simpler.",
     )
     add_pipeline_strip(
         slide,
@@ -2524,7 +2524,7 @@ def slide_yoloe26_onemodel(prs: Presentation):
         ["SAM 3 BF16",                           "0.40 FPS",  "1 (SAM 3)",           "Dead-on-arrival baseline."],
         ["EfficientSAM3 ES-EV-S BF16 (Apr 2026)", "2.59 FPS",  "1 (community lite)",  "Community SAM 3 Lite, open-vocab preserved."],
         ["YOLOE-26S-PF FP16 (Jan 2026)",          "13.25 FPS", "1 (one-model)",       "Replaces YOLO-seg + CLIP. Simplest stack."],
-        ["Keyhole shipping (TRT FP8 + 1 Hz CLIP)", "36.1 FPS",  "2 (YOLO-seg + CLIP)", "Our optimized two-stage pipeline."],
+        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)", "36.1 FPS",  "2 (YOLO-seg + CLIP)", "Our optimized two-stage pipeline."],
     ]
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(4.3),
@@ -2541,7 +2541,7 @@ def slide_yoloe26_onemodel(prs: Presentation):
          "Text-prompted with our 20-concept SAM 3 list: lower recall at 720p (0.60) but comparable at higher resolutions.",
          C.TEXT_DIM),
         "",
-        ("What's missing vs shipping", C.ACCENT_ORANGE, True),
+        ("What's missing vs recommended", C.ACCENT_ORANGE, True),
         ("• No TRT/FP8 path explored yet — this is plain PyTorch FP16. TRT FP8 would potentially close most of the gap to 36 FPS.",
          C.TEXT_BRIGHT),
         ("• License is AGPL-3.0 (same as ultralytics itself). Commercial licensing via Ultralytics if needed for a proprietary product.",
@@ -2552,7 +2552,7 @@ def slide_yoloe26_onemodel(prs: Presentation):
 
 
 def slide_efficientsam3_community(prs: Presentation):
-    """Slide: "The community finally shipped a SAM 3 Lite" — EfficientSAM3 ES-EV-S benched against our shipping stack.
+    """Slide: "The community finally shipped a SAM 3 Lite" — EfficientSAM3 ES-EV-S benched against our recommended stack.
 
     Post-ship watch on roadmap item #9 (SAM 3 Lite). As of April 2026 the
     community has released EfficientSAM3 (ES-EV-S, Apache-2.0, ~424M total /
@@ -2569,7 +2569,7 @@ def slide_efficientsam3_community(prs: Presentation):
     add_title_subtitle(
         slide,
         "Post-ship watch: the community finally shipped a SAM 3 Lite",
-        "EfficientSAM3 ES-EV-S (Apr 2026, Apache-2.0) — 6.5× faster than SAM 3, still 13× behind our shipping stack.",
+        "EfficientSAM3 ES-EV-S (Apr 2026, Apache-2.0) — 6.5× faster than SAM 3, still 13× behind our recommended stack.",
     )
     add_pipeline_strip(
         slide,
@@ -2611,12 +2611,12 @@ def slide_efficientsam3_community(prs: Presentation):
         ["SAM 3 BF16 (Meta baseline)",    "0.40 FPS",  "The thing we are replacing — DOA at the edge."],
         ["EfficientSAM3 ES-EV-S (BF16)",  "2.59 FPS",  "Community lite, Apr 2026. 6.5× over SAM 3."],
         ["EfficientSAM-Small FP8 (ours)", "4.93 FPS",  "Mask-only, SAM 1/2 era model + FP8 quant."],
-        ["Keyhole shipping (TRT FP8, 1 Hz CLIP)", "36.1 FPS", "YOLO-seg FP8 + CLIP FP8, both on TensorRT."],
+        ["Keyhole recommended (TRT FP8, 1 Hz CLIP)", "36.1 FPS", "YOLO-seg FP8 + CLIP FP8, both on TensorRT."],
     ]
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(4.0),
         Inches(CONTENT_W), Inches(1.5), comp_headers, comp_rows,
-        highlight_rows=[4],   # shipping stack
+        highlight_rows=[4],   # recommended stack
     )
 
     add_bullet_box(slide, CONTENT_LEFT, 5.9, CONTENT_W, 1.7, [
@@ -2628,7 +2628,7 @@ def slide_efficientsam3_community(prs: Presentation):
          C.TEXT_DIM),
         "",
         ("Why we still ship YOLO-seg FP8 TRT + CLIP FP8 TRT", C.ACCENT_INDIGO, True),
-        ("• ES-EV-S is 6.5× faster than SAM 3 but 13× slower than our shipping stack. It has no TRT path, no FP8 path, "
+        ("• ES-EV-S is 6.5× faster than SAM 3 but 13× slower than our recommended stack. It has no TRT path, no FP8 path, "
          "and the vision backbone is only 6% of the total 424M params — the rest is text encoder + segmentation head.",
          C.TEXT_BRIGHT),
         ("• Takeaway: even when the community ships a credible SAM 3 Lite, an optimized two-stage pipeline (detector + "
@@ -2685,17 +2685,17 @@ def slide_trt_takeaways(prs: Presentation):
          "Dense Conv backbone, matmul-bound",
          f"{yolo_fp16_edge:.1f} FPS (FP16) → {yolo_fp8_edge:.1f} FPS (FP8), "
          f"+{(yolo_fp8_edge/yolo_fp16_edge - 1)*100:.0f}% — full model activation halving works",
-         "SHIPS — the core FP8 unblock"],
+         "RECOMMENDED — the core FP8 unblock"],
         ["OpenCLIP ViT-B-32 visual (88M params)",
          "ViT attention + MLP, matmul-bound",
          f"{clip_bf16_edge_ms:.1f} ms BF16 → {clip_fp8_edge_ms:.1f} ms FP8, "
          f"{clip_bf16_edge_ms/clip_fp8_edge_ms:.1f}× faster — Top-1 agreement 0.964",
-         "SHIPS — halves CLIP cost"],
+         "RECOMMENDED — halves CLIP cost"],
         ["YOLOE-26S-PF (16M params)",
          "Small model + complex open-vocab head, kernel-launch bound",
          f"PT {pt16_720:.1f} ms → TRT FP16 {tr16_720:.1f} ms ({pt16_720/tr16_720:.2f}×); "
          f"FP8 {tr8_720:.1f} ms — FP16→FP8 gains ~0% on the matmul",
-         "DOESN'T close gap to shipping"],
+         "DOESN'T close gap to recommended"],
     ]
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(1.9),
@@ -2758,7 +2758,7 @@ def _ncu_family(workload_id: str) -> str:
 def build_ncu_headline_chart(bundle: dict):
     """Horizontal log-scale bar chart of per-forward DRAM MB for headline workloads.
 
-    Orders workloads worst → best so the 515× SAM3 → shipping gap reads top-to-bottom.
+    Orders workloads worst → best so the 515× SAM3 → recommended gap reads top-to-bottom.
     """
     # Hand-picked representatives so the chart isn't overcrowded.
     picks = [
@@ -2771,7 +2771,7 @@ def build_ncu_headline_chart(bundle: dict):
         ("yoloe26_trt_fp8",               "YOLOE-26S-PF TRT FP8",                   MPL_COLORS["purple"]),
         ("yolo_seg",                      "YOLO11s-seg PyTorch FP32",               MPL_COLORS["blue"]),
         ("clip_trt",                      "OpenCLIP visual TRT",                    MPL_COLORS["blue"]),
-        ("yolo_seg_fp8_trt",              "YOLO11s-seg TRT FP8 (SHIPPING)",         MPL_COLORS["green"]),
+        ("yolo_seg_fp8_trt",              "YOLO11s-seg TRT FP8 (RECOMMENDED)",         MPL_COLORS["green"]),
     ]
     by_id = {w["workload_id"]: w for w in bundle["workloads"]}
 
@@ -2786,7 +2786,7 @@ def build_ncu_headline_chart(bundle: dict):
     fig, ax = plt.subplots(1, 1, figsize=(11, 4.4), facecolor=MPL_COLORS["bg_slide"])
     ax.set_facecolor(MPL_COLORS["bg_slide"])
 
-    # Reverse so shipping lands at the top of the chart (best first)
+    # Reverse so recommended lands at the top of the chart (best first)
     y_pos = np.arange(len(labels))
     bars = ax.barh(y_pos[::-1], mbs, color=colors, edgecolor="none", height=0.65)
 
@@ -2821,7 +2821,7 @@ def build_ncu_headline_chart(bundle: dict):
     ratio = sam3_mb / ship_mb
     ax.set_title(
         f"SAM 3 reference moves {sam3_mb/1000:,.0f} GB/frame — "
-        f"shipping TRT FP8 + 1 Hz CLIP moves ~{ship_mb:.0f} MB/frame → {ratio:,.0f}× lighter",
+        f"recommended TRT FP8 + 1 Hz CLIP moves ~{ship_mb:.0f} MB/frame → {ratio:,.0f}× lighter",
         color=MPL_COLORS["text"], fontsize=11, fontweight="bold", pad=10,
     )
     fig.tight_layout(pad=1.0)
@@ -2837,7 +2837,7 @@ def slide_ncu_headline(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(
         slide,
-        "Measured DRAM bandwidth — how the shipping pipeline actually moves memory",
+        "Measured DRAM bandwidth — how the recommended pipeline actually moves memory",
         f"Nsight Compute 2026 per-kernel bytes × NVTX per-workload, {bundle['n_workloads']} workloads on RTX 5090",
     )
     add_pipeline_strip(
@@ -2880,7 +2880,7 @@ def slide_ncu_headline(prs: Presentation):
     add_bullet_box(slide, CONTENT_LEFT, 6.3, CONTENT_W, 0.85, [
         ("Why this matters", C.ACCENT_BLUE, True),
         ("• Before ncu, the sizer assumed every pipeline saturates the bus. Measured bytes show "
-         "the shipping stack runs at 9% of NPU Mid — the engineering win is real, with massive headroom.", C.ACCENT_GREEN),
+         "the recommended stack runs at 9% of NPU Mid — the engineering win is real, with massive headroom.", C.ACCENT_GREEN),
         ("• Conversely, EfficientSAM-Small and the community SAM 3 Lites physically cannot fit: per-forward "
          "DRAM already exceeds what the bus can deliver per second at any usable FPS.", C.ACCENT_RED),
     ], font_size=10)
@@ -2921,7 +2921,7 @@ def slide_ncu_workload_table(prs: Presentation):
         ))
     rows_raw.sort(key=lambda r: (r[0], r[4]))
 
-    # Pretty-print labels + highlight shipping row
+    # Pretty-print labels + highlight recommended row
     pretty = {
         "sam3_bf16_reference":                  "SAM 3 reference (BF16)",
         "mobilesam":                            "MobileSAM",
@@ -2937,8 +2937,8 @@ def slide_ncu_workload_table(prs: Presentation):
         "yoloe26_trt_fp8":                      "YOLOE-26S-PF TRT FP8",
         "yolo_seg":                             "YOLO11s-seg PyTorch FP32",
         "yolo_seg_fp16_trt":                    "YOLO11s-seg TRT FP16",
-        "yolo_seg_fp8_trt":                     "YOLO11s-seg TRT FP8 ★ shipping",
-        "clip_trt":                             "OpenCLIP visual TRT ★ shipping",
+        "yolo_seg_fp8_trt":                     "YOLO11s-seg TRT FP8 ★ recommended",
+        "clip_trt":                             "OpenCLIP visual TRT ★ recommended",
     }
 
     headers = ["Family", "Workload", "Kernels", "DRAM / forward", "BW-bound FPS ceiling"]
@@ -2949,7 +2949,7 @@ def slide_ncu_workload_table(prs: Presentation):
         mb_str = f"{mb/1000:,.1f} GB" if mb >= 1000 else f"{mb:,.1f} MB"
         fps_str = f"{fps:,.1f}" if fps >= 10 else f"{fps:,.2f}"
         rows.append([fam, label, f"{k:,}", mb_str, fps_str])
-        if "★ shipping" in label:
+        if "★ recommended" in label:
             highlight_rows.append(i + 1)
 
     add_styled_table(
@@ -2960,7 +2960,7 @@ def slide_ncu_workload_table(prs: Presentation):
 
     add_bullet_box(slide, CONTENT_LEFT, 6.45, CONTENT_W, 0.85, [
         ("Reading the ceiling column", C.ACCENT_BLUE, True),
-        ("• BW-bound FPS is the best case — compute may cut it further. For shipping TRT FP8 the two numbers "
+        ("• BW-bound FPS is the best case — compute may cut it further. For recommended TRT FP8 the two numbers "
          "agree: YOLO @ 465 ceiling vs ~140 measured, CLIP @ 232 ceiling at 1 Hz — either way 30 fps fits "
          "with headroom. For SAM 3 the ceiling is 0.8 FPS: there is no CPU-side optimization that gets past it.",
          C.ACCENT_GREEN),
@@ -3003,7 +3003,7 @@ def slide_optimization_roadmap(prs: Presentation):
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
                      Inches(CONTENT_W), Inches(3.9), headers, rows,
-                     highlight_rows=[17],  # Full-stack 1 Hz all-TRT — shipping target
+                     highlight_rows=[17],  # Full-stack 1 Hz all-TRT — recommended target
                      font_size=9, header_font_size=10)
 
     add_bullet_box(slide, CONTENT_LEFT, 5.45, CONTENT_W, 1.6, [
@@ -3011,10 +3011,10 @@ def slide_optimization_roadmap(prs: Presentation):
         ("1-3. ES-Small quant: FP8 (94/95) & plain INT8 both → 4.9 FPS edge; SmoothQuant CONVERT blocked by torchao 0.17",),
         ("4-5. Hybrid V2 CLIP torchao FP8/INT8 (48/72) → 4.9 FPS; 1 Hz keyframe debounce → 16 FPS (93% of YOLO ceiling)",),
         ("6-7. YOLO-seg Conv: torchao 1×1 swap INT8 → 23.8 FPS (partial); TRT 10.16 full Conv-FP8 → 36.8 FPS (+98%, recall 1.00)",),
-        ("8. CLIP visual FP8 via TRT → 29.8 → 15.1 ms edge (+120% CLIP FPS); full TRT stack projects 36 FPS shipping",),
+        ("8. CLIP visual FP8 via TRT → 29.8 → 15.1 ms edge (+120% CLIP FPS); full TRT stack projects 36 FPS recommended",),
         ("9. LLM — Qwen3-30B-A3B MoE (Q4/Q5/Q8): NPU Low/Mid/High vendor actuals: 29 / 38 / 50 tok/s Q4_K_M; duty-cycle chart quantifies vision+LLM coexistence",),
         ("10. Multi-stream concurrency — TRT YOLO dynamic-batch: 4 streams @ 26 FPS each (not 9), 8 @ 15, batching amortizes kernel overhead",),
-        ("11. [PARTIAL] SAM 3 Lite watch — community shipped EfficientSAM3 ES-EV-S Apr 2026; benched at 2.59 FPS @ 720p NPU Mid (6.5× over SAM 3, still 13× behind our shipping stack). Meta SAM 3.1 / distillations still data-center-only.",),
+        ("11. [PARTIAL] SAM 3 Lite watch — community shipped EfficientSAM3 ES-EV-S Apr 2026; benched at 2.59 FPS @ 720p NPU Mid (6.5× over SAM 3, still 13× behind our recommended stack). Meta SAM 3.1 / distillations still data-center-only.",),
     ], font_size=9)
 
 
@@ -3148,7 +3148,7 @@ def slide_npu_tier_specs(prs: Presentation):
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
                      Inches(CONTENT_W), Inches(2.5), headers, rows,
-                     highlight_rows=[3],   # NPU Mid — shipping target
+                     highlight_rows=[3],   # NPU Mid — recommended target
                      font_size=10, header_font_size=11)
 
     # Context bullets + assumptions callout
@@ -3247,7 +3247,7 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
     """Final summary slide — the 90× journey from 0.4 to 36 FPS."""
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(slide, "Summary & Key Findings — 0.4 FPS → 36 FPS (90× Edge Improvement)",
-                       "What Keyhole proved, ruled out, and what ships")
+                       "What Keyhole proved, ruled out, and what we recommend")
 
     # Hero stat bar (indigo)
     hero = slide.shapes.add_shape(
@@ -3257,7 +3257,7 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
     hero.line.fill.background()
     add_text_box(slide, Inches(CONTENT_LEFT + 0.2), Inches(CONTENT_TOP + 0.1),
                  Inches(CONTENT_W - 0.4), Inches(0.5),
-                 "Shipping stack  •  Hybrid V2 + YOLO-seg FP8 + CLIP FP8 (all TensorRT)  •  720p Edge MPU (134.4 GB/s LPDDR5X)  •  36 FPS projected",
+                 "Recommended stack  •  Hybrid V2 + YOLO-seg FP8 + CLIP FP8 (all TensorRT)  •  720p Edge MPU (134.4 GB/s LPDDR5X)  •  36 FPS projected",
                  font_size=14, color=C.TEXT_WHITE, bold=True, alignment=PP_ALIGN.CENTER)
 
     items = [
@@ -3271,7 +3271,7 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
         ("  Hybrid V2 (YOLO-seg + CLIP) + FP8 CLIP + 1 Hz keyframe debounce. YOLO becomes the ceiling.",),
         ("24 FPS",    C.ACCENT_GREEN, True),
         ("  YOLO-seg FP8 via TensorRT 10.16 on Blackwell (recall 1.00, IoU 0.998). CLIP FP8 every frame — no debounce needed.",),
-        ("36 FPS  ← shipping", C.ACCENT_INDIGO, True),
+        ("36 FPS  ← recommended", C.ACCENT_INDIGO, True),
         ("  Full TRT stack + CLIP @ 1 Hz. YOLO-only ceiling. Room for INT4/FP4 if the edge NPU exposes them.",),
     ]
     add_bullet_box(slide, CONTENT_LEFT, 2.2, CONTENT_W / 2 - 0.15, 4.6, items, font_size=11)
