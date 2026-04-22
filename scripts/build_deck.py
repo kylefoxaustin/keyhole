@@ -59,19 +59,50 @@ class C:
     FEASIBLE = RGBColor(0x00, 0xE6, 0x76)
     NOT_FEASIBLE = RGBColor(0xFF, 0x44, 0x44)
 
-# Matplotlib equivalents
-MPL_COLORS = {
-    "bg": "#1A1A2E",
-    "bg_slide": "#16213E",
-    "blue": "#00D4FF",
-    "green": "#00FF88",
-    "orange": "#FF8C00",
-    "red": "#FF4444",
-    "purple": "#BB86FC",
-    "text": "#E0E0FF",
-    "dim": "#AAAACC",
-    "grid": "#333355",
-}
+# Merge-target mode: when KEYHOLE_DECK_MERGE_TARGET=1, the deck is built for
+# the pptx_template_converter (grafts a light-bg corporate template over our
+# slides). In that mode we:
+#   • Use white backgrounds in matplotlib PNGs (charts blend into light slides)
+#   • Use dark text in matplotlib PNGs (readable on the light bg)
+#   • Skip our custom footer line (template's master provides numbering +
+#     confidentiality marker, and our footer would collide)
+#   • Skip the top accent stripe on slides (template master owns the branding)
+# The Keyhole color map (1A1A2E → lt1, 00D4FF → accent1, etc.) in
+# pptx_template_converter/mappings/keyhole_to_corporate.json handles everything
+# else automatically — our shape fills and run colors get remapped to theme
+# slots so they inherit the corporate theme.
+import os as _os_merge
+MERGE_TARGET = _os_merge.environ.get("KEYHOLE_DECK_MERGE_TARGET", "").strip() == "1"
+
+# Matplotlib equivalents. In merge-target mode, flip to a light palette so
+# the chart PNGs sit cleanly on a white slide rather than looking like dark
+# islands. Accents stay the same — they get retheme'd by the color map.
+if MERGE_TARGET:
+    MPL_COLORS = {
+        "bg":       "#FFFFFF",
+        "bg_slide": "#FFFFFF",
+        "blue":     "#00D4FF",
+        "green":    "#00FF88",
+        "orange":   "#FF8C00",
+        "red":      "#FF4444",
+        "purple":   "#BB86FC",
+        "text":     "#1A1A2E",   # dark text on light bg
+        "dim":      "#6B6B80",   # medium-gray for subtle labels
+        "grid":     "#CCCCDD",   # light grid lines
+    }
+else:
+    MPL_COLORS = {
+        "bg":       "#1A1A2E",
+        "bg_slide": "#16213E",
+        "blue":     "#00D4FF",
+        "green":    "#00FF88",
+        "orange":   "#FF8C00",
+        "red":      "#FF4444",
+        "purple":   "#BB86FC",
+        "text":     "#E0E0FF",
+        "dim":      "#AAAACC",
+        "grid":     "#333355",
+    }
 
 
 # ============================================================
@@ -216,17 +247,24 @@ def set_deck_size(prs: Presentation):
 
 
 def new_slide(prs: Presentation, bg_color=None, accent_stripe: bool = True):
-    """Create a blank slide with background + optional top accent stripe."""
+    """Create a blank slide with background + optional top accent stripe.
+
+    In MERGE_TARGET mode: skip our slide background (template's master
+    provides it) and skip our top accent stripe (template's branding
+    already lives in the master). That leaves a pure content canvas for
+    our shapes, which the template grafts theme + master branding onto.
+    """
     slide = prs.slides.add_slide(prs.slide_layouts[6])
-    set_slide_bg(slide, bg_color or C.BG_SLIDE)
-    if accent_stripe:
-        stripe = slide.shapes.add_shape(
-            MSO_SHAPE.RECTANGLE,
-            Inches(0), Inches(0), Inches(SLIDE_W_IN), Pt(4),
-        )
-        stripe.fill.solid()
-        stripe.fill.fore_color.rgb = C.ACCENT_BLUE
-        stripe.line.fill.background()
+    if not MERGE_TARGET:
+        set_slide_bg(slide, bg_color or C.BG_SLIDE)
+        if accent_stripe:
+            stripe = slide.shapes.add_shape(
+                MSO_SHAPE.RECTANGLE,
+                Inches(0), Inches(0), Inches(SLIDE_W_IN), Pt(4),
+            )
+            stripe.fill.solid()
+            stripe.fill.fore_color.rgb = C.ACCENT_BLUE
+            stripe.line.fill.background()
     return slide
 
 
@@ -3508,8 +3546,12 @@ def build_deck(output, runs_dir, data_dir):
     console.print("  Building: Summary & findings")
     slide_summary(prs, runs, targets)
 
-    # Add consistent footer (project + page number) to every slide
-    finalize_footers(prs)
+    # Add consistent footer (project + page number) to every slide.
+    # Skip in merge-target mode — the corporate template's master already
+    # provides a numbered + confidentiality-marked footer; adding ours would
+    # visually collide.
+    if not MERGE_TARGET:
+        finalize_footers(prs)
 
     # Save
     output.parent.mkdir(parents=True, exist_ok=True)
