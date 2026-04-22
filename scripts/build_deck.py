@@ -837,8 +837,9 @@ def slide_exec_summary(prs: Presentation):
     ], top_in=after_label_y + 0.25)
 
     # ── Two-column DO / DON'T ──────────────────────────────────────────────
-    col_top = 4.5
-    col_h = 1.55
+    col_top = 4.45
+    col_h = 1.35   # shrunk 1.55 → 1.35 so bottom lands at 5.80,
+                   # clearing room for "Buy the right NPU…" at 5.90
     col_w = (CONTENT_W - 0.25) / 2
 
     add_bullet_box(slide, CONTENT_LEFT, col_top, col_w, col_h, [
@@ -858,12 +859,23 @@ def slide_exec_summary(prs: Presentation):
     ], font_size=9)
 
     # ── NPU tier sizing ────────────────────────────────────────────────────
-    tier_y = 6.15
+    # Moved up from 6.15 → 5.90 so the tier table stays inside the 7.5"
+    # slide height. Previously the table autogrew past y=7.5 — hidden on
+    # the dark-bg standalone deck (content just fell off the slide edge)
+    # but visibly clipped after the template-converter merge onto a light
+    # slide with a hard white boundary.
+    tier_y = 5.90
+    # Sub-header color: use TEXT_BRIGHT (E0E0FF) instead of ACCENT_INDIGO.
+    # ACCENT_INDIGO (6366F1) maps to template accent2 = #0067DE which is
+    # still blue on the merged NXP deck. TEXT_BRIGHT maps to dk1 on light
+    # (black) and stays bright-lavender on the dark standalone — readable
+    # in both without the stubborn-blue issue Kyle flagged on slide 2.
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(tier_y),
                  Inches(CONTENT_W), Inches(0.25),
                  "Buy the right NPU class for the job",
-                 font_size=11, color=C.ACCENT_INDIGO, bold=True)
-    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(tier_y + 0.3),
+                 font_size=11, color=C.TEXT_BRIGHT, bold=True)
+    tier_table_shape = add_styled_table(
+                     slide, Inches(CONTENT_LEFT), Inches(tier_y + 0.3),
                      Inches(CONTENT_W), Inches(0.8),
                      ["NPU tier", "Memory bus", "Vision (1-stream)", "Vision (4-stream, batch=4)",
                       "LLM Q4_K_M decode", "Good for"],
@@ -876,7 +888,17 @@ def slide_exec_summary(prs: Presentation):
                           "50 tok/s",  "Live vision + sustained LLM"],
                      ],
                      highlight_rows=[2],   # NPU Mid — the recommended target
-                     font_size=9, header_font_size=10)
+                     font_size=8, header_font_size=9)
+    # Force compact row heights so the table stays inside the 7.5" slide.
+    # Without this LibreOffice / PowerPoint autogrow overshoots y=7.5 and
+    # clips the last row — visible on the template-merged deck because
+    # the white template bg makes the overflow obvious. 4 rows × 0.20"
+    # = 0.80" total height at 8pt font. The font size bump-down is only
+    # on this exec-summary overview table — it trades a bit of per-cell
+    # readability for fitting cleanly inside the 7.5" slide when every
+    # earlier band is already committed.
+    for row in tier_table_shape.table.rows:
+        row.height = Inches(0.20)
 
     # ── Footer assumption note ─────────────────────────────────────────
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(7.25),
