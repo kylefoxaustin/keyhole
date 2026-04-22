@@ -89,17 +89,27 @@ def set_slide_bg(slide, color=C.BG_SLIDE):
 def add_text_box(slide, left, top, width, height, text,
                  font_size=18, color=C.TEXT_WHITE, bold=False,
                  alignment=PP_ALIGN.LEFT, font_name="Segoe UI"):
-    """Add a styled text box."""
+    """Add a styled text box.
+
+    Writes formatting to the run-level <a:rPr> (via explicit Run) rather
+    than the paragraph default <a:pPr><a:defRPr>. The defRPr approach
+    renders correctly but PowerPoint's Font Color picker edits run-level
+    properties — with no <a:rPr> present on the run, the override
+    sometimes fails to apply when a user selects text and tries to
+    change color. Putting the formatting on <a:rPr> directly gives
+    PowerPoint exactly the element it expects to modify.
+    """
     txBox = slide.shapes.add_textbox(left, top, width, height)
     tf = txBox.text_frame
     tf.word_wrap = True
     p = tf.paragraphs[0]
-    p.text = text
-    p.font.size = Pt(font_size)
-    p.font.color.rgb = color
-    p.font.bold = bold
-    p.font.name = font_name
     p.alignment = alignment
+    run = p.add_run()
+    run.text = text
+    run.font.size = Pt(font_size)
+    run.font.color.rgb = color
+    run.font.bold = bold
+    run.font.name = font_name
     return txBox
 
 
@@ -146,18 +156,27 @@ def add_styled_table(slide, left, top, width, height,
         for i, w in enumerate(col_widths):
             table.columns[i].width = w
 
-    # Style header row
+    # Style header row. Writes formatting to the run-level <a:rPr> rather
+    # than paragraph defRPr so PowerPoint's Font Color picker can override
+    # our defaults when a user edits the deck by hand.
+    def _set_cell_formatting(cell, text, *, sz, color, bold, align=PP_ALIGN.CENTER):
+        cell.text = ""   # clear default paragraph
+        tf = cell.text_frame
+        p = tf.paragraphs[0]
+        p.alignment = align
+        run = p.add_run()
+        run.text = str(text)
+        run.font.size = Pt(sz)
+        run.font.color.rgb = color
+        run.font.bold = bold
+        run.font.name = "Segoe UI"
+
     for i, header in enumerate(headers):
         cell = table.cell(0, i)
-        cell.text = header
         cell.fill.solid()
         cell.fill.fore_color.rgb = C.TABLE_HEADER
-        for paragraph in cell.text_frame.paragraphs:
-            paragraph.font.size = Pt(header_font_size)
-            paragraph.font.color.rgb = C.TEXT_WHITE
-            paragraph.font.bold = True
-            paragraph.font.name = "Segoe UI"
-            paragraph.alignment = PP_ALIGN.CENTER
+        _set_cell_formatting(cell, header, sz=header_font_size,
+                              color=C.TEXT_WHITE, bold=True)
 
     # Style data rows
     for r_idx, row in enumerate(rows):
@@ -167,15 +186,10 @@ def add_styled_table(slide, left, top, width, height,
         fg = C.TEXT_WHITE if is_hl else C.TEXT_BRIGHT
         for c_idx, value in enumerate(row):
             cell = table.cell(row_idx, c_idx)
-            cell.text = str(value)
             cell.fill.solid()
             cell.fill.fore_color.rgb = bg
-            for paragraph in cell.text_frame.paragraphs:
-                paragraph.font.size = Pt(font_size)
-                paragraph.font.color.rgb = fg
-                paragraph.font.bold = is_hl
-                paragraph.font.name = "Segoe UI"
-                paragraph.alignment = PP_ALIGN.CENTER
+            _set_cell_formatting(cell, value, sz=font_size,
+                                  color=fg, bold=is_hl)
 
     return table_shape
 
