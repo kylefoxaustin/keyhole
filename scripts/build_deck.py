@@ -1797,6 +1797,11 @@ def slide_yolov8n_comparison(prs: Presentation):
         r = d.get("results", {}).get(res, {}).get(recipe, {})
         return r.get("mean_frame_ms", 0) if isinstance(r, dict) and "frames" in r else 0
 
+    def quality(d, res, recipe):
+        """Return (box_recall, matched_iou) at given res/recipe; (nan, nan) if missing."""
+        q = d.get("quality", {}).get(res, {}).get(recipe, {})
+        return q.get("box_recall", float("nan")), q.get("mean_matched_iou", float("nan"))
+
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(
         slide,
@@ -1809,39 +1814,72 @@ def slide_yolov8n_comparison(prs: Presentation):
         accent_color=C.ACCENT_INDIGO,
     )
 
-    # Table 1: pure engine ms/frame per variant × resolution × precision
+    # Table 1: 5090 engine ms × precision, with 720p box-recall to flag INT8 quality drop
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(1.9), Inches(CONTENT_W), Inches(0.3),
-                 "Pure TRT engine execute() latency on 5090 Blackwell (not full pipeline — see below)",
+                 "Pure TRT engine execute() ms on 5090 Blackwell, + 720p box recall (vs FP16 baseline)",
                  font_size=12, color=C.ACCENT_PURPLE, bold=True)
-    headers = ["Variant", "Params", "720p FP16", "720p FP8", "1080p FP16", "1080p FP8",
-               "4K FP16", "4K FP8", "mAP (COCO)"]
+    headers = ["Variant", "Prec", "Params", "720p ms", "1080p ms", "4K ms",
+               "720p recall", "720p IoU", "Verdict"]
     rows = []
+    highlight = []
+    row_i = 0
     for label, data, params, mAP in [
-        ("yolo11s-seg (shipping)", trt11, "10.1 M", "37.0"),
-        ("yolov8n-seg (nano)",      trt8,  "3.4 M",  "30.5"),
+        ("yolo11s-seg (mAP 37.0)", trt11, "10.1 M", "37.0"),
+        ("yolov8n-seg (mAP 30.5)",  trt8,  "3.4 M",  "30.5"),
     ]:
-        row = [label, params]
-        for res in ("720p", "1080p", "4K"):
-            for recipe in ("fp16", "fp8"):
-                m = ms_5090(data, res, recipe)
-                row.append(f"{m:.2f}" if m > 0 else "—")
-        row.append(mAP)
-        rows.append(row)
+        for recipe in ("fp16", "int8", "fp8"):
+            row_i += 1
+            m_720 = ms_5090(data, "720p", recipe)
+            m_1080 = ms_5090(data, "1080p", recipe)
+            m_4k = ms_5090(data, "4K", recipe)
+            rec, iou = quality(data, "720p", recipe)
+            rec_s = f"{rec:.3f}" if rec == rec else "—"   # NaN check
+            iou_s = f"{iou:.3f}" if iou == iou else "—"
+            # Verdict: compare this precision's 5090 ms + recall to the variant's FP16
+            fp16_ms = ms_5090(data, "720p", "fp16")
+            verdict = ""
+            if recipe == "fp16":
+                verdict = "reference"
+            elif recipe == "int8":
+                if m_720 > fp16_ms * 1.05 and rec == rec and rec < 0.95:
+                    verdict = "slower AND lossy"
+                    highlight.append(row_i)
+                elif rec == rec and rec < 0.95:
+                    verdict = "lossy"
+                elif m_720 > fp16_ms * 1.05:
+                    verdict = "slower"
+                else:
+                    verdict = "ok"
+            elif recipe == "fp8":
+                if rec == rec and rec >= 0.99:
+                    verdict = "shipping ✓"
+                else:
+                    verdict = "check recall"
+            rows.append([
+                label if recipe == "fp16" else "",   # collapse variant label across 3 precision rows
+                recipe.upper(),
+                params if recipe == "fp16" else "",
+                f"{m_720:.2f}" if m_720 > 0 else "—",
+                f"{m_1080:.2f}" if m_1080 > 0 else "—",
+                f"{m_4k:.2f}" if m_4k > 0 else "—",
+                rec_s, iou_s,
+                verdict,
+            ])
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(2.22),
-                     Inches(CONTENT_W), Inches(1.1), headers, rows,
-                     highlight_rows=[2], font_size=10, header_font_size=10)
+                     Inches(CONTENT_W), Inches(1.9), headers, rows,
+                     highlight_rows=highlight, font_size=10, header_font_size=10)
 
-    # Table 2: concurrency — edge batch ms side by side
+    # Table 2: concurrency — edge batch ms side by side (both at FP8 shipping)
     if conc8n_p.exists() and conc11_p.exists():
-        add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.55), Inches(CONTENT_W), Inches(0.3),
-                     "Multi-stream batching — edge batch ms on NPU Mid (lower is better)",
+        add_text_box(slide, Inches(CONTENT_LEFT), Inches(4.25), Inches(CONTENT_W), Inches(0.3),
+                     "Multi-stream batching (FP8 shipping) — edge batch ms on NPU Mid",
                      font_size=12, color=C.ACCENT_PURPLE, bold=True)
         c8 = json.loads(conc8n_p.read_text())["batches_edge"]
         c11 = json.loads(conc11_p.read_text())["batches_edge"]
         c8_map = {r["batch"]: r["mean_ms_edge"] for r in c8}
         c11_map = {r["batch"]: r["mean_ms_edge"] for r in c11}
-        headers2 = ["Batch", "yolo11s-seg ms", "yolov8n-seg ms", "Speedup (v8n vs 11s)",
-                    "yolo11s FPS/stream", "yolov8n FPS/stream"]
+        headers2 = ["Batch", "11s ms", "v8n ms", "Speedup",
+                    "11s FPS/stream", "v8n FPS/stream"]
         rows2 = []
         for B in (1, 2, 4, 8, 16):
             m11 = c11_map.get(B, 0)
@@ -1851,25 +1889,25 @@ def slide_yolov8n_comparison(prs: Presentation):
             speedup = m11 / m8 if m8 > 0 else 0
             rows2.append([
                 f"B = {B}",
-                f"{m11:.1f} ms" if m11 > 0 else "—",
-                f"{m8:.1f} ms" if m8 > 0 else "—",
+                f"{m11:.1f}" if m11 > 0 else "—",
+                f"{m8:.1f}" if m8 > 0 else "—",
                 f"{speedup:.2f}×" if speedup > 0 else "—",
                 f"{fps11:.1f}" if fps11 > 0 else "—",
                 f"{fps8:.1f}" if fps8 > 0 else "—",
             ])
-        add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.85),
-                         Inches(CONTENT_W), Inches(1.95), headers2, rows2,
+        add_styled_table(slide, Inches(CONTENT_LEFT), Inches(4.55),
+                         Inches(CONTENT_W), Inches(1.4), headers2, rows2,
                          highlight_rows=[1, 3], font_size=10)
 
-    add_bullet_box(slide, CONTENT_LEFT, 5.95, CONTENT_W, 1.3, [
-        ("Why we measured both", C.ACCENT_BLUE, True),
-        ("• Vendor NPU benchmarks are almost always published against yolov8n-seg — the nano variant has been the de-facto industry reference for 2+ years. Having it alongside yolo11s-seg lets you drop real-silicon numbers from any vendor into a direct apples-to-apples comparison.",
+    add_bullet_box(slide, CONTENT_LEFT, 6.05, CONTENT_W, 1.05, [
+        ("Silicon comparison + the INT8 trap on nano YOLOs", C.ACCENT_BLUE, True),
+        ("• Vendor NPU benchmarks almost always cite yolov8n-seg — the nano is the de-facto industry reference. Alongside yolo11s-seg this lets you drop real-silicon numbers into a direct apples-to-apples compare.",
          C.TEXT_BRIGHT),
-        ("• yolov8n-seg is ~3× smaller (3.4M vs 10.1M) and ~3× faster on 5090 TRT FP8. Edge FPS at 720p climbs from 37 → 127 — but quality drops too (COCO mAP ≈ 30 vs 37 for yolo11s). Pick the variant that matches your accuracy floor.",
-         C.ACCENT_AMBER),
-        ("• Run with KEYHOLE_YOLO_VARIANT=yolov8n-seg scripts/bakeoff_trt_yolo.py (or scripts/bakeoff_concurrency.py). Default stays yolo11s-seg so existing measurements are preserved.",
-         C.TEXT_DIM),
-    ], font_size=10)
+        ("• INT8 FAILS on nano YOLO: slower than FP16 (kernel-launch overhead > compute savings at 3.4M params) AND drops 29% of boxes. Less severe on yolo11s (~13%). Vendor INT8 NPU numbers likely hide this unless they did QAT.",
+         C.ACCENT_RED),
+        ("• FP8 wins on both — E4M3's wider dynamic range preserves logits. Shipping recipe for both variants.",
+         C.ACCENT_GREEN),
+    ], font_size=9)
 
 
 def slide_trt_clip(prs: Presentation):

@@ -146,6 +146,48 @@ def build_fp8_engine(onnx_path: Path, out_path: Path, dynbatch_profile: bool = F
     raise RuntimeError(f"All FP8 flag combinations failed for {onnx_path}: {last_err}")
 
 
+def build_int8_engine(variant: str, onnx_path: Path, out_path: Path):
+    """Build a TRT INT8 engine from the ONNX using the bake-off's
+    Int8EntropyCalibrator2 over 20 bake-off frames.
+
+    Reuses BakeoffCalibrator from scripts.bakeoff_trt_yolo so the calibration
+    stream matches what the FP8/FP16 engines see during timing.
+    """
+    if out_path.exists():
+        log.info("INT8 engine already present at %s", out_path)
+        return
+    import sys as _sys
+    _sys.path.insert(0, str(ROOT))
+    from scripts.bakeoff_trt_yolo import BakeoffCalibrator, gather_calib_paths  # type: ignore
+    import tensorrt as trt
+    TRT_LOGGER = trt.Logger(trt.Logger.INFO)
+
+    # Gather 20 calibration frames from the cached bake-off clips
+    calib_images = gather_calib_paths()
+    cache_file = out_path.with_suffix(".calib_cache")
+    calib = BakeoffCalibrator(calib_images, cache_file)
+
+    builder = trt.Builder(TRT_LOGGER)
+    network = builder.create_network(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+    parser = trt.OnnxParser(network, TRT_LOGGER)
+    with open(onnx_path, "rb") as f:
+        if not parser.parse(f.read()):
+            raise RuntimeError("ONNX parse failed")
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 4 << 30)
+    config.set_flag(trt.BuilderFlag.INT8)
+    config.int8_calibrator = calib
+    log.info("Calibrating + building INT8 engine for %s on %d frames …",
+             variant, len(calib_images))
+    serialized = builder.build_serialized_network(network, config)
+    if serialized is None:
+        raise RuntimeError(f"INT8 engine build returned None for {variant}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(out_path, "wb") as f:
+        f.write(serialized)
+    log.info("  ✓ %s (%.1f MB)", out_path, out_path.stat().st_size / 1e6)
+
+
 def build_fp16_dynbatch_engine(onnx_path: Path, out_path: Path):
     """Hand-roll FP16 dynbatch engine for the concurrency bake-off."""
     if out_path.exists():
@@ -187,10 +229,12 @@ def main():
     # Fixed-batch ONNX + engines
     onnx_fixed = TRT_DIR / f"{variant}.onnx"
     fp16_engine = TRT_DIR / f"{variant}.fp16.engine"
+    int8_engine = TRT_DIR / f"{variant}.int8.engine"
     fp8_engine = TRT_DIR / f"{variant}.fp8.engine"
 
     export_onnx(pt, onnx_fixed, dynamic=False)
     export_fp16_engine(pt, fp16_engine)
+    build_int8_engine(variant, onnx_fixed, int8_engine)
     build_fp8_engine(onnx_fixed, fp8_engine)
 
     # Dynbatch ONNX + engines (for concurrency bake-off)
@@ -204,7 +248,7 @@ def main():
 
     log.info("")
     log.info("=== Summary: engines for %s ===", variant)
-    for p in [onnx_fixed, fp16_engine, fp8_engine, onnx_dyn, fp16_dyn, fp8_dyn]:
+    for p in [onnx_fixed, fp16_engine, int8_engine, fp8_engine, onnx_dyn, fp16_dyn, fp8_dyn]:
         if p.exists():
             log.info("  %s (%.1f MB)", p.name, p.stat().st_size / 1e6)
 
