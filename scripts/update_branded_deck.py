@@ -109,6 +109,14 @@ def set_row_cells(tr, values: list[str]):
             txbody.remove(p)
 
 
+def replace_run_text_any(slide, old: str, new: str) -> int:
+    """Run replace_run_text across every shape in a slide."""
+    total = 0
+    for shape in slide.shapes:
+        total += replace_run_text(shape, old, new)
+    return total
+
+
 def update_slide_1(slide):
     """Date: April 22 → April 24."""
     for shape in slide.shapes:
@@ -366,6 +374,15 @@ def main():
     # Slide 4 — tier specs
     tbl_ok, bullets_n = update_slide_4_tier_specs(prs.slides[3])
     print(f"  Slide  4 — tier table +2 rows ({'ok' if tbl_ok else 'FAIL'}), bullets rewritten: {bullets_n}")
+
+    # Slide 57 — Optimization Roadmap item-8 bullet had hardcoded stale
+    # 29.8 → 15.1 ms / 120% CLIP FPS numbers (pre-dates today's rerun).
+    roadmap_replace = replace_run_text_any(
+        prs.slides[56],
+        "CLIP visual FP8 via TRT → 29.8 → 15.1 ms edge (+120% CLIP FPS)",
+        "CLIP visual FP8 via TRT → 30.7 → 15.6 ms edge (+97% CLIP FPS)",
+    )
+    print(f"  Slide 57 — roadmap item-8 CLIP bullet refreshed: {roadmap_replace}")
 
     # Slide 50 — "What just happened" text box was 0.10" past slide bottom.
     # Nudge the box up so it ends exactly at the slide bottom.
