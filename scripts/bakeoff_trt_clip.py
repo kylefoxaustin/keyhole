@@ -272,7 +272,16 @@ def load_crops_and_classes(clip_stem: str):
 def run_torch_bf16(frames_data: list[dict], m_bf16, tokenizer) -> dict:
     """Reference run: OpenCLIP visual in BF16 (same as hybrid_v2 FP8 CLIP variant)."""
     text_cache = build_text_cache_torch(m_bf16, tokenizer)
-    torch.cuda.synchronize()
+    # Warmup: first frame used to carry model-load + first-kernel overhead into
+    # the measured mean (pollution was ~900 ms at 720p, dragging mean from 3.9
+    # to 67.9 ms and blowing up the edge projection for ALL three recipes).
+    for fd in frames_data:
+        if fd["crops"]:
+            warm = preprocess_crops(fd["crops"]).bfloat16()
+            with torch.no_grad():
+                m_bf16.visual(warm)
+            torch.cuda.synchronize()
+            break
     gpu_reset_peak()
     frame_results = []
     for fd in frames_data:
@@ -311,7 +320,9 @@ def run_trt(frames_data: list[dict], engine, text_cache: dict) -> dict:
                           device="cuda")
     out_buf = torch.zeros(max_bsz, 512, dtype=torch.float32, device="cuda")
 
-    # Warmup
+    # Warmup — 3 iters to let TRT select tactics + prime kernel cache. One iter
+    # wasn't enough at 720p: first real frame measured 27.79 ms for FP16 vs
+    # ~1.16 ms steady-state.
     batch = preprocess_crops(frames_data[0]["crops"][:BATCH_OPT])
     if batch.shape[0] > 0:
         ctx.set_input_shape(input_name, batch.shape)
@@ -319,8 +330,9 @@ def run_trt(frames_data: list[dict], engine, text_cache: dict) -> dict:
         ctx.set_tensor_address(input_name, int(in_buf.data_ptr()))
         ctx.set_tensor_address(output_name, int(out_buf.data_ptr()))
         stream = torch.cuda.Stream()
-        with torch.cuda.stream(stream):
-            ctx.execute_async_v3(stream.cuda_stream)
+        for _ in range(3):
+            with torch.cuda.stream(stream):
+                ctx.execute_async_v3(stream.cuda_stream)
         stream.synchronize()
 
     gpu_reset_peak()

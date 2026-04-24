@@ -2028,16 +2028,26 @@ def slide_trt_clip(prs: Presentation):
                      Inches(CONTENT_W), Inches(3.1), headers, rows,
                      highlight_rows=highlight)
 
+    # Pull 720p numbers live so bullets track the JSON instead of drifting.
+    fp8_720 = proj.get("720p", {}).get("fp8", {}).get("projected_clip_ms_edge", 0.0)
+    bf16_720 = proj.get("720p", {}).get("bf16_torch", {}).get("projected_clip_ms_edge", 0.0)
+    fp8_pct = int(round((bf16_720 / fp8_720 - 1.0) * 100)) if fp8_720 > 0 else 0
+    yolo_edge_ms = 27.2
+    every_frame_ms = yolo_edge_ms + fp8_720
+    every_frame_fps = 1000.0 / every_frame_ms if every_frame_ms > 0 else 0.0
+    hz_frame_ms = yolo_edge_ms + fp8_720 / 30.0
+    hz_fps = 1000.0 / hz_frame_ms if hz_frame_ms > 0 else 0.0
+
     add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.85, [
         ("Key findings", C.ACCENT_BLUE, True),
         ("• CLIP visual TRT-compiled cleanly at FP16 + FP8 (180 MB engine). No QDQ nodes needed — TRT auto-selects FP8 layers.", C.ACCENT_GREEN, True),
-        ("• FP8 edge CLIP drops from 29.8 ms (BF16/FP16) to 15.1 ms (+120% CLIP-only FPS).", C.ACCENT_GREEN, True),
+        (f"• FP8 edge CLIP drops from {bf16_720:.1f} ms (BF16/FP16) to {fp8_720:.1f} ms (+{fp8_pct}% CLIP-only FPS).", C.ACCENT_GREEN, True),
         ("• Top-1 concept-tag agreement: TRT FP16 0.970, TRT FP8 0.964 — FP8 costs ~0.4 pts, noise-level.", C.TEXT_DIM),
         ("• Earlier hybrid_v2 CLIP measurement (22 ms) included per-crop Python dispatch. Pure visual() kernel time is 2.3 ms BF16 — TRT exposes the honest number.", C.ACCENT_AMBER, True),
         "",
         ("Recalibrated full-stack (720p Edge MPU)", C.ACCENT_INDIGO, True),
-        ("• YOLO-FP8 (27.2 ms) + CLIP-FP8 every frame (15.1 ms) = 42.3 ms → 24 FPS  — real-time with ZERO debouncing",),
-        ("• YOLO-FP8 + CLIP-FP8 at 1 Hz (0.5 ms amortized) = 27.7 ms → 36 FPS  — at the YOLO-only ceiling; CLIP is effectively free",),
+        (f"• YOLO-FP8 ({yolo_edge_ms:.1f} ms) + CLIP-FP8 every frame ({fp8_720:.1f} ms) = {every_frame_ms:.1f} ms → {every_frame_fps:.0f} FPS  — real-time with ZERO debouncing",),
+        (f"• YOLO-FP8 + CLIP-FP8 at 1 Hz ({fp8_720/30.0:.2f} ms amortized) = {hz_frame_ms:.1f} ms → {hz_fps:.0f} FPS  — at the YOLO-only ceiling; CLIP is effectively free",),
     ], font_size=11)
 
 
@@ -3194,44 +3204,49 @@ def slide_npu_tier_specs(prs: Presentation):
     )
 
     # Row format mirrors the sizer's describe_hw output — single source of truth.
-    headers = ["Tier", "Memory bus", "BW theoretical", "BW effective (70%)",
+    # "†" marks rows anchored to real measured silicon (not BW-projected).
+    headers = ["Tier", "Memory bus", "BW theoretical", "BW effective",
                "Tensor TOPS", "DRAM", "TDP", "LLM Q4 decode", "LLM TTFT @ 1K"]
     rows = [
-        ["NPU Low-LP5-32bit", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s",
+        ["NPU Low-LP5-32bit", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s (70%)",
          "2 INT8 (dense)",                    "16 GB", "10 W", "— (projected)", "— (projected)"],
-        ["NPU Low-LP5-64bit", "64-bit LPDDR5 @ 6.4 GT/s", "51.2 GB/s", "35.84 GB/s",
+        ["NPU i.MX 95 (ground truth) †", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s (70%)",
+         "2 INT8 (Neutron NPU)",              "16 GB", "10 W", "— (not evaluated)", "— (not evaluated)"],
+        ["NPU Low-LP5-64bit", "64-bit LPDDR5 @ 6.4 GT/s", "51.2 GB/s", "35.84 GB/s (70%)",
          "2 INT8 (dense)",                    "16 GB", "10 W", "29.27 tok/s",   "1.67 s"],
-        ["NPU Low-LP5X",      "64-bit LPDDR5X @ 8.4 GT/s","67.2 GB/s", "47.04 GB/s",
+        ["NPU Low-LP5X",      "64-bit LPDDR5X @ 8.4 GT/s","67.2 GB/s", "47.04 GB/s (70%)",
          "50 BF16 / 100 INT8 / 100 FP8",      "16 GB", "10 W", "— (projected)", "— (projected)"],
-        ["NPU Mid",           "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s",
+        ["NPU Mid",           "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
          "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "37.85 tok/s",   "0.351 s"],
-        ["NPU High",          "128-bit LPDDR5X @ 11.2 GT/s","179.2 GB/s","125.44 GB/s",
+        ["NPU High",          "128-bit LPDDR5X @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
          "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "50.46 tok/s",   "0.176 s"],
+        ["RTX 5090 (reference, measured) †", "512-bit GDDR7 @ 28 GT/s", "1792 GB/s", "1523.2 GB/s (85%)",
+         "~105 BF16 / ~210 FP8 / INT8 DP4A",  "32 GB", "575 W", "250 tok/s",    "0.165 s"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
-                     Inches(CONTENT_W), Inches(2.6), headers, rows,
-                     highlight_rows=[4],   # NPU Mid — recommended target
-                     font_size=10, header_font_size=11)
+                     Inches(CONTENT_W), Inches(2.9), headers, rows,
+                     highlight_rows=[5],   # NPU Mid — recommended target (shifted by i.MX 95 insert above)
+                     font_size=9, header_font_size=11)
 
     # Context bullets + assumptions callout
-    add_bullet_box(slide, CONTENT_LEFT, 4.3, CONTENT_W, 2.6, [
+    add_bullet_box(slide, CONTENT_LEFT, 4.6, CONTENT_W, 2.3, [
         ("How edge FPS numbers in this deck are derived", C.ACCENT_BLUE, True),
         ("• Reference measurement happens on the RTX 5090 (1792 GB/s theo × 0.85 eff = 1523.2 GB/s realized). "
          "Edge ms projects via bandwidth ratio: edge_ms = 5090_ms × (5090_eff_bw / edge_eff_bw). "
          "No TOPS-based compute ceiling in the current math — every tier is treated as bandwidth-bound.",
          C.TEXT_BRIGHT),
-        ("• 70% bandwidth efficiency is uniform across all five edge tiers — removes tier-specific efficiency games so cross-tier comparisons reflect silicon differences, not modeling assumptions. "
-         "Derived from published NPU vendor benchmarks on Qwen3-30B-A3B Q4_K_M (135 ms TTFT vs 1K prompt on Mid).",
+        ("• 70% bandwidth efficiency is uniform across all five edge NPU tiers (RTX 5090 reference uses 85% — datacenter-class memory controller). "
+         "Removes tier-specific efficiency games so cross-tier comparisons reflect silicon differences, not modeling assumptions.",
          C.TEXT_DIM),
         "",
-        ("Precision + silicon-class notes", C.ACCENT_BLUE, True),
-        ("• NPU Low-LP5-32bit and -64bit are the SAME silicon class (INT8-only, 2 TOPS dense, NXP i.MX 95 Neutron N3-1024S family) paired with different memory bus widths. The 32-bit variant has half the bandwidth of the 64-bit. Floating-point pipelines (BF16 / FP8) will fail to load on either Low-LP5 tier and fall back to CPU at catastrophic slowdown.",
-         C.ACCENT_AMBER),
-        ("• NPU Low-LP5X through High have native BF16/FP8 tensor cores. Tensor TOPS column lists BF16 / INT8 / FP8 peaks per NVIDIA-class spec conventions.",
+        ("Measured-silicon anchors (†)", C.ACCENT_INDIGO, True),
+        ("• NPU i.MX 95 (ground truth): NXP eIQ Neutron NPU, real production measurement. yolov8n-seg INT8 @ 1080p = 32 ms (29.2 FPS) measured. Sizer surfaces this alongside the generic Low-LP5-32bit projection (18.3 FPS via BW scaling) — the 1.6× delta is honest evidence that pure-BW projection misses compute+overhead floor on weak silicon. Phase 2 compute-ceiling clamp (upcoming) uses this data point as the calibration anchor.",
+         C.ACCENT_GREEN),
+        ("• RTX 5090 (reference, measured): every edge projection in the deck derives from 5090 measurements on Blackwell TRT 10.16. Exposed as a selectable tier in the sizer so users can see the raw measured numbers alongside edge projections.",
          C.TEXT_BRIGHT),
-        ("• LLM decode + TTFT are vendor-published measurements on Qwen3-30B-A3B Q4_K_M (1K prompt, short response). Tiers without vendor benchmarks (Low-LP5-32bit, Low-LP5X) BW-project from adjacent measured tiers.",
+        ("• Low-LP5-32bit and -64bit are the SAME silicon class (INT8-only, 2 TOPS dense, Neutron-class) paired with different bus widths. Low-LP5X through High have native BF16/FP8 tensor cores. LLM decode + TTFT are vendor-published measurements on Qwen3-30B-A3B Q4_K_M.",
          C.TEXT_DIM),
-    ], font_size=10)
+    ], font_size=9)
 
 
 def slide_platform_specs(prs: Presentation):
