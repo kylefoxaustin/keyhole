@@ -117,6 +117,60 @@ def update_slide_1(slide):
     return False
 
 
+def update_slide_2_exec_summary(slide):
+    """Slide 2 tier table at bottom was overflowing — header 'Vision
+    (4-stream, batch=4)' and row-1 'Good for' were wrapping to 2 lines,
+    blowing the 0.22"-per-row budget and pushing the table past the
+    'Assumes vision/LLM time-slice on the NPU' footer. Fix by abbreviating
+    the wrapping strings and setting uneven column widths that give the
+    long 'Good for' column more room."""
+    from pptx.util import Inches, Pt, Emu
+    for shape in slide.shapes:
+        if not shape.has_table:
+            continue
+        t = shape.table
+        # Only touch the NPU tier table (sniff header cell 0)
+        if t.cell(0, 0).text.strip() != "NPU tier":
+            continue
+
+        # --- (1) Rewrite wrap-prone strings to shorter forms
+        rewrites = {
+            "Vision (4-stream, batch=4)": "Vision (4-stream)",
+            "LLM Q4_K_M decode": "LLM Q4 decode",
+            "64-bit LPDDR5 @ 6.4 GT/s": "64-bit LPDDR5 6.4 GT/s",
+            "128-bit LPDDR5X @ 8.4 GT/s": "128-bit LPDDR5X 8.4 GT/s",
+            "Dense INT8-only silicon (NXP Neutron class)": "Dense INT8 (Neutron)",
+            "Live multi-stream + occasional LLM": "Multi-stream + occasional LLM",
+        }
+        for i in range(len(t.rows)):
+            for j in range(len(t.columns)):
+                cell = t.cell(i, j)
+                for old, new in rewrites.items():
+                    if cell.text.strip() == old:
+                        set_cell_text(cell, new)
+
+        # --- (2) Widen 'Good for' column (col 5), steal from narrower ones.
+        # Original: 6 cols × 2.05" = 12.30" total.
+        # New: 1.8 / 1.9 / 1.2 / 1.3 / 1.3 / 4.8 = 12.30" total.
+        target_widths_in = [1.8, 1.9, 1.2, 1.3, 1.3, 4.8]
+        for col, w_in in zip(t.columns, target_widths_in):
+            col.width = Inches(w_in)
+
+        # --- (3) Explicit compact row heights so auto-grow can't bully us
+        for row in t.rows:
+            row.height = Inches(0.22)
+
+        # --- (4) Shrink table font to 8pt (header to 9) to be safe
+        for i in range(len(t.rows)):
+            for j in range(len(t.columns)):
+                cell = t.cell(i, j)
+                for para in cell.text_frame.paragraphs:
+                    for run in para.runs:
+                        run.font.size = Pt(9 if i == 0 else 8)
+        return True
+    return False
+
+
 def update_slide_46_clip(slide):
     """TRT CLIP table + two bullet lines."""
     # Target data (from data/output/bakeoff/trt_clip_edge_projection.json, rerun 2026-04-24)
@@ -277,6 +331,21 @@ def update_slide_4_tier_specs(slide):
         for old, new in bullet_replacements:
             if replace_run_text(shape, old, new):
                 bullets_updated += 1
+
+    # --- (7) Shrink bullet font to 8pt so the "Measured-silicon anchors"
+    #         section (which has a very long NPU i.MX 95 bullet) fits inside
+    #         the 2.60" bullet box instead of bleeding past the slide edge.
+    from pptx.util import Pt
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        # Skip the title and sub-header — only shrink the bullet paragraph box
+        txt = shape.text_frame.text
+        if "How edge FPS numbers" not in txt:
+            continue
+        for para in shape.text_frame.paragraphs:
+            for run in para.runs:
+                run.font.size = Pt(8)
     return True, bullets_updated
 
 
@@ -290,9 +359,22 @@ def main():
     else:
         print("  Slide  1 — date string not found (skipped)")
 
+    # Slide 2 — exec summary tier table fit
+    if update_slide_2_exec_summary(prs.slides[1]):
+        print("  Slide  2 — exec-summary tier table rewrapped + column widths fixed")
+
     # Slide 4 — tier specs
     tbl_ok, bullets_n = update_slide_4_tier_specs(prs.slides[3])
     print(f"  Slide  4 — tier table +2 rows ({'ok' if tbl_ok else 'FAIL'}), bullets rewritten: {bullets_n}")
+
+    # Slide 50 — "What just happened" text box was 0.10" past slide bottom.
+    # Nudge the box up so it ends exactly at the slide bottom.
+    from pptx.util import Inches
+    for shape in prs.slides[49].shapes:
+        if shape.has_text_frame and shape.text_frame.text.startswith("What just happened"):
+            shape.top = Inches(5.80)
+            print("  Slide 50 — 'What just happened' text box nudged up 0.10\"")
+            break
 
     # Slide 46 — TRT CLIP
     tbl_ok, bullets_n = update_slide_46_clip(prs.slides[45])
