@@ -93,6 +93,15 @@ NVTX_DIVISORS: dict[str, dict[str, int]] = {
     "yoloe26_pytorch_fp16":   {"source": "trt_yoloe26", "n_forwards": 39},
     "yoloe26_trt_fp16":       {"source": "trt_yoloe26", "n_forwards": 39},
     "yoloe26_trt_fp8":        {"source": "trt_yoloe26", "n_forwards": 39},
+    # ─── vit_alternatives (Kyle 2026-04-25 what-if): 720p-only app-replay
+    # sweep, 12 frames per variant (2 WARMUP + 10 MAX, all NVTX-wrapped).
+    # Range names match the bake-off script's NVTX labels (variant__res).
+    # 720p is sufficient for one DRAM-per-forward sample per variant —
+    # mirrors the efficientsam3p1 720p-only scope-decision pattern.
+    "rtdetr_l__720p":         {"source": "vit_alternatives", "n_forwards": 12},
+    "detr__720p":             {"source": "vit_alternatives", "n_forwards": 12},
+    "owlv2__720p":            {"source": "vit_alternatives", "n_forwards": 12},
+    "grounding_dino__720p":   {"source": "vit_alternatives", "n_forwards": 12},
 }
 
 
