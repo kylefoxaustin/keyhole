@@ -2621,6 +2621,126 @@ def slide_yoloe26_onemodel(prs: Presentation):
     ], font_size=10)
 
 
+def slide_vit_alternatives(prs: Presentation):
+    """Slide: "Vision transformers — could they replace YOLO-seg + SAM 3?"
+
+    What-if investigation Kyle scoped 2026-04-25. Tests four ViT-class
+    candidates across two roles (camera-stream + agentic-prompt) on the
+    same EW frames every prior bake-off uses. Same 5090 → NPU Mid BW
+    scaling, same box-recall-vs-YOLO11x protocol.
+
+    Conclusion of the investigation: 1-not-2 ViT outcome. Camera ViTs
+    are 10-13× heavier per forward than the shipping CNN stack and
+    bust real-time on edge. OWLv2 IS a real SAM 3 successor for the
+    agentic-prompt role — 42× lighter than SAM 3, 6× faster, retains
+    open-vocab text prompting natively.
+    """
+    lat_path = Path("data/output/bakeoff/vit_alternatives_summary.json")
+    rec_path = Path("data/output/bakeoff/vit_alternatives_recall.json")
+    ncu_path = Path("data/output/ncu/vit_alternatives.json")
+    if not lat_path.exists():
+        return
+
+    lat = json.loads(lat_path.read_text())
+    rec = json.loads(rec_path.read_text()) if rec_path.exists() else {"variants": {}}
+    ncu = json.loads(ncu_path.read_text()) if ncu_path.exists() else {"by_range": {}}
+
+    # 5090 → NPU Mid BW ratio (canonical, matches every other deck slide)
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19×
+    n_frames_per_range = 12   # 2 warmup + 10 timed, all NVTX-wrapped
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Vision transformers — could they replace YOLO-seg + SAM 3?",
+        "Two roles, four candidates. ViT camera detectors lose by structural margins; OWLv2 is the SAM 3 successor for agentic prompts.",
+    )
+
+    # Per-variant 720p results
+    headers = [
+        "Candidate", "Role", "Params",
+        "5090 ms (p50)", "NPU Mid FPS", "DRAM / forward",
+        "Box recall vs YOLO11x",
+    ]
+    ncu_range_for = {
+        "rtdetr-l":       "rtdetr_l__720p",
+        "detr_resnet50":  "detr__720p",
+        "owlv2":          "owlv2__720p",
+        "grounding_dino": "grounding_dino__720p",
+    }
+    label_for = {
+        "rtdetr-l":       "RT-DETR-L (Ultralytics)",
+        "detr_resnet50":  "DETR ResNet-50 (Facebook)",
+        "owlv2":          "OWLv2-base (Google)",
+        "grounding_dino": "Grounding DINO Tiny (IDEA)",
+    }
+    role_short = {"camera_stream": "camera", "agentic_prompt": "agentic"}
+
+    rows = []
+    for vk in ["rtdetr-l", "detr_resnet50", "owlv2", "grounding_dino"]:
+        v = lat.get("variants", {}).get(vk)
+        if not v:
+            continue
+        ms_5090 = v["resolutions"]["720p"]["p50_ms"]
+        npu_ms = ms_5090 * bw_ratio
+        npu_fps = 1000.0 / npu_ms if npu_ms > 0 else 0
+        dram_gb = "—"
+        if ncu_range_for[vk] in ncu.get("by_range", {}):
+            dram_b = ncu["by_range"][ncu_range_for[vk]]["metrics"].get("dram__bytes.sum", 0)
+            dram_gb = f"{dram_b / n_frames_per_range / 1e9:.2f} GB"
+        recall = rec.get("variants", {}).get(vk, {}).get("720p", {}).get("recall")
+        recall_str = f"{recall:.3f}" if recall is not None else "—"
+        rows.append([
+            label_for[vk],
+            role_short.get(v.get("role", ""), v.get("role", "")),
+            f"{v.get('n_params_M', 0):.0f}M",
+            f"{ms_5090:.2f} ms",
+            f"{npu_fps:.1f} FPS",
+            dram_gb,
+            recall_str,
+        ])
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.4),
+        Inches(CONTENT_W), Inches(1.7), headers, rows,
+        font_size=10,
+    )
+
+    # Head-to-head: ViT candidates vs shipping baselines
+    comp_headers = [
+        "Architecture", "Role", "NPU Mid FPS @ 720p", "DRAM / forward", "Verdict",
+    ]
+    comp_rows = [
+        ["yolo11s-seg FP8 TRT (shipping)",      "camera",   "90.8 FPS",  "0.22 GB",  "Reference: shipping camera stack."],
+        ["RT-DETR-L PyTorch FP16 (ViT)",        "camera",   "4.1 FPS",   "2.05 GB",  "10× heavier than shipping. Bust real-time even with TRT FP8."],
+        ["DETR ResNet-50 FP16 (ViT)",           "camera",   "5.7 FPS",   "2.74 GB",  "13× heavier. Same conclusion."],
+        ["SAM 3 BF16 (legacy agentic)",         "agentic",  "0.7 FPS",   "119 GB",   "Reference: model we want to replace."],
+        ["EfficientSAM3 ES-EV-S (community)",   "agentic",  "2.3 FPS",   "8.9 GB",   "13× lighter than SAM 3 but still heavy."],
+        ["OWLv2-base FP16 (ViT)",               "agentic",  "4.2 FPS",   "2.82 GB",  "42× lighter than SAM 3, 6× faster. Real successor."],
+        ["Grounding DINO Tiny FP32 (ViT)",      "agentic",  "0.9 FPS",   "38.5 GB",  "Between SAM 3 and EfficientSAM3. Skip vs OWLv2."],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(3.4),
+        Inches(CONTENT_W), Inches(2.0), comp_headers, comp_rows,
+        highlight_rows=[6],   # OWLv2 — the win
+        font_size=10,
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.6, CONTENT_W, 1.7, [
+        ("What we tested", C.ACCENT_BLUE, True),
+        ("• Camera-stream candidates: RT-DETR-L (Ultralytics), DETR ResNet-50 (Facebook). "
+         "Compared against shipping yolo11s-seg FP8 TRT.", C.TEXT_BRIGHT),
+        ("• Agentic-prompt candidates: OWLv2-base (Google), Grounding DINO Tiny (IDEA-Research). "
+         "Compared against SAM 3 + EfficientSAM3 from the SAM-3-lineage track.", C.TEXT_BRIGHT),
+        "",
+        ("Net: 1-not-2 ViT outcome", C.ACCENT_BLUE, True),
+        ("• Don't replace YOLO-seg + CLIP for cameras. ViT detectors carry 10-13× the per-frame BW "
+         "load and bust real-time on edge even with TRT FP8 closing 3×.", C.TEXT_BRIGHT),
+        ("• Replace SAM-3-lineage with OWLv2 for agentic prompts. Same on-demand duty-cycle math "
+         "shipping CLIP uses (240 ms × 1 query/min = 0.4% NPU duty). 447 MB peak VRAM fits even "
+         "on tight 16 GB edge SKUs.", C.ACCENT_BLUE),
+    ], font_size=10)
+
+
 def slide_efficientsam3_community(prs: Presentation):
     """Slide: "The community finally shipped a SAM 3 Lite" — EfficientSAM3 ES-EV-S benched against our recommended stack.
 
@@ -3560,6 +3680,13 @@ def build_deck(output, runs_dir, data_dir):
     if Path("data/output/bakeoff/trt_yoloe26_summary.json").exists():
         console.print("  Building: TRT YOLOE-26 — does FP8 close the gap?")
         slide_trt_yoloe26(prs)
+
+    # ViT alternatives — broader transformer-class investigation (Kyle 2026-04-25 what-if)
+    # Story: 1-not-2 ViT outcome. Camera ViTs lose by 10-13× BW margins;
+    # OWLv2 is the real SAM 3 successor for agentic prompts.
+    if Path("data/output/bakeoff/vit_alternatives_summary.json").exists():
+        console.print("  Building: ViT alternatives — what-if for camera + agentic")
+        slide_vit_alternatives(prs)
 
     # TRT takeaways — synthesize the 3 TRT bake-offs + edge-compiler caveat
     if (Path("data/output/bakeoff/trt_yolo_edge_projection.json").exists()

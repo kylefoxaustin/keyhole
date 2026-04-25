@@ -290,6 +290,60 @@ def sheet_yoloe26() -> pd.DataFrame | None:
     return pd.DataFrame(rows)
 
 
+def sheet_vit_alternatives() -> pd.DataFrame | None:
+    """ViT alternatives bake-off (Kyle 2026-04-25 what-if). Combines latency
+    + DRAM-per-forward (from ncu) + box recall vs YOLO11x reference into a
+    single sheet. One row per (variant, resolution)."""
+    lat = _load("vit_alternatives_summary.json")
+    if not lat:
+        return None
+    rec = _load("vit_alternatives_recall.json") or {"variants": {}}
+    # ncu lives in a sibling dir
+    ncu_path = Path("data/output/ncu/vit_alternatives.json")
+    ncu = json.loads(ncu_path.read_text()) if ncu_path.exists() else {"by_range": {}}
+
+    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19×
+    n_frames_per_range = 12
+
+    ncu_range_for = {
+        "rtdetr-l":       "rtdetr_l__720p",
+        "detr_resnet50":  "detr__720p",
+        "owlv2":          "owlv2__720p",
+        "grounding_dino": "grounding_dino__720p",
+    }
+
+    rows = []
+    for vk, v in lat.get("variants", {}).items():
+        # DRAM is 720p-only (ncu sweep scope decision)
+        dram_b = ncu.get("by_range", {}).get(ncu_range_for.get(vk, ""), {}).get(
+            "metrics", {}).get("dram__bytes.sum")
+        per_fwd_dram_mb = round(dram_b / n_frames_per_range / 1e6, 1) if dram_b else None
+        rec_data = rec.get("variants", {}).get(vk, {})
+        for res, rd in v.get("resolutions", {}).items():
+            ms_5090 = rd.get("p50_ms", 0.0)
+            ms_mid = ms_5090 * bw_ratio
+            rec_for_res = rec_data.get(res, {}) if isinstance(rec_data, dict) else {}
+            rows.append({
+                "Variant":             vk,
+                "Role":                v.get("role", ""),
+                "Resolution":          res,
+                "Params (M)":          round(v.get("n_params_M", 0), 1),
+                "VRAM MB (5090)":      round(v.get("peak_vram_mb", 0), 0),
+                "5090 p50 ms":         round(ms_5090, 2),
+                "5090 mean ms":        round(rd.get("mean_ms", 0), 2),
+                "NPU Mid ms (BW-scaled)": round(ms_mid, 1),
+                "NPU Mid FPS":         round(1000.0 / ms_mid, 2) if ms_mid > 0 else 0.0,
+                # ncu data is 720p-only
+                "DRAM MB / forward (720p ncu)":
+                    per_fwd_dram_mb if res == "720p" else None,
+                "Box recall vs YOLO11x":
+                    round(rec_for_res.get("recall"), 3) if rec_for_res.get("recall") is not None else None,
+                "Box precision":
+                    round(rec_for_res.get("precision"), 3) if rec_for_res.get("precision") is not None else None,
+            })
+    return pd.DataFrame(rows)
+
+
 def sheet_efficientsam3() -> pd.DataFrame | None:
     d = _load("efficientsam3_summary.json")
     if not d:
@@ -552,6 +606,7 @@ SHEETS = [
     ("EfficientSAM3.1 text-prompt", sheet_efficientsam3p1),
     ("YOLOE-26 one-model",       sheet_yoloe26),
     ("TRT YOLOE-26",             sheet_trt_yoloe26),
+    ("ViT alternatives",         sheet_vit_alternatives),
     ("TRT YOLO",                 sheet_trt_yolo),
     ("TRT CLIP",                 sheet_trt_clip),
     ("LLM Qwen3 5090",           sheet_llm_qwen3_5090),
