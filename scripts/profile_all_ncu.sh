@@ -177,11 +177,44 @@ if has yoloe26; then
         -- "$KEYHOLE_PY" scripts/bakeoff_yoloe26.py
 fi
 
+if has vit_alternatives; then
+    # ViT what-if candidates from Kyle's 2026-04-25 ask. Pure-PyTorch targets
+    # (no TRT, no dynamic NMS) → app-replay is the right mode (matches the
+    # yoloe26/efficientsam3 family). 720p-only because the sizer needs one
+    # DRAM-per-forward measurement per (variant, role) combo, not three —
+    # mirrors the efficientsam3p1 720p-only scope decision from 2026-04-21.
+    echo "==== [vit_alternatives] RT-DETR-L / DETR / OWLv2 / Grounding DINO (PyTorch, 720p) ===="
+    "$KEYHOLE_PY" scripts/profile_ncu.py \
+        --out "$OUT_DIR/vit_alternatives.json" $KEEP_CSV_FLAG \
+        -- "$KEYHOLE_PY" scripts/bakeoff_vit_alternatives.py --variant all --resolutions 720p
+fi
+
 if has llm; then
     echo "==== [llm] Qwen3-30B-A3B Q4/Q5/Q8 — prefill + decode ===="
     "$KEYHOLE_PY" scripts/profile_ncu.py \
         --out "$OUT_DIR/llm.json" $KEEP_CSV_FLAG \
         -- "$KEYHOLE_PY" scripts/bakeoff_llm.py --quants Q4_K_M
+fi
+
+if has dp4a_probe; then
+    # One-off: does yolov8n-seg INT8 TRT on SM120 route through DP4A CUDA-core
+    # (IDP instructions) or through IMMA tensor-core? Run INT8 + FP8 engines
+    # inside distinct NVTX ranges, capture integer-pipe vs tensor-pipe metrics.
+    # Answers the 2026-04-23 [docs] question.
+    echo "==== [dp4a_probe] yolov8n-seg INT8 vs FP8 — DP4A instruction mix ===="
+    CSV_OUT="$OUT_DIR/dp4a_probe.csv"
+    # Metric set: aggregate tensor pipe (hmma/bmma/fmma/imma), integer pipe,
+    # plus explicit IDP op count. gpu__time_duration.sum gives kernel wall time.
+    METRICS="sm__inst_executed_pipe_tensor.sum,smsp__inst_executed_pipe_tensor.sum,sm__inst_executed_pipe_int.sum,smsp__sass_thread_inst_executed_op_idp_pred_on.sum,smsp__inst_executed.sum,gpu__time_duration.sum"
+    NCU_BIN="${NCU_BIN:-/usr/local/cuda-12.6/bin/ncu}"
+    "$NCU_BIN" --target-processes all \
+        --nvtx --nvtx-include 'yolo_int8_dp4a_probe/' \
+        --nvtx-include 'yolo_fp8_tc_probe/' \
+        --metrics "$METRICS" \
+        --csv --log-file "$CSV_OUT" \
+        --replay-mode application \
+        "$KEYHOLE_PY" scripts/ncu_dp4a_check.py
+    echo "  CSV: $CSV_OUT"
 fi
 
 echo
