@@ -240,6 +240,70 @@ FOOTER_TOP = 7.1
 PROJECT_FOOTER = "Keyhole — Edge AI Video Intelligence"
 
 
+# ============================================================
+# NPU memory + bandwidth schema
+# ============================================================
+# Mirrors keyhole-sizer/sizer/npu_model.py LPDDR6_UPGRADE_OPTIONS so deck
+# projections track the sizer's memory-upgrade what-ifs 1:1.
+#
+# Stock memory per tier comes from the silicon-tier ground truth (i.MX 95
+# = LP4-32, NPU Mid = 128-bit LPDDR5X-8.4, NPU High = 128-bit LPDDR5X-11.2).
+# LPDDR6 entries are forward-looking what-ifs at 12 + 14 GT/s on the same
+# 128-bit bus (LPDDR6 max is currently spec'd at ~14.4 GT/s).
+#
+# Held bandwidth_efficiency at 70% uniformly across all memory types per
+# sizer's design — clean comparison; LPDDR6's improved subchannel arch
+# probably realizes 75-80% in practice but holding 70% is conservative.
+
+GPU_5090_PEAK_GBS = 1792.0
+GPU_5090_EFFICIENCY = 0.85
+NPU_BW_EFFICIENCY = 0.70
+
+# (tier, mem_label) → peak GB/s
+MEMORY_BW_GBS = {
+    ("NPU Mid",  "LPDDR5X-8.4"):  134.4,   # stock
+    ("NPU Mid",  "LPDDR6-12"):    192.0,
+    ("NPU Mid",  "LPDDR6-14"):    224.0,
+    ("NPU High", "LPDDR5X-11.2"): 179.2,   # stock
+    ("NPU High", "LPDDR6-12"):    192.0,
+    ("NPU High", "LPDDR6-14"):    224.0,
+}
+
+# Stock memory key per tier — used as the default everywhere a slide doesn't
+# explicitly compare across memory options.
+TIER_STOCK_MEM = {
+    "NPU Mid":  "LPDDR5X-8.4",
+    "NPU High": "LPDDR5X-11.2",
+}
+
+# Memory upgrade options surfaced in 3-column projection tables.
+# (mem_label, short_header) — short_header is what fits in a deck table cell.
+LPDDR6_UPGRADE_OPTIONS = [
+    ("LPDDR6-12", "+LPDDR6-12"),
+    ("LPDDR6-14", "+LPDDR6-14"),
+]
+
+
+def npu_effective_gbs(tier: str, mem: str | None = None) -> float:
+    """Effective NPU memory bandwidth in GB/s for a given (tier, memory) combo.
+
+    Effective = peak × NPU_BW_EFFICIENCY (uniform 70% across memory types).
+    """
+    mem = mem or TIER_STOCK_MEM[tier]
+    return MEMORY_BW_GBS[(tier, mem)] * NPU_BW_EFFICIENCY
+
+
+def bw_ratio_5090_to_npu(tier: str = "NPU Mid", mem: str | None = None) -> float:
+    """5090 effective BW ÷ NPU effective BW for the given tier / memory.
+
+    Multiply a 5090 ms latency by this ratio to get a BW-bound NPU edge ms
+    projection. Replaces the formerly-hardcoded
+    `bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70) = 16.19×` constant —
+    that value now equals `bw_ratio_5090_to_npu("NPU Mid")` (stock).
+    """
+    return (GPU_5090_PEAK_GBS * GPU_5090_EFFICIENCY) / npu_effective_gbs(tier, mem)
+
+
 def set_deck_size(prs: Presentation):
     """Switch the presentation to 16:9 widescreen (13.333 x 7.5 in)."""
     prs.slide_width = Inches(SLIDE_W_IN)
@@ -2375,9 +2439,11 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
         accent_color=C.ACCENT_PURPLE,
     )
 
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19× (5090 eff BW ÷ NPU Mid eff BW, uniform 0.70 tier eff)
+    bw_ratio = bw_ratio_5090_to_npu("NPU Mid")   # stock = 16.19×
 
     # Primary table: per-resolution 5090 cost split + NPU Mid totals for n=1/5/20
+    # Dense (8 cols) so the FPS columns stay at stock memory; LPDDR6 lift is
+    # captured in the comparison table + bullets below.
     headers = ["Resolution",
                 "set_image ms (5090)",
                 "per-prompt ms (5090)",
@@ -2407,13 +2473,17 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
                       Inches(CONTENT_W), Inches(1.8), headers, rows,
                       font_size=9, header_font_size=10)
 
-    # Comparison row
-    comp_headers = ["Variant", "Total params", "Path", "720p NPU Mid (best-case)"]
+    # Comparison row — 3-column FPS (stock / +LPDDR6-12 / +LPDDR6-14) on 720p NPU Mid best-case.
+    # Per-row stock numbers come from the prior bake-offs; +12 ≈ ×1.43, +14 ≈ ×1.67.
+    comp_headers = ["Variant", "Total params", "Path",
+                    "Stock", "+LPDDR6-12", "⚡+LPDDR6-14"]
+    def _fps3(stock: float, suffix: str = "") -> tuple[str, str, str]:
+        return (f"{stock:.2f}{suffix}", f"{stock * 1.43:.2f}{suffix}", f"{stock * 1.67:.2f}{suffix}")
     comp_rows = [
-        ["SAM 3 BF16 (baseline)",                       "840M", "text-concept (native)",    "0.40 FPS"],
-        ["EfficientSAM3 ES-EV-S BF16 (Option A)",       "424M", "box-prompt (batched)",     "2.59 FPS (18 boxes)"],
-        ["EfficientSAM3.1 ES-EV-S BF16 (SAM3.1 student)", "106M", "text-concept (native)",  "2.33 FPS (1 concept)"],
-        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)",       "~40M total two-stage", "detector + CLIP tagger", "36.1 FPS"],
+        ["SAM 3 BF16 (baseline)",                       "840M", "text-concept (native)",    *_fps3(0.40)],
+        ["EfficientSAM3 ES-EV-S BF16 (Option A)",       "424M", "box-prompt (batched)",     *_fps3(2.59, " (18 b)")],
+        ["EfficientSAM3.1 ES-EV-S BF16 (SAM3.1 student)", "106M", "text-concept (native)",  *_fps3(2.33, " (n=1)")],
+        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)",       "~40M two-stage", "detector + CLIP tagger", *_fps3(36.10)],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.9),
                       Inches(CONTENT_W), Inches(1.3), comp_headers, comp_rows,
@@ -2460,11 +2530,14 @@ def slide_trt_yoloe26(prs: Presentation):
         accent_color=C.ACCENT_AMBER,
     )
 
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19× (5090 eff BW ÷ NPU Mid eff BW, uniform 0.70 tier eff)
+    bw_stock = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
+    bw_l6_12 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")     # 11.33×
+    bw_l6_14 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")     # 9.71×
 
-    # Per-recipe per-resolution table
+    # Per-recipe per-resolution table — 3-column NPU Mid FPS for the LPDDR6 axis
     headers = ["Recipe", "720p 5090 (p50)", "1080p 5090", "4K 5090",
-                "720p NPU Mid FPS", "VRAM (5090)", "Speedup vs PT"]
+                "720p Mid · stock", "+LPDDR6-12", "⚡+LPDDR6-14",
+                "VRAM (5090)", "Speedup vs PT"]
     rows = []
     pt_ref_720 = recipes.get("pytorch_fp16", {}).get("by_resolution", {}).get("720p", {}).get("per_frame_ms_5090", {}).get("p50", 0)
     for tag in ["pytorch_fp16", "trt_fp16", "trt_fp8"]:
@@ -2473,32 +2546,35 @@ def slide_trt_yoloe26(prs: Presentation):
             continue
         def ms(res): return r["by_resolution"].get(res, {}).get("per_frame_ms_5090", {}).get("p50", 0)
         p50_720 = ms("720p")
-        ms_mid = p50_720 * bw_ratio
-        fps_mid = 1000.0 / ms_mid if ms_mid > 0 else 0
+        fps_stock = 1000.0 / (p50_720 * bw_stock) if p50_720 > 0 else 0
+        fps_l6_12 = 1000.0 / (p50_720 * bw_l6_12) if p50_720 > 0 else 0
+        fps_l6_14 = 1000.0 / (p50_720 * bw_l6_14) if p50_720 > 0 else 0
         speedup = pt_ref_720 / p50_720 if p50_720 > 0 else 0
         rows.append([
             tag.replace("_", " "),
             f"{p50_720:.2f} ms",
             f"{ms('1080p'):.2f} ms",
             f"{ms('4K'):.2f} ms",
-            f"{fps_mid:.2f} FPS",
+            f"{fps_stock:.2f}", f"{fps_l6_12:.2f}", f"{fps_l6_14:.2f}",
             f"{r['peak_vram_mb_5090']:.0f} MB",
             f"{speedup:.2f}×" if tag != "pytorch_fp16" else "baseline",
         ])
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                       Inches(CONTENT_W), Inches(1.6), headers, rows,
                       highlight_rows=[3],   # TRT FP8 row
-                      font_size=10)
+                      font_size=9)
 
-    # Context: where YOLOE-26 TRT FP8 slots in the progression
-    comp_headers = ["Stack", "720p NPU Mid FPS", "Note"]
+    # Context: where YOLOE-26 TRT FP8 slots in the progression — 3-col FPS
+    comp_headers = ["Stack", "Stock", "+LPDDR6-12", "⚡+LPDDR6-14", "Note"]
+    def _fps3(stock: float) -> tuple[str, str, str]:
+        return (f"{stock:.2f}", f"{stock * 1.43:.2f}", f"{stock * 1.67:.2f}")
     comp_rows = [
-        ["SAM 3 BF16 (baseline)",                    "0.40 FPS",  "Dead-on-arrival."],
-        ["EfficientSAM3 ES-EV-S BF16 (Apr 2026)",     "2.59 FPS",  "Community lite; box-prompt."],
-        ["EfficientSAM3.1 ES-EV-S (SAM 3.1 student)", "2.33 FPS",  "Text-prompt; 1 concept."],
-        ["YOLOE-26S-PF PyTorch FP16",                 "13.25 FPS", "Plain PyTorch, one model."],
-        ["YOLOE-26S-PF TRT FP8 (optimized ceiling)",  "14.36 FPS", "One model fully optimized."],
-        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)",    "36.10 FPS", "Two-stage, CLIP 1/30 frames."],
+        ["SAM 3 BF16 (baseline)",                    *_fps3(0.40),  "Dead-on-arrival."],
+        ["EfficientSAM3 ES-EV-S BF16 (Apr 2026)",     *_fps3(2.59),  "Community lite; box-prompt."],
+        ["EfficientSAM3.1 ES-EV-S (SAM 3.1 student)", *_fps3(2.33),  "Text-prompt; 1 concept."],
+        ["YOLOE-26S-PF PyTorch FP16",                 *_fps3(13.25), "Plain PyTorch, one model."],
+        ["YOLOE-26S-PF TRT FP8 (optimized ceiling)",  *_fps3(14.36), "One model fully optimized."],
+        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)", *_fps3(36.10), "Two-stage, CLIP 1/30 frames."],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(3.7),
                       Inches(CONTENT_W), Inches(1.7), comp_headers, comp_rows,
@@ -2553,11 +2629,14 @@ def slide_yoloe26_onemodel(prs: Presentation):
         accent_color=C.ACCENT_AMBER,
     )
 
-    # Per-variant, per-resolution numbers
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19× (5090 eff BW ÷ NPU Mid eff BW, uniform 0.70 tier eff)
+    # Per-variant, per-resolution numbers — 3-column NPU Mid FPS for the LPDDR6 axis
+    bw_stock = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
+    bw_l6_12 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")     # 11.33×
+    bw_l6_14 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")     # 9.71×
     headers = ["Variant", "Res", "Params",
-                "5090 ms (p50)", "NPU Mid ms (BW-scaled)", "NPU Mid FPS",
-                "Box recall vs YOLO11x"]
+                "5090 ms (p50)",
+                "Mid · stock", "+LPDDR6-12", "⚡+LPDDR6-14",
+                "Recall vs YOLO11x"]
     rows = []
     tag_display = {
         "text_prompt_s":  "YOLOE-26S (text prompts: 20 concepts)",
@@ -2572,14 +2651,15 @@ def slide_yoloe26_onemodel(prs: Presentation):
             if not r:
                 continue
             ms_5090 = r["per_frame_ms_5090"]["p50"]
-            ms_mid = ms_5090 * bw_ratio
+            fps_stock = 1000.0 / (ms_5090 * bw_stock)
+            fps_l6_12 = 1000.0 / (ms_5090 * bw_l6_12)
+            fps_l6_14 = 1000.0 / (ms_5090 * bw_l6_14)
             rows.append([
                 tag_display[tag] if res == "720p" else "",
                 res,
                 f"{v['params_m']:.1f}M" if res == "720p" else "",
                 f"{ms_5090:.2f} ms",
-                f"{ms_mid:.1f} ms",
-                f"{1000/ms_mid:.2f} FPS",
+                f"{fps_stock:.2f}", f"{fps_l6_12:.2f}", f"{fps_l6_14:.2f}",
                 f"{r['box_recall_vs_yolo11x']:.3f}",
             ])
     add_styled_table(
@@ -2588,19 +2668,21 @@ def slide_yoloe26_onemodel(prs: Presentation):
         font_size=9,
     )
 
-    # Head-to-head at 720p NPU Mid
-    comp_headers = ["Architecture", "NPU Mid FPS @ 720p", "Models on the NPU", "Note"]
+    # Head-to-head at 720p NPU Mid — 3-col FPS
+    comp_headers = ["Architecture", "Stock", "+LPDDR6-12", "⚡+LPDDR6-14", "Models on the NPU", "Note"]
+    def _fps3(stock: float) -> tuple[str, str, str]:
+        return (f"{stock:.2f}", f"{stock * 1.43:.2f}", f"{stock * 1.67:.2f}")
     comp_rows = [
-        ["SAM 3 BF16",                           "0.40 FPS",  "1 (SAM 3)",           "Dead-on-arrival baseline."],
-        ["EfficientSAM3 ES-EV-S BF16 (Apr 2026)", "2.59 FPS",  "1 (community lite)",  "Community SAM 3 Lite, open-vocab preserved."],
-        ["YOLOE-26S-PF FP16 (Jan 2026)",          "13.25 FPS", "1 (one-model)",       "Replaces YOLO-seg + CLIP. Simplest stack."],
-        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)", "36.1 FPS",  "2 (YOLO-seg + CLIP)", "Our optimized two-stage pipeline."],
+        ["SAM 3 BF16",                           *_fps3(0.40),  "1 (SAM 3)",           "Dead-on-arrival baseline."],
+        ["EfficientSAM3 ES-EV-S BF16 (Apr 2026)", *_fps3(2.59),  "1 (community lite)",  "Community SAM 3 Lite, open-vocab preserved."],
+        ["YOLOE-26S-PF FP16 (Jan 2026)",          *_fps3(13.25), "1 (one-model)",       "Replaces YOLO-seg + CLIP. Simplest stack."],
+        ["Keyhole recommended (TRT FP8 + 1 Hz CLIP)", *_fps3(36.10), "2 (YOLO-seg + CLIP)", "Our optimized two-stage pipeline."],
     ]
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(4.3),
         Inches(CONTENT_W), Inches(1.3), comp_headers, comp_rows,
         highlight_rows=[4],
-        font_size=10,
+        font_size=9,
     )
 
     add_bullet_box(slide, CONTENT_LEFT, 5.7, CONTENT_W, 1.7, [
@@ -2645,22 +2727,28 @@ def slide_vit_alternatives(prs: Presentation):
     rec = json.loads(rec_path.read_text()) if rec_path.exists() else {"variants": {}}
     ncu = json.loads(ncu_path.read_text()) if ncu_path.exists() else {"by_range": {}}
 
-    # 5090 → NPU Mid BW ratio (canonical, matches every other deck slide)
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19×
+    # 5090 → NPU Mid BW ratios — three memory variants for the LPDDR6 what-if columns.
+    bw_ratio_stock = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
+    bw_ratio_l6_12 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")     # 11.33×
+    bw_ratio_l6_14 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")     # 9.71×
     n_frames_per_range = 12   # 2 warmup + 10 timed, all NVTX-wrapped
 
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(
         slide,
         "Vision transformers — could they replace YOLO-seg + SAM 3?",
-        "Two roles, four candidates. ViT camera detectors lose by structural margins; OWLv2 is the SAM 3 successor for agentic prompts.",
+        "Two roles, four candidates. Camera ViTs miss real-time on stock memory — but ⚡LPDDR6-14 unlocks them. Agentic role: OWLv2 is the SAM 3 successor.",
     )
 
-    # Per-variant 720p results
+    # Per-variant 720p results — 3-column NPU Mid FPS to surface the LPDDR6 lift
     headers = [
         "Candidate", "Role", "Params",
-        "5090 ms (p50)", "NPU Mid FPS", "DRAM / forward",
-        "Box recall vs YOLO11x",
+        "5090 ms (p50)",
+        "NPU Mid FPS · stock",
+        "+LPDDR6-12 FPS",
+        "⚡+LPDDR6-14 FPS",
+        "DRAM / fwd",
+        "Recall vs YOLO11x",
     ]
     ncu_range_for = {
         "rtdetr-l":       "rtdetr_l__720p",
@@ -2682,8 +2770,9 @@ def slide_vit_alternatives(prs: Presentation):
         if not v:
             continue
         ms_5090 = v["resolutions"]["720p"]["p50_ms"]
-        npu_ms = ms_5090 * bw_ratio
-        npu_fps = 1000.0 / npu_ms if npu_ms > 0 else 0
+        fps_stock = 1000.0 / (ms_5090 * bw_ratio_stock) if ms_5090 > 0 else 0
+        fps_l6_12 = 1000.0 / (ms_5090 * bw_ratio_l6_12) if ms_5090 > 0 else 0
+        fps_l6_14 = 1000.0 / (ms_5090 * bw_ratio_l6_14) if ms_5090 > 0 else 0
         dram_gb = "—"
         if ncu_range_for[vk] in ncu.get("by_range", {}):
             dram_b = ncu["by_range"][ncu_range_for[vk]]["metrics"].get("dram__bytes.sum", 0)
@@ -2695,50 +2784,58 @@ def slide_vit_alternatives(prs: Presentation):
             role_short.get(v.get("role", ""), v.get("role", "")),
             f"{v.get('n_params_M', 0):.0f}M",
             f"{ms_5090:.2f} ms",
-            f"{npu_fps:.1f} FPS",
+            f"{fps_stock:.1f}",
+            f"{fps_l6_12:.1f}",
+            f"{fps_l6_14:.1f}",
             dram_gb,
             recall_str,
         ])
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(1.4),
         Inches(CONTENT_W), Inches(1.7), headers, rows,
-        font_size=10,
+        font_size=9,
     )
 
-    # Head-to-head: ViT candidates vs shipping baselines
+    # Head-to-head: ViT candidates vs shipping baselines.
+    # FPS columns precomputed via the canonical bw_ratio_5090_to_npu helper —
+    # stock at 16.19×, LPDDR6-12 at 11.33× (+43%), LPDDR6-14 at 9.71× (+67%).
+    # Multipliers vs stock:  +12 = 1.43×,  +14 = 1.67×.
+    def _three_fps(stock: float) -> tuple[str, str, str]:
+        return f"{stock:.1f}", f"{stock * 1.43:.1f}", f"{stock * 1.67:.1f}"
+
     comp_headers = [
-        "Architecture", "Role", "NPU Mid FPS @ 720p", "DRAM / forward", "Verdict",
+        "Architecture", "Role",
+        "Stock", "+LPDDR6-12", "⚡+LPDDR6-14",
+        "DRAM / fwd", "Verdict",
     ]
     comp_rows = [
-        ["yolo11s-seg FP8 TRT (shipping)",      "camera",   "90.8 FPS",  "0.22 GB",  "Reference: shipping camera stack."],
-        ["RT-DETR-L PyTorch FP16 (ViT)",        "camera",   "4.1 FPS",   "2.05 GB",  "10× heavier than shipping. Bust real-time even with TRT FP8."],
-        ["DETR ResNet-50 FP16 (ViT)",           "camera",   "5.7 FPS",   "2.74 GB",  "13× heavier. Same conclusion."],
-        ["SAM 3 BF16 (legacy agentic)",         "agentic",  "0.7 FPS",   "119 GB",   "Reference: model we want to replace."],
-        ["EfficientSAM3 ES-EV-S (community)",   "agentic",  "2.3 FPS",   "8.9 GB",   "13× lighter than SAM 3 but still heavy."],
-        ["OWLv2-base FP16 (ViT)",               "agentic",  "4.2 FPS",   "2.82 GB",  "42× lighter than SAM 3, 6× faster. Real successor."],
-        ["Grounding DINO Tiny FP32 (ViT)",      "agentic",  "0.9 FPS",   "38.5 GB",  "Between SAM 3 and EfficientSAM3. Skip vs OWLv2."],
+        ["yolo11s-seg FP8 TRT (shipping)",      "camera",   *_three_fps(90.8), "0.22 GB",  "Already shipping >>30 FPS — LPDDR6 is headroom."],
+        ["RT-DETR-L PyTorch FP16 (ViT)",        "camera",   *_three_fps(4.1),  "2.05 GB",  "Stock: bust. ⚡+LPDDR6-14: 6.9 FPS — still not real-time, TRT FP8 needed too."],
+        ["DETR ResNet-50 FP16 (ViT)",           "camera",   *_three_fps(5.7),  "2.74 GB",  "Stock: bust. ⚡+LPDDR6-14: 9.5 FPS — TRT FP8 (3×) → 28 FPS, near real-time."],
+        ["SAM 3 BF16 (legacy agentic)",         "agentic",  *_three_fps(0.7),  "119 GB",   "Reference: model we want to replace. Even +LPDDR6-14 can't save it."],
+        ["EfficientSAM3 ES-EV-S (community)",   "agentic",  *_three_fps(2.3),  "8.9 GB",   "13× lighter than SAM 3, but heavy. +LPDDR6-14 → 3.8 FPS."],
+        ["OWLv2-base FP16 (ViT)",               "agentic",  *_three_fps(4.2),  "2.82 GB",  "42× lighter than SAM 3. ⚡+LPDDR6-14 → 7.0 FPS — real successor."],
+        ["Grounding DINO Tiny FP32 (ViT)",      "agentic",  *_three_fps(0.9),  "38.5 GB",  "Between SAM 3 and EfficientSAM3. Skip vs OWLv2."],
     ]
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(3.4),
         Inches(CONTENT_W), Inches(2.0), comp_headers, comp_rows,
         highlight_rows=[6],   # OWLv2 — the win
-        font_size=10,
+        font_size=9,
     )
 
     add_bullet_box(slide, CONTENT_LEFT, 5.6, CONTENT_W, 1.7, [
-        ("What we tested", C.ACCENT_BLUE, True),
-        ("• Camera-stream candidates: RT-DETR-L (Ultralytics), DETR ResNet-50 (Facebook). "
-         "Compared against shipping yolo11s-seg FP8 TRT.", C.TEXT_BRIGHT),
-        ("• Agentic-prompt candidates: OWLv2-base (Google), Grounding DINO Tiny (IDEA-Research). "
-         "Compared against SAM 3 + EfficientSAM3 from the SAM-3-lineage track.", C.TEXT_BRIGHT),
-        "",
-        ("Net: 1-not-2 ViT outcome", C.ACCENT_BLUE, True),
-        ("• Don't replace YOLO-seg + CLIP for cameras. ViT detectors carry 10-13× the per-frame BW "
-         "load and bust real-time on edge even with TRT FP8 closing 3×.", C.TEXT_BRIGHT),
-        ("• Replace SAM-3-lineage with OWLv2 for agentic prompts. Same on-demand duty-cycle math "
-         "shipping CLIP uses (240 ms × 1 query/min = 0.4% NPU duty). 447 MB peak VRAM fits even "
-         "on tight 16 GB edge SKUs.", C.ACCENT_BLUE),
-    ], font_size=10)
+        ("Net: 1-not-2 ViT on stock — but LPDDR6 changes the camera story", C.ACCENT_BLUE, True),
+        ("• Stock LPDDR5X-8.4: don't replace YOLO-seg + CLIP for cameras (ViT detectors are 10-13× heavier per frame, bust real-time even with TRT FP8). "
+         "Replace SAM-3-lineage with OWLv2 for agentic prompts (42× lighter than SAM 3, fits the 1-Hz duty-cycle slot CLIP uses).",
+         C.TEXT_BRIGHT),
+        ("⚡ LPDDR6 @ 14 GT/s flips the camera-ViT story: BW-bound ceiling jumps from 33-46 FPS → 55-77 FPS at NPU Mid. "
+         "Combined with TRT FP8 (closes ~3×), DETR ResNet-50 reaches ~28 FPS — within striking distance of 30 FPS real-time. "
+         "RT-DETR-L still needs more (heavier compute kernel). Net: LPDDR6-14 is what it'd take to make camera ViTs viable on edge — that's a memory-tier story, not a model story.",
+         C.ACCENT_INDIGO),
+        ("• OWLv2 stays the agentic winner under any memory tier — duty-cycle math is so generous (240 ms × 1/min = 0.4% NPU) that BW upgrade is gravy.",
+         C.TEXT_DIM),
+    ], font_size=9)
 
 
 def slide_efficientsam3_community(prs: Presentation):
@@ -2767,26 +2864,28 @@ def slide_efficientsam3_community(prs: Presentation):
         accent_color=C.ACCENT_PURPLE,
     )
 
-    # Per-resolution measured + projected numbers
+    # Per-resolution measured + projected numbers — 3-column NPU Mid FPS
     by_res = data["by_resolution"]
-    headers = ["Resolution", "5090 ms (p50)", "NPU Mid ms (BW-scaled)",
-                "NPU Mid FPS", "Mean IoU vs SAM 3", "VRAM"]
+    bw_stock = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
+    bw_l6_12 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")     # 11.33×
+    bw_l6_14 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")     # 9.71×
+    headers = ["Resolution", "5090 ms (p50)",
+                "Mid · stock FPS", "+LPDDR6-12", "⚡+LPDDR6-14",
+                "Mean IoU vs SAM 3", "VRAM"]
     rows = []
     for res in ["720p", "1080p", "4K"]:
         if res not in by_res:
             continue
         r = by_res[res]
         ms_5090 = r["per_frame_ms_5090"]["p50"]
-        # Bandwidth ratio from npu_model.py (5090 effective BW ÷ NPU Mid effective BW)
-        bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # = 16.19x (uniform 0.70 NPU tier efficiency)
-        ms_mid = ms_5090 * bw_ratio
-        fps_mid = 1000.0 / ms_mid if ms_mid > 0 else 0.0
+        fps_stock = 1000.0 / (ms_5090 * bw_stock) if ms_5090 > 0 else 0.0
+        fps_l6_12 = 1000.0 / (ms_5090 * bw_l6_12) if ms_5090 > 0 else 0.0
+        fps_l6_14 = 1000.0 / (ms_5090 * bw_l6_14) if ms_5090 > 0 else 0.0
         iou = r["iou_vs_sam3"]["mean"]
         rows.append([
             res,
             f"{ms_5090:.1f} ms",
-            f"{ms_mid:.0f} ms",
-            f"{fps_mid:.2f} FPS",
+            f"{fps_stock:.2f}", f"{fps_l6_12:.2f}", f"{fps_l6_14:.2f}",
             f"{iou:.3f}",
             f"{data['peak_vram_mb_5090']:.0f} MB (5090 BF16)" if res == "720p" else "—",
         ])
@@ -2795,13 +2894,15 @@ def slide_efficientsam3_community(prs: Presentation):
         Inches(CONTENT_W), Inches(1.8), headers, rows,
     )
 
-    # Head-to-head comparison at 720p NPU Mid
-    comp_headers = ["Model / stack", "NPU Mid FPS @ 720p", "Note"]
+    # Head-to-head comparison at 720p NPU Mid — 3-col FPS
+    comp_headers = ["Model / stack", "Stock", "+LPDDR6-12", "⚡+LPDDR6-14", "Note"]
+    def _fps3(stock: float) -> tuple[str, str, str]:
+        return (f"{stock:.2f}", f"{stock * 1.43:.2f}", f"{stock * 1.67:.2f}")
     comp_rows = [
-        ["SAM 3 BF16 (Meta baseline)",    "0.40 FPS",  "The thing we are replacing — DOA at the edge."],
-        ["EfficientSAM3 ES-EV-S (BF16)",  "2.59 FPS",  "Community lite, Apr 2026. 6.5× over SAM 3."],
-        ["EfficientSAM-Small FP8 (ours)", "4.93 FPS",  "Mask-only, SAM 1/2 era model + FP8 quant."],
-        ["Keyhole recommended (TRT FP8, 1 Hz CLIP)", "36.1 FPS", "YOLO-seg FP8 + CLIP FP8, both on TensorRT."],
+        ["SAM 3 BF16 (Meta baseline)",    *_fps3(0.40),  "The thing we are replacing — DOA at the edge."],
+        ["EfficientSAM3 ES-EV-S (BF16)",  *_fps3(2.59),  "Community lite, Apr 2026. 6.5× over SAM 3."],
+        ["EfficientSAM-Small FP8 (ours)", *_fps3(4.93),  "Mask-only, SAM 1/2 era model + FP8 quant."],
+        ["Keyhole recommended (TRT FP8, 1 Hz CLIP)", *_fps3(36.10), "YOLO-seg FP8 + CLIP FP8, both on TensorRT."],
     ]
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(4.0),
@@ -3045,10 +3146,11 @@ def slide_ncu_headline(prs: Presentation):
     # Right-side callout column
     add_text_box(slide, Inches(9.8), Inches(1.95), Inches(3.4), Inches(0.35),
                  "NPU Mid budget", font_size=12, color=C.ACCENT_INDIGO, bold=True)
-    add_text_box(slide, Inches(9.8), Inches(2.25), Inches(3.4), Inches(1.2),
-                 "128-bit LPDDR5X @ 8.4 GT/s\n"
-                 "= 134.4 GB/s theoretical\n"
-                 "= 94.1 GB/s effective (70%)",
+    add_text_box(slide, Inches(9.8), Inches(2.25), Inches(3.4), Inches(1.6),
+                 "Stock LPDDR5X @ 8.4 GT/s\n"
+                 "= 94.1 GB/s effective (70%)\n"
+                 "+LPDDR6 @ 12 GT/s → 134.4 GB/s\n"
+                 "⚡+LPDDR6 @ 14 GT/s → 156.8 GB/s",
                  font_size=10, color=C.TEXT_BRIGHT)
 
     add_text_box(slide, Inches(9.8), Inches(3.35), Inches(3.4), Inches(0.35),
@@ -3086,7 +3188,7 @@ def slide_ncu_workload_table(prs: Presentation):
     add_title_subtitle(
         slide,
         f"All {bundle['n_workloads']} measured workloads — per-forward DRAM and NPU Mid ceiling",
-        "Nsight Compute bytes ÷ NVTX-bounded forwards. FPS ceiling = 94.08 GB/s ÷ MB/forward (BW-bound only).",
+        "Nsight Compute bytes ÷ NVTX-bounded forwards. FPS ceiling = (94.08 / 134.4 / 156.8 GB/s effective) ÷ MB/forward — stock / +LPDDR6-12 / +LPDDR6-14.",
     )
 
     # Order by family, best-case first within each family (low MB = good)
@@ -3131,28 +3233,36 @@ def slide_ncu_workload_table(prs: Presentation):
         "clip_trt":                             "OpenCLIP visual TRT ★ recommended",
     }
 
-    headers = ["Family", "Workload", "Kernels", "DRAM / forward", "BW-bound FPS ceiling"]
+    # FPS ceilings at three memory tiers — multipliers vs stock NPU Mid (94.08 GB/s eff):
+    #   stock: 1.00×,  +LPDDR6-12: 134.4/94.08 = 1.43×,  +LPDDR6-14: 156.8/94.08 = 1.67×
+    headers = ["Family", "Workload", "Kernels", "DRAM / forward",
+               "Stock", "+LPDDR6-12", "⚡+LPDDR6-14"]
     rows = []
     highlight_rows = []
+
+    def _fps_str(f: float) -> str:
+        return f"{f:,.1f}" if f >= 10 else f"{f:,.2f}"
+
     for i, (_, fam, wid, k, mb, fps) in enumerate(rows_raw):
         label = pretty.get(wid, wid)
         mb_str = f"{mb/1000:,.1f} GB" if mb >= 1000 else f"{mb:,.1f} MB"
-        fps_str = f"{fps:,.1f}" if fps >= 10 else f"{fps:,.2f}"
-        rows.append([fam, label, f"{k:,}", mb_str, fps_str])
+        rows.append([
+            fam, label, f"{k:,}", mb_str,
+            _fps_str(fps), _fps_str(fps * 1.43), _fps_str(fps * 1.67),
+        ])
         if "★ recommended" in label:
             highlight_rows.append(i + 1)
 
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(1.75),
         Inches(CONTENT_W), Inches(4.6), headers, rows,
-        highlight_rows=highlight_rows, font_size=9, header_font_size=10,
+        highlight_rows=highlight_rows, font_size=8, header_font_size=10,
     )
 
     add_bullet_box(slide, CONTENT_LEFT, 6.45, CONTENT_W, 0.85, [
-        ("Reading the ceiling column", C.ACCENT_BLUE, True),
-        ("• BW-bound FPS is the best case — compute may cut it further. For recommended TRT FP8 the two numbers "
-         "agree: YOLO @ 465 ceiling vs ~140 measured, CLIP @ 232 ceiling at 1 Hz — either way 30 fps fits "
-         "with headroom. For SAM 3 the ceiling is 0.8 FPS: there is no CPU-side optimization that gets past it.",
+        ("Reading the ceiling columns", C.ACCENT_BLUE, True),
+        ("• BW-bound FPS is the best case — compute may cut it further. LPDDR6-12 / LPDDR6-14 columns scale stock by 1.43× / 1.67× (linear in effective BW). "
+         "Recommended TRT FP8 has so much headroom that LPDDR6 is gravy; the SAM 3 lineage is so heavy that even +LPDDR6-14 leaves them sub-2 FPS.",
          C.ACCENT_GREEN),
         ("• Source: data/output/ncu/sizer_bundle.json (vendored to keyhole-sizer/sizer/). Regenerate with "
          "scripts/export_ncu_for_sizer.py after any ncu re-run.", C.TEXT_DIM),
@@ -3338,33 +3448,35 @@ def slide_npu_tier_specs(prs: Presentation):
          "50 BF16 / 100 INT8 / 100 FP8",      "16 GB", "10 W", "— (projected)", "— (projected)"],
         ["NPU Mid",           "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
          "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "37.85 tok/s",   "0.351 s"],
+        ["NPU Mid (+LPDDR6-12) ‡",  "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
+         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "54.07 tok/s ‡", "0.351 s †"],
+        ["NPU Mid (+LPDDR6-14) ‡",  "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
+         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "63.08 tok/s ‡", "0.351 s †"],
         ["NPU High",          "128-bit LPDDR5X @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
          "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "50.46 tok/s",   "0.176 s"],
+        ["NPU High (+LPDDR6-12) ‡", "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "54.06 tok/s ‡", "0.176 s †"],
+        ["NPU High (+LPDDR6-14) ‡", "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "63.08 tok/s ‡", "0.176 s †"],
         ["RTX 5090 (reference, measured) †", "512-bit GDDR7 @ 28 GT/s", "1792 GB/s", "1523.2 GB/s (85%)",
          "~105 BF16 / ~210 FP8 / INT8 DP4A",  "32 GB", "575 W", "250 tok/s",    "0.165 s"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
-                     Inches(CONTENT_W), Inches(2.9), headers, rows,
-                     highlight_rows=[5],   # NPU Mid — recommended target (shifted by i.MX 95 insert above)
-                     font_size=9, header_font_size=11)
+                     Inches(CONTENT_W), Inches(3.4), headers, rows,
+                     highlight_rows=[5],   # NPU Mid — recommended target (LPDDR6 rows insert below it; index unchanged)
+                     font_size=8, header_font_size=10)
 
     # Context bullets + assumptions callout
-    add_bullet_box(slide, CONTENT_LEFT, 4.6, CONTENT_W, 2.3, [
-        ("How edge FPS numbers in this deck are derived", C.ACCENT_BLUE, True),
-        ("• Reference measurement happens on the RTX 5090 (1792 GB/s theo × 0.85 eff = 1523.2 GB/s realized). "
-         "Edge ms projects via bandwidth ratio: edge_ms = 5090_ms × (5090_eff_bw / edge_eff_bw). "
-         "No TOPS-based compute ceiling in the current math — every tier is treated as bandwidth-bound.",
+    add_bullet_box(slide, CONTENT_LEFT, 5.0, CONTENT_W, 2.0, [
+        ("How edge FPS / tok/s numbers in this deck are derived", C.ACCENT_BLUE, True),
+        ("• Edge ms projects via bandwidth ratio: edge_ms = 5090_ms × (5090_eff_bw / edge_eff_bw). 70% BW efficiency uniform across all NPU rows (5090 = 85%, datacenter-class). "
+         "No TOPS-based compute ceiling in the current math — every NPU row is treated as bandwidth-bound.",
          C.TEXT_BRIGHT),
-        ("• 70% bandwidth efficiency is uniform across all five edge NPU tiers (RTX 5090 reference uses 85% — datacenter-class memory controller). "
-         "Removes tier-specific efficiency games so cross-tier comparisons reflect silicon differences, not modeling assumptions.",
-         C.TEXT_DIM),
-        "",
-        ("Measured-silicon anchors (†)", C.ACCENT_INDIGO, True),
-        ("• NPU i.MX 95 (ground truth): NXP eIQ Neutron NPU, real production measurement. yolov8n-seg INT8 @ 1080p = 32 ms (29.2 FPS) measured. Sizer surfaces this alongside the generic Low-LP5-32bit projection (18.3 FPS via BW scaling) — the 1.6× delta is honest evidence that pure-BW projection misses compute+overhead floor on weak silicon. Phase 2 compute-ceiling clamp (upcoming) uses this data point as the calibration anchor.",
+        ("‡ Memory-upgrade what-if (LPDDR6 @ 12 / 14 GT/s on the same 128-bit bus) — TOPS / DRAM / TDP unchanged from stock; LLM decode BW-scaled from stock measurement; TTFT held at stock value (compute-bound, not BW-improved).",
+         C.ACCENT_INDIGO),
+        ("† Measured-silicon anchors. NPU i.MX 95 yolov8n-seg INT8 @ 1080p = 32 ms (29.2 FPS) measured — vs Low-LP5-32bit BW projection 18.3 FPS — the 1.6× delta is honest evidence pure-BW misses compute+overhead floor on weak silicon (Phase 2 compute-clamp anchor). RTX 5090 is every projection's measurement reference.",
          C.ACCENT_GREEN),
-        ("• RTX 5090 (reference, measured): every edge projection in the deck derives from 5090 measurements on Blackwell TRT 10.16. Exposed as a selectable tier in the sizer so users can see the raw measured numbers alongside edge projections.",
-         C.TEXT_BRIGHT),
-        ("• Low-LP5-32bit and -64bit are the SAME silicon class (INT8-only, 2 TOPS dense, Neutron-class) paired with different bus widths. Low-LP5X through High have native BF16/FP8 tensor cores. LLM decode + TTFT are vendor-published measurements on Qwen3-30B-A3B Q4_K_M.",
+        ("• Low-LP5-32bit and -64bit are the SAME silicon class (INT8-only, Neutron-class) on different bus widths. Low-LP5X through High have native BF16/FP8 tensor cores. LLM decode + TTFT are vendor-published measurements on Qwen3-30B-A3B Q4_K_M.",
          C.TEXT_DIM),
     ], font_size=9)
 

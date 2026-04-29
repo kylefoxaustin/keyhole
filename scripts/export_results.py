@@ -35,6 +35,44 @@ BAKEOFF_DIR = REPO_ROOT / "data" / "output" / "bakeoff"
 OUT_PATH = REPO_ROOT / "data" / "output" / "keyhole_results.xlsx"
 
 
+# ───────────────────────── Memory schema ─────────────────────────
+# Mirrors build_deck.py's NPU memory schema (which mirrors keyhole-sizer).
+# Held bandwidth_efficiency at 70% uniformly across all NPU memory types.
+# (This file historically used 0.80 efficiency in some sheets and 0.70 in
+# others — the deck + sizer have always used 0.70; normalizing here.)
+
+GPU_5090_PEAK_GBS = 1792.0
+GPU_5090_EFFICIENCY = 0.85
+NPU_BW_EFFICIENCY = 0.70
+
+MEMORY_BW_GBS = {
+    ("NPU Mid",  "LPDDR5X-8.4"):  134.4,   # stock
+    ("NPU Mid",  "LPDDR6-12"):    192.0,
+    ("NPU Mid",  "LPDDR6-14"):    224.0,
+    ("NPU High", "LPDDR5X-11.2"): 179.2,
+    ("NPU High", "LPDDR6-12"):    192.0,
+    ("NPU High", "LPDDR6-14"):    224.0,
+}
+
+
+def bw_ratio_5090_to_npu(tier: str = "NPU Mid", mem: str = "LPDDR5X-8.4") -> float:
+    """Multiply a 5090 ms latency by this to get NPU edge ms (BW-bound)."""
+    eff = MEMORY_BW_GBS[(tier, mem)] * NPU_BW_EFFICIENCY
+    return (GPU_5090_PEAK_GBS * GPU_5090_EFFICIENCY) / eff
+
+
+def _mid_fps_triplet(ms_5090: float) -> tuple[float, float, float]:
+    """Return (stock, +LPDDR6-12, +LPDDR6-14) NPU Mid FPS for a given 5090 ms."""
+    if ms_5090 <= 0:
+        return 0.0, 0.0, 0.0
+    rs = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")
+    r1 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")
+    r2 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")
+    return (1000.0 / (ms_5090 * rs),
+            1000.0 / (ms_5090 * r1),
+            1000.0 / (ms_5090 * r2))
+
+
 # ───────────────────────── Helpers ─────────────────────────
 
 def _load(name: str) -> dict | None:
@@ -213,21 +251,21 @@ def sheet_efficientsam3p1() -> pd.DataFrame | None:
     d = _load("efficientsam3p1_summary.json")
     if not d:
         return None
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)
     rows = []
     for res, r in d.get("by_resolution", {}).items():
         for n in [1, 5, 20]:
             key = {1: "n_1_concept", 5: "n_5_concepts", 20: "n_20_concepts_exhaustive"}[n]
             ms_5090 = r["per_frame_5090_ms"][key]
-            ms_mid = ms_5090 * bw_ratio
+            fps_stock, fps_l6_12, fps_l6_14 = _mid_fps_triplet(ms_5090)
             rows.append({
                 "Resolution":        res,
                 "N concepts":        n,
                 "set_image p50 (5090)": round(r["set_image_5090_p50_ms"], 2),
                 "per-prompt p50 (5090)": round(r["per_prompt_5090_p50_ms"], 2),
                 "Total 5090 ms":     round(ms_5090, 2),
-                "NPU Mid ms (BW-scaled)": round(ms_mid, 1),
-                "NPU Mid FPS":       round(1000.0 / ms_mid, 3) if ms_mid > 0 else 0.0,
+                "NPU Mid FPS · stock":      round(fps_stock, 3),
+                "NPU Mid FPS · +LPDDR6-12": round(fps_l6_12, 3),
+                "NPU Mid FPS · +LPDDR6-14": round(fps_l6_14, 3),
             })
     return pd.DataFrame(rows)
 
@@ -236,12 +274,11 @@ def sheet_trt_yoloe26() -> pd.DataFrame | None:
     d = _load("trt_yoloe26_summary.json")
     if not d:
         return None
-    bw_ratio = d.get("bw_ratio_5090_to_npu_mid", 14.17)
     rows = []
     for recipe, r in d.get("recipes", {}).items():
         for res, rr in r.get("by_resolution", {}).items():
             p50 = rr["per_frame_ms_5090"]["p50"]
-            ms_mid = p50 * bw_ratio
+            fps_stock, fps_l6_12, fps_l6_14 = _mid_fps_triplet(p50)
             rows.append({
                 "Recipe":         recipe,
                 "Resolution":     res,
@@ -249,8 +286,9 @@ def sheet_trt_yoloe26() -> pd.DataFrame | None:
                 "5090 mean ms":   round(rr["per_frame_ms_5090"]["mean"], 2),
                 "5090 p50 ms":    round(p50, 2),
                 "5090 p95 ms":    round(rr["per_frame_ms_5090"]["p95"], 2),
-                "NPU Mid ms (BW-scaled)": round(ms_mid, 1),
-                "NPU Mid FPS":    round(1000.0 / ms_mid, 2) if ms_mid > 0 else 0,
+                "NPU Mid FPS · stock":      round(fps_stock, 2),
+                "NPU Mid FPS · +LPDDR6-12": round(fps_l6_12, 2),
+                "NPU Mid FPS · +LPDDR6-14": round(fps_l6_14, 2),
                 "VRAM MB (5090)": round(r["peak_vram_mb_5090"], 0),
                 "Mean dets/frame": round(rr.get("mean_dets_per_frame", 0), 1),
                 "Box recall vs YOLO11x": round(rr.get("box_recall", 0), 3),
@@ -262,14 +300,13 @@ def sheet_yoloe26() -> pd.DataFrame | None:
     d = _load("yoloe26_summary.json")
     if not d:
         return None
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)
     rows = []
     for tag, v in d.get("variants", {}).items():
         if "error" in v:
             continue
         for res, r in v.get("by_resolution", {}).items():
             ms_5090 = r["per_frame_ms_5090"]["p50"]
-            ms_mid = ms_5090 * bw_ratio
+            fps_stock, fps_l6_12, fps_l6_14 = _mid_fps_triplet(ms_5090)
             rows.append({
                 "Variant":           tag,
                 "Weights":           v["weights"],
@@ -280,8 +317,9 @@ def sheet_yoloe26() -> pd.DataFrame | None:
                 "5090 mean ms":      round(r["per_frame_ms_5090"]["mean"], 2),
                 "5090 p50 ms":       round(r["per_frame_ms_5090"]["p50"], 2),
                 "5090 p95 ms":       round(r["per_frame_ms_5090"]["p95"], 2),
-                "NPU Mid ms (BW-scaled)": round(ms_mid, 1),
-                "NPU Mid FPS":       round(1000.0 / ms_mid, 2) if ms_mid > 0 else 0.0,
+                "NPU Mid FPS · stock":      round(fps_stock, 2),
+                "NPU Mid FPS · +LPDDR6-12": round(fps_l6_12, 2),
+                "NPU Mid FPS · +LPDDR6-14": round(fps_l6_14, 2),
                 "N YOLOE boxes":     r["n_boxes_yoloe"],
                 "N ref YOLO11x boxes": r["n_boxes_reference_yolo11x"],
                 "N matched IoU≥0.5": r["n_matched_boxes_iou_ge_0.5"],
@@ -302,7 +340,6 @@ def sheet_vit_alternatives() -> pd.DataFrame | None:
     ncu_path = Path("data/output/ncu/vit_alternatives.json")
     ncu = json.loads(ncu_path.read_text()) if ncu_path.exists() else {"by_range": {}}
 
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.70)   # 16.19×
     n_frames_per_range = 12
 
     ncu_range_for = {
@@ -321,7 +358,7 @@ def sheet_vit_alternatives() -> pd.DataFrame | None:
         rec_data = rec.get("variants", {}).get(vk, {})
         for res, rd in v.get("resolutions", {}).items():
             ms_5090 = rd.get("p50_ms", 0.0)
-            ms_mid = ms_5090 * bw_ratio
+            fps_stock, fps_l6_12, fps_l6_14 = _mid_fps_triplet(ms_5090)
             rec_for_res = rec_data.get(res, {}) if isinstance(rec_data, dict) else {}
             rows.append({
                 "Variant":             vk,
@@ -331,8 +368,9 @@ def sheet_vit_alternatives() -> pd.DataFrame | None:
                 "VRAM MB (5090)":      round(v.get("peak_vram_mb", 0), 0),
                 "5090 p50 ms":         round(ms_5090, 2),
                 "5090 mean ms":        round(rd.get("mean_ms", 0), 2),
-                "NPU Mid ms (BW-scaled)": round(ms_mid, 1),
-                "NPU Mid FPS":         round(1000.0 / ms_mid, 2) if ms_mid > 0 else 0.0,
+                "NPU Mid FPS · stock":      round(fps_stock, 2),
+                "NPU Mid FPS · +LPDDR6-12": round(fps_l6_12, 2),
+                "NPU Mid FPS · +LPDDR6-14": round(fps_l6_14, 2),
                 # ncu data is 720p-only
                 "DRAM MB / forward (720p ncu)":
                     per_fwd_dram_mb if res == "720p" else None,
@@ -348,11 +386,10 @@ def sheet_efficientsam3() -> pd.DataFrame | None:
     d = _load("efficientsam3_summary.json")
     if not d:
         return None
-    bw_ratio = (1792.0 * 0.85) / (134.4 * 0.80)   # 5090 eff / NPU Mid eff ≈ 14.17
     rows = []
     for res, r in d.get("by_resolution", {}).items():
         ms_5090 = r["per_frame_ms_5090"]["p50"]
-        ms_mid = ms_5090 * bw_ratio
+        fps_stock, fps_l6_12, fps_l6_14 = _mid_fps_triplet(ms_5090)
         rows.append({
             "Resolution":        res,
             "Clip":              r["clip"],
@@ -361,8 +398,9 @@ def sheet_efficientsam3() -> pd.DataFrame | None:
             "5090 mean ms":      round(r["per_frame_ms_5090"]["mean"], 1),
             "5090 p50 ms":       round(r["per_frame_ms_5090"]["p50"], 1),
             "5090 p95 ms":       round(r["per_frame_ms_5090"]["p95"], 1),
-            "NPU Mid ms (BW-scaled)": round(ms_mid, 0),
-            "NPU Mid FPS (proj)": round(1000.0 / ms_mid, 2) if ms_mid > 0 else 0.0,
+            "NPU Mid FPS · stock":      round(fps_stock, 2),
+            "NPU Mid FPS · +LPDDR6-12": round(fps_l6_12, 2),
+            "NPU Mid FPS · +LPDDR6-14": round(fps_l6_14, 2),
             "Mean IoU vs SAM 3": round(r["iou_vs_sam3"]["mean"], 3),
             "Median IoU vs SAM 3": round(r["iou_vs_sam3"]["median"], 3),
             "IoU sample count":  r["iou_vs_sam3"]["n"],
