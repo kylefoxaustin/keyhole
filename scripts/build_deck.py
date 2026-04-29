@@ -248,8 +248,10 @@ PROJECT_FOOTER = "Keyhole — Edge AI Video Intelligence"
 #
 # Tier silicon (post-2026-04-29 NPU High redirect — see sizer commit 239aa7e):
 #   Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s).
-#   High differentiates on COMPUTE (1.375× TOPS) + CAPACITY (1.33× DRAM,
-#   higher compute_efficiency, 1.6× TDP), NOT memory bandwidth.
+#   High differentiates on COMPUTE (multi-precision FP-capable silicon — 200 BF16/FP16,
+#   2× INT8 doubling on same MAC = 400 INT8, 400 FP8) + CAPACITY (1.33× DRAM,
+#   higher compute_efficiency, 1.6× TDP), NOT memory bandwidth. Mid is INT8-only;
+#   High is the inflection point where FP capability shows up.
 #
 # A symmetric memory-upgrade overlay is available on either tier:
 #   stock LPDDR5X 8.4   → 134.4 / 94.1  GB/s peak/effective
@@ -960,7 +962,7 @@ def slide_exec_summary(prs: Presentation):
                          ["NPU Mid",  "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
                           "38 tok/s",  "Live multi-stream + occasional LLM"],
                          ["NPU High", "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
-                          "38 tok/s",  "Same BW class as Mid; +1.375× TOPS, +33% DRAM, +60% TDP for compute-bound jobs"],
+                          "38 tok/s",  "Same BW class as Mid; FP-capable (200 BF16, 2× INT8 = 400, FP8 too) + 1.33× DRAM + 1.6× TDP"],
                          ["+ LPDDR5T-11.2 overlay ‡", "(opt-in upgrade)",   "~48 FPS",  "~35 FPS each",
                           "50 tok/s ‡", "Recovers vendor's 11.2 GT/s reading via memory overlay"],
                      ],
@@ -3473,13 +3475,13 @@ def slide_npu_tier_specs(prs: Presentation):
         ["🟡 Mid (+LPDDR6-14)",  "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
          "200 INT8 (no FP)",     "24 GB", "25 W", "63.08 tok/s",   "0.351 s †"],
         ["🟡 NPU High",          "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "37.85 tok/s",   "0.176 s"],
+         "200 BF16 / 400 INT8 / 400 FP8",     "32 GB", "40 W", "37.85 tok/s",   "0.176 s"],
         ["🟡 High (+LPDDR5T-11.2)","128-bit LPDDR5T @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "50.47 tok/s",   "0.176 s †"],
+         "200 BF16 / 400 INT8 / 400 FP8",     "32 GB", "40 W", "50.47 tok/s",   "0.176 s †"],
         ["🟡 High (+LPDDR6-12)", "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "54.07 tok/s",   "0.176 s †"],
+         "200 BF16 / 400 INT8 / 400 FP8",     "32 GB", "40 W", "54.07 tok/s",   "0.176 s †"],
         ["🟡 High (+LPDDR6-14)", "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "63.08 tok/s",   "0.176 s †"],
+         "200 BF16 / 400 INT8 / 400 FP8",     "32 GB", "40 W", "63.08 tok/s",   "0.176 s †"],
         ["🟢 RTX 5090 (measurement ref)", "512-bit GDDR7 @ 28 GT/s", "1792 GB/s", "1523.2 GB/s (85%)",
          "~105 BF16 / ~210 FP8 / INT8 DP4A",  "32 GB", "575 W", "250 tok/s",    "0.165 s"],
     ]
@@ -3498,7 +3500,7 @@ def slide_npu_tier_specs(prs: Presentation):
          C.TEXT_BRIGHT),
         ("Badge legend: 🟢 measured / measured_anchor  •  🟡 same_class (BW-scaled within memory class)  •  🟠 cross_class (first-principles projection, no in-class anchor). Memory-upgrade overlays (LPDDR5T-11.2 / LPDDR6-12 / LPDDR6-14) are always 🟡 since they BW-scale within their tier's memory class. † TTFT held = prefill is compute-bound, doesn't move on memory upgrade.",
          C.ACCENT_INDIGO),
-        ("• Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s). NPU High differentiates on COMPUTE (1.375× TOPS, faster TTFT) + CAPACITY (1.33× DRAM) + TDP. Same upgrade ladder available on either tier.",
+        ("• Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s). NPU High differentiates on COMPUTE — FP-capable silicon (200 BF16/FP16, 400 INT8 via 2× MAC doubling, 400 FP8) vs Mid's INT8-only 200 TOPS — plus CAPACITY (1.33× DRAM) + TDP (1.6×). High is the inflection point where FP capability shows up; the same silicon naturally delivers 2× INT8 throughput on dense models. Both tiers share the upgrade ladder.",
          C.ACCENT_GREEN),
         ("• Anchors today: NPU i.MX 95 yolov8n-seg INT8 = 32 ms / 31.25 FPS (vision); NPU Mid Skippy MoE Q4 = 37.85 tok/s decode / 351 ms TTFT @ 1K (LLM, INT8-native — Mid silicon is 200 TOPS INT8 only, no FP). RTX 5090 is every other projection's reference measurement. Low-LP5-64bit LLM 29.27 tok/s = vendor-published Qwen3-30B-A3B Q4_K_M.",
          C.TEXT_DIM),
