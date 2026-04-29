@@ -2266,7 +2266,7 @@ def slide_llm_bakeoff(prs: Presentation):
         ("• MoE wins on bandwidth. Cross-reference from a Kyle-merged production Q4_K_M of the same model on the same 5090 host: 155 tok/s sustained / 192 peak (Prometheus, prod traffic) — within 3% of our synthetic 159 tok/s RAG decode. Synthetic numbers generalize.", C.ACCENT_GREEN, True),
         ("• MoE 30B/3B-active beats dense Qwen 2.5 14B Q4_K_M on the same 5090 by ~25-40% decode (155 vs 85-140 tok/s) despite 2× total params — the 3B active footprint is what BW sees per token.", C.ACCENT_AMBER, True),
         ("• Vendor NPU actuals beat our BW-only edge projection by ~2.3×. Purpose-built LLM silicon (memory controllers, expert routing, tiling) > llama.cpp on a desktop GPU.", C.ACCENT_INDIGO, True),
-        ("• NPU Mid: 5.3 s for 200-tok answer / 57 s for RAG 8K+2K. NPU High at stock has same BW class (= same decode rate) but ~50% faster TTFT due to compute headroom — wins on short prompts, ties on long generations. + LPDDR5T-11.2 overlay recovers the old 50 tok/s reading on either tier. Q4_K_M is the recommended quant.", C.TEXT_DIM),
+        ("• NPU Mid 🟢: 5.3 s for 200-tok answer / 57 s for RAG 8K+2K (anchor at 100% NPU_share idle-best-case; typical-deployment 75% → 7.0 s / 76 s). NPU High at stock has same BW class (= same decode rate) but ~50% faster TTFT due to compute headroom — wins on short prompts, ties on long generations. + LPDDR5T-11.2 overlay recovers the old 50 tok/s reading on either tier. Q4_K_M is the recommended quant.", C.TEXT_DIM),
     ], font_size=9)
 
 
@@ -2845,7 +2845,7 @@ def slide_vit_alternatives(prs: Presentation):
          C.TEXT_BRIGHT),
         ("⚡ LPDDR6 @ 14 GT/s flips the camera-ViT story: BW-bound ceiling jumps from 33-46 FPS → 55-77 FPS at NPU Mid. "
          "Combined with TRT FP8 (closes ~3×), DETR ResNet-50 reaches ~28 FPS — within striking distance of 30 FPS real-time. "
-         "RT-DETR-L still needs more (heavier compute kernel). Net: LPDDR6-14 is what it'd take to make camera ViTs viable on edge — that's a memory-tier story, not a model story.",
+         "All numbers are 🟠 cross-class projections (no NPU anchor for ViT-class workloads) at 100% NPU_share idle-best-case — multiply by 0.75 for typical-deployment NPU_share.",
          C.ACCENT_INDIGO),
         ("• OWLv2 stays the agentic winner under any memory tier — duty-cycle math is so generous (240 ms × 1/min = 0.4% NPU) that BW upgrade is gravy.",
          C.TEXT_DIM),
@@ -3275,8 +3275,9 @@ def slide_ncu_workload_table(prs: Presentation):
 
     add_bullet_box(slide, CONTENT_LEFT, 6.45, CONTENT_W, 0.85, [
         ("Reading the ceiling columns", C.ACCENT_BLUE, True),
-        ("• BW-bound FPS is the best case — compute may cut it further. LPDDR6-12 / LPDDR6-14 columns scale stock by 1.43× / 1.67× (linear in effective BW). "
-         "Recommended TRT FP8 has so much headroom that LPDDR6 is gravy; the SAM 3 lineage is so heavy that even +LPDDR6-14 leaves them sub-2 FPS.",
+        ("• BW-bound FPS = effective_BW ÷ DRAM/forward, at 100% NPU_share idle-best-case. LPDDR6-12 / LPDDR6-14 scale stock by 1.43× / 1.67×. "
+         "Typical-deployment NPU_share = 75% → multiply by 0.75 (Mid stock realistic ceiling = 70.6 GB/s instead of 94.08). "
+         "Recommended TRT FP8 has so much headroom even at 75% × stock that LPDDR6 + idle-share are gravy; SAM 3 lineage stays sub-2 FPS even at +LPDDR6-14 × 100%.",
          C.ACCENT_GREEN),
         ("• Source: data/output/ncu/sizer_bundle.json (vendored to keyhole-sizer/sizer/). Regenerate with "
          "scripts/export_ncu_for_sizer.py after any ncu re-run.", C.TEXT_DIM),
@@ -3448,33 +3449,38 @@ def slide_npu_tier_specs(prs: Presentation):
     )
 
     # Row format mirrors the sizer's describe_hw output — single source of truth.
-    # "†" marks rows anchored to real measured silicon (not BW-projected).
+    # Leading badge encodes data pedigree (Phase 2 4-state spec, mirrors sizer):
+    #   🟢 measured / measured_anchor (data point or anchor exists for this cell)
+    #   🟡 same_class_anchor (BW-scaled within the same memory class as a measured anchor)
+    #   🟠 cross_class (no anchor in this memory class — first-principles two-floor projection)
+    # All decode/TTFT numbers below are at 100% NPU_share (idle-best-case, matching anchor conditions).
+    # Typical-deployment is 75% NPU_share — see bullet section.
     headers = ["Tier", "Memory bus", "BW theoretical", "BW effective",
                "Tensor TOPS", "DRAM", "TDP", "LLM Q4 decode", "LLM TTFT @ 1K"]
     rows = [
-        ["NPU i.MX 95 (32-bit LP5) †", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s (70%)",
+        ["🟢 NPU i.MX 95 (32-bit LP5)", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s (70%)",
          "2 INT8 (Neutron NPU)",              "16 GB", "10 W", "— (not evaluated)", "— (not evaluated)"],
-        ["NPU Low-LP5-64bit", "64-bit LPDDR5 @ 6.4 GT/s", "51.2 GB/s", "35.84 GB/s (70%)",
+        ["🟢 NPU Low-LP5-64bit", "64-bit LPDDR5 @ 6.4 GT/s", "51.2 GB/s", "35.84 GB/s (70%)",
          "2 INT8 (dense)",                    "16 GB", "10 W", "29.27 tok/s",   "1.67 s"],
-        ["NPU Low-LP5X",      "64-bit LPDDR5X @ 8.4 GT/s","67.2 GB/s", "47.04 GB/s (70%)",
+        ["🟠 NPU Low-LP5X",      "64-bit LPDDR5X @ 8.4 GT/s","67.2 GB/s", "47.04 GB/s (70%)",
          "50 BF16 / 100 INT8 / 100 FP8",      "16 GB", "10 W", "— (projected)", "— (projected)"],
-        ["NPU Mid",           "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
+        ["🟢 NPU Mid",           "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
          "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "37.85 tok/s",   "0.351 s"],
-        ["NPU Mid (+LPDDR5T-11.2) ‡","128-bit LPDDR5T @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
-         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "50.47 tok/s ‡", "0.351 s †"],
-        ["NPU Mid (+LPDDR6-12) ‡",  "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
-         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "54.07 tok/s ‡", "0.351 s †"],
-        ["NPU Mid (+LPDDR6-14) ‡",  "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
-         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "63.08 tok/s ‡", "0.351 s †"],
-        ["NPU High",          "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
+        ["🟡 Mid (+LPDDR5T-11.2)","128-bit LPDDR5T @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
+         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "50.47 tok/s",   "0.351 s †"],
+        ["🟡 Mid (+LPDDR6-12)",  "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
+         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "54.07 tok/s",   "0.351 s †"],
+        ["🟡 Mid (+LPDDR6-14)",  "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
+         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "63.08 tok/s",   "0.351 s †"],
+        ["🟡 NPU High",          "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
          "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "37.85 tok/s",   "0.176 s"],
-        ["NPU High (+LPDDR5T-11.2) ‡","128-bit LPDDR5T @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "50.47 tok/s ‡", "0.176 s †"],
-        ["NPU High (+LPDDR6-12) ‡", "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "54.07 tok/s ‡", "0.176 s †"],
-        ["NPU High (+LPDDR6-14) ‡", "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "63.08 tok/s ‡", "0.176 s †"],
-        ["RTX 5090 (reference, measured) †", "512-bit GDDR7 @ 28 GT/s", "1792 GB/s", "1523.2 GB/s (85%)",
+        ["🟡 High (+LPDDR5T-11.2)","128-bit LPDDR5T @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "50.47 tok/s",   "0.176 s †"],
+        ["🟡 High (+LPDDR6-12)", "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "54.07 tok/s",   "0.176 s †"],
+        ["🟡 High (+LPDDR6-14)", "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "63.08 tok/s",   "0.176 s †"],
+        ["🟢 RTX 5090 (measurement ref)", "512-bit GDDR7 @ 28 GT/s", "1792 GB/s", "1523.2 GB/s (85%)",
          "~105 BF16 / ~210 FP8 / INT8 DP4A",  "32 GB", "575 W", "250 tok/s",    "0.165 s"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
@@ -3484,14 +3490,17 @@ def slide_npu_tier_specs(prs: Presentation):
 
     # Context bullets + assumptions callout
     add_bullet_box(slide, CONTENT_LEFT, 5.3, CONTENT_W, 1.75, [
-        ("Memory-upgrade overlay (‡) — same ladder available on either Mid or High", C.ACCENT_BLUE, True),
-        ("• Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s, 134.4 / 94.1 GB/s). NPU High differentiates on COMPUTE (1.375× TOPS) + CAPACITY (1.33× DRAM) + TDP, not memory bandwidth.",
+        ("Three-factor BW decomposition + 4-state badge legend", C.ACCENT_BLUE, True),
+        ("• effective_NPU_BW = peak_DRAM_BW × NPU_share × kernel_util_factor.   "
+         "All decode tok/s + edge FPS in this deck are shown at NPU_share = 100% (idle-best-case, matching anchor conditions). "
+         "Typical-deployment NPU_share = 75% (display + camera + audio sharing the SoC bus); multiply by 0.75 for realistic numbers. "
+         "Sizer surfaces this as a user selector — toggling moves only BW-bound cells, demonstrating regime visually.",
          C.TEXT_BRIGHT),
-        ("• Symmetric upgrade ladder: + LPDDR5T-11.2 → 179.2 / 125.4 GB/s (recovers what was previously NPU-High-stock)  •  + LPDDR6-12 → 192.0 / 134.4  •  + LPDDR6-14 → 224.0 / 156.8. TOPS / DRAM / TDP unchanged on swap; LLM decode BW-scaled (BW-bound); TTFT held (compute-bound). 70% BW efficiency uniform.",
+        ("Badge legend: 🟢 measured / measured_anchor  •  🟡 same_class (BW-scaled within memory class)  •  🟠 cross_class (first-principles projection, no in-class anchor). Memory-upgrade overlays (LPDDR5T-11.2 / LPDDR6-12 / LPDDR6-14) are always 🟡 since they BW-scale within their tier's memory class. † TTFT held = prefill is compute-bound, doesn't move on memory upgrade.",
          C.ACCENT_INDIGO),
-        ("† Measured-silicon anchors. NPU i.MX 95 (NXP eIQ Neutron NPU): yolov8n-seg INT8 @ 1080p = 32 ms / 31.25 FPS measured — surfaced verbatim, no BW-only projection synthesized for the same memory class. RTX 5090 is every other projection's measurement reference.",
+        ("• Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s). NPU High differentiates on COMPUTE (1.375× TOPS, faster TTFT) + CAPACITY (1.33× DRAM) + TDP. Same upgrade ladder available on either tier.",
          C.ACCENT_GREEN),
-        ("• Low-LP5-64bit is INT8-only Neutron-class silicon on a 64-bit bus. Low-LP5X / Mid / High have native BF16/FP8 tensor cores. LLM decode + TTFT are vendor-published Qwen3-30B-A3B Q4_K_M measurements.",
+        ("• Anchors today: NPU i.MX 95 yolov8n-seg INT8 = 32 ms / 31.25 FPS (vision); NPU Mid Skippy MoE Q4 = 37.85 tok/s decode / 351 ms TTFT @ 1K (LLM). RTX 5090 is every other projection's reference measurement. Low-LP5-64bit LLM 29.27 tok/s = vendor-published Qwen3-30B-A3B Q4_K_M.",
          C.TEXT_DIM),
     ], font_size=8)
 
