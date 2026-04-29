@@ -3452,9 +3452,7 @@ def slide_npu_tier_specs(prs: Presentation):
     headers = ["Tier", "Memory bus", "BW theoretical", "BW effective",
                "Tensor TOPS", "DRAM", "TDP", "LLM Q4 decode", "LLM TTFT @ 1K"]
     rows = [
-        ["NPU Low-LP5-32bit", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s (70%)",
-         "2 INT8 (dense)",                    "16 GB", "10 W", "— (projected)", "— (projected)"],
-        ["NPU i.MX 95 (ground truth) †", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s (70%)",
+        ["NPU i.MX 95 (32-bit LP5) †", "32-bit LPDDR5 @ 6.4 GT/s", "25.6 GB/s", "17.92 GB/s (70%)",
          "2 INT8 (Neutron NPU)",              "16 GB", "10 W", "— (not evaluated)", "— (not evaluated)"],
         ["NPU Low-LP5-64bit", "64-bit LPDDR5 @ 6.4 GT/s", "51.2 GB/s", "35.84 GB/s (70%)",
          "2 INT8 (dense)",                    "16 GB", "10 W", "29.27 tok/s",   "1.67 s"],
@@ -3481,7 +3479,7 @@ def slide_npu_tier_specs(prs: Presentation):
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
                      Inches(CONTENT_W), Inches(3.7), headers, rows,
-                     highlight_rows=[5],   # NPU Mid — recommended target (upgrade rows insert below it; index unchanged)
+                     highlight_rows=[4],   # NPU Mid — recommended target (row index shifted -1 after Low-LP5-32bit synthetic-tier collapse into i.MX 95)
                      font_size=8, header_font_size=10)
 
     # Context bullets + assumptions callout
@@ -3491,9 +3489,9 @@ def slide_npu_tier_specs(prs: Presentation):
          C.TEXT_BRIGHT),
         ("• Symmetric upgrade ladder: + LPDDR5T-11.2 → 179.2 / 125.4 GB/s (recovers what was previously NPU-High-stock)  •  + LPDDR6-12 → 192.0 / 134.4  •  + LPDDR6-14 → 224.0 / 156.8. TOPS / DRAM / TDP unchanged on swap; LLM decode BW-scaled (BW-bound); TTFT held (compute-bound). 70% BW efficiency uniform.",
          C.ACCENT_INDIGO),
-        ("† Measured-silicon anchors. NPU i.MX 95 yolov8n-seg INT8 @ 1080p = 32 ms (29.2 FPS) measured — vs Low-LP5-32bit BW projection 18.3 FPS — the 1.6× delta is honest evidence pure-BW misses compute+overhead floor on weak silicon (Phase 2 compute-clamp anchor). RTX 5090 is every projection's measurement reference.",
+        ("† Measured-silicon anchors. NPU i.MX 95 (NXP eIQ Neutron NPU): yolov8n-seg INT8 @ 1080p = 32 ms / 31.25 FPS measured — surfaced verbatim, no BW-only projection synthesized for the same memory class. RTX 5090 is every other projection's measurement reference.",
          C.ACCENT_GREEN),
-        ("• Low-LP5-32bit and -64bit are the SAME silicon class (INT8-only, Neutron-class) on different bus widths. Low-LP5X / Mid / High have native BF16/FP8 tensor cores. LLM decode + TTFT are vendor-published Qwen3-30B-A3B Q4_K_M measurements.",
+        ("• Low-LP5-64bit is INT8-only Neutron-class silicon on a 64-bit bus. Low-LP5X / Mid / High have native BF16/FP8 tensor cores. LLM decode + TTFT are vendor-published Qwen3-30B-A3B Q4_K_M measurements.",
          C.TEXT_DIM),
     ], font_size=8)
 
