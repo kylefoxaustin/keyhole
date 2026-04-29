@@ -243,13 +243,19 @@ PROJECT_FOOTER = "Keyhole — Edge AI Video Intelligence"
 # ============================================================
 # NPU memory + bandwidth schema
 # ============================================================
-# Mirrors keyhole-sizer/sizer/npu_model.py LPDDR6_UPGRADE_OPTIONS so deck
+# Mirrors keyhole-sizer/sizer/npu_model.py MEMORY_UPGRADE_OPTIONS so deck
 # projections track the sizer's memory-upgrade what-ifs 1:1.
 #
-# Stock memory per tier comes from the silicon-tier ground truth (i.MX 95
-# = LP4-32, NPU Mid = 128-bit LPDDR5X-8.4, NPU High = 128-bit LPDDR5X-11.2).
-# LPDDR6 entries are forward-looking what-ifs at 12 + 14 GT/s on the same
-# 128-bit bus (LPDDR6 max is currently spec'd at ~14.4 GT/s).
+# Tier silicon (post-2026-04-29 NPU High redirect — see sizer commit 239aa7e):
+#   Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s).
+#   High differentiates on COMPUTE (1.375× TOPS) + CAPACITY (1.33× DRAM,
+#   higher compute_efficiency, 1.6× TDP), NOT memory bandwidth.
+#
+# A symmetric memory-upgrade overlay is available on either tier:
+#   stock LPDDR5X 8.4   → 134.4 / 94.1  GB/s peak/effective
+#   + LPDDR5T-11.2      → 179.2 / 125.4 GB/s   (Samsung's >10 GT/s LPDDR5-class extension; recovers what was previously NPU-High-stock)
+#   + LPDDR6-12         → 192.0 / 134.4 GB/s
+#   + LPDDR6-14         → 224.0 / 156.8 GB/s
 #
 # Held bandwidth_efficiency at 70% uniformly across all memory types per
 # sizer's design — clean comparison; LPDDR6's improved subchannel arch
@@ -259,12 +265,15 @@ GPU_5090_PEAK_GBS = 1792.0
 GPU_5090_EFFICIENCY = 0.85
 NPU_BW_EFFICIENCY = 0.70
 
-# (tier, mem_label) → peak GB/s
+# (tier, mem_label) → peak GB/s. Both Mid and High carry the same set of
+# (stock + upgrade) memory options — High is BW-equal to Mid at stock.
 MEMORY_BW_GBS = {
-    ("NPU Mid",  "LPDDR5X-8.4"):  134.4,   # stock
+    ("NPU Mid",  "LPDDR5X-8.4"):  134.4,   # stock for both Mid + High
+    ("NPU Mid",  "LPDDR5T-11.2"): 179.2,
     ("NPU Mid",  "LPDDR6-12"):    192.0,
     ("NPU Mid",  "LPDDR6-14"):    224.0,
-    ("NPU High", "LPDDR5X-11.2"): 179.2,   # stock
+    ("NPU High", "LPDDR5X-8.4"):  134.4,   # stock — same memory class as Mid (post-redirect)
+    ("NPU High", "LPDDR5T-11.2"): 179.2,
     ("NPU High", "LPDDR6-12"):    192.0,
     ("NPU High", "LPDDR6-14"):    224.0,
 }
@@ -273,14 +282,16 @@ MEMORY_BW_GBS = {
 # explicitly compare across memory options.
 TIER_STOCK_MEM = {
     "NPU Mid":  "LPDDR5X-8.4",
-    "NPU High": "LPDDR5X-11.2",
+    "NPU High": "LPDDR5X-8.4",   # post-redirect: High no longer has 11.2 baked in
 }
 
-# Memory upgrade options surfaced in 3-column projection tables.
+# Memory upgrade options surfaced as separate rows / columns. Sorted by
+# ascending peak BW so the ladder reads stock → 5T → 6-12 → 6-14.
 # (mem_label, short_header) — short_header is what fits in a deck table cell.
-LPDDR6_UPGRADE_OPTIONS = [
-    ("LPDDR6-12", "+LPDDR6-12"),
-    ("LPDDR6-14", "+LPDDR6-14"),
+MEMORY_UPGRADE_OPTIONS = [
+    ("LPDDR5T-11.2", "+LPDDR5T-11.2"),
+    ("LPDDR6-12",    "+LPDDR6-12"),
+    ("LPDDR6-14",    "+LPDDR6-14"),
 ]
 
 
@@ -948,17 +959,20 @@ def slide_exec_summary(prs: Presentation):
                           "29 tok/s",  "Dense INT8-only silicon (NXP Neutron class)"],
                          ["NPU Mid",  "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
                           "38 tok/s",  "Live multi-stream + occasional LLM"],
-                         ["NPU High", "high-bin LPDDR5X",            "~48 FPS",  "~35 FPS each",
-                          "50 tok/s",  "Live vision + sustained LLM"],
+                         ["NPU High", "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
+                          "38 tok/s",  "Same BW class as Mid; +1.375× TOPS, +33% DRAM, +60% TDP for compute-bound jobs"],
+                         ["+ LPDDR5T-11.2 overlay ‡", "(opt-in upgrade)",   "~48 FPS",  "~35 FPS each",
+                          "50 tok/s ‡", "Recovers vendor's 11.2 GT/s reading via memory overlay"],
                      ],
                      highlight_rows=[2],   # NPU Mid — the recommended target
                      font_size=8, header_font_size=9)
     # Force compact row heights so the table stays inside the 7.5" slide.
     # Without this LibreOffice / PowerPoint autogrow overshoots y=7.5 and
     # clips the last row — visible on the template-merged deck because
-    # the white template bg makes the overflow obvious. 4 rows × 0.20"
-    # = 0.80" total height at 8pt font. The font size bump-down is only
-    # on this exec-summary overview table — it trades a bit of per-cell
+    # the white template bg makes the overflow obvious. 5 rows × 0.20"
+    # = 1.00" total height at 8pt font (header + Low + Mid + High +
+    # +LPDDR5T overlay). The font size bump-down is only on this
+    # exec-summary overview table — it trades a bit of per-cell
     # readability for fitting cleanly inside the 7.5" slide when every
     # earlier band is already committed.
     for row in tier_table_shape.table.rows:
@@ -2252,7 +2266,7 @@ def slide_llm_bakeoff(prs: Presentation):
         ("• MoE wins on bandwidth. Cross-reference from a Kyle-merged production Q4_K_M of the same model on the same 5090 host: 155 tok/s sustained / 192 peak (Prometheus, prod traffic) — within 3% of our synthetic 159 tok/s RAG decode. Synthetic numbers generalize.", C.ACCENT_GREEN, True),
         ("• MoE 30B/3B-active beats dense Qwen 2.5 14B Q4_K_M on the same 5090 by ~25-40% decode (155 vs 85-140 tok/s) despite 2× total params — the 3B active footprint is what BW sees per token.", C.ACCENT_AMBER, True),
         ("• Vendor NPU actuals beat our BW-only edge projection by ~2.3×. Purpose-built LLM silicon (memory controllers, expert routing, tiling) > llama.cpp on a desktop GPU.", C.ACCENT_INDIGO, True),
-        ("• NPU Mid: 5.3 s for 200-tok answer / 57 s for RAG 8K+2K. NPU High ~25% better. Q4_K_M is the recommended quant.", C.TEXT_DIM),
+        ("• NPU Mid: 5.3 s for 200-tok answer / 57 s for RAG 8K+2K. NPU High at stock has same BW class (= same decode rate) but ~50% faster TTFT due to compute headroom — wins on short prompts, ties on long generations. + LPDDR5T-11.2 overlay recovers the old 50 tok/s reading on either tier. Q4_K_M is the recommended quant.", C.TEXT_DIM),
     ], font_size=9)
 
 
@@ -3294,9 +3308,9 @@ def slide_optimization_roadmap(prs: Presentation):
         ["CLIP visual FP8 via TensorRT 10.16",     "~50% on CLIP (full model)", "66.3 FPS",  "MEASURED — top-1 agree 0.964"],
         ["Hybrid V2 + CLIP every-frame (all TRT)", "stacked, no debounce",       "24 FPS",    "PROJECTED — real-time, simplest"],
         ["Hybrid V2 + 1 Hz CLIP (all TRT)",        "stacked, debounced",         "36 FPS",    "PROJECTED — at YOLO ceiling"],
-        ["LLM: Qwen3-30B-A3B Q4_K_M (MoE) — NPU Mid",  "3B active / 30B total",     "37.85 tok/s","VENDOR actual (128-bit LPDDR5X @ 8.4 GT/s)"],
+        ["LLM: Qwen3-30B-A3B Q4_K_M (MoE) — NPU Mid (stock)",  "3B active / 30B total", "37.85 tok/s","VENDOR actual (128-bit LPDDR5X @ 8.4 GT/s)"],
         ["LLM: Qwen3-30B-A3B Q4_K_M — NPU Low-LP5",    "64-bit LPDDR5 @ 6.4 GT/s",  "29.27 tok/s","VENDOR actual — lower-bin bus"],
-        ["LLM: Qwen3-30B-A3B Q4_K_M — NPU High",       "higher-bin LPDDR5X",        "50.46 tok/s","VENDOR actual — headroom for concurrent load"],
+        ["LLM: Qwen3-30B-A3B Q4_K_M — Mid/High + LPDDR5T-11.2 ‡","BW-projected via memory overlay","50.47 tok/s ‡","Recovers vendor's 11.2 GT/s reading via overlay (same silicon, opt-in BW upgrade)"],
         ["Vision + LLM concurrent (short query)",      "duty-cycle sharing NPU Mid","~30 FPS",    "PROJECTED — 10 queries/min, 200 tok"],
         ["4-stream concurrent (YOLO batch=4)",      "batching amortizes overhead","25.9 FPS/stream","MEASURED batching, edge-projected"],
         ["8-stream concurrent (YOLO batch=8)",      "further batching gain",      "15.1 FPS/stream","MEASURED batching, edge-projected"],
@@ -3312,7 +3326,7 @@ def slide_optimization_roadmap(prs: Presentation):
         ("4-5. Hybrid V2 CLIP torchao FP8/INT8 (48/72) → 4.9 FPS; 1 Hz keyframe debounce → 16 FPS (93% of YOLO ceiling)",),
         ("6-7. YOLO-seg Conv: torchao 1×1 swap INT8 → 23.8 FPS (partial); TRT 10.16 full Conv-FP8 → 36.8 FPS (+98%, recall 1.00)",),
         ("8. CLIP visual FP8 via TRT → 29.8 → 15.1 ms edge (+120% CLIP FPS); full TRT stack projects 36 FPS recommended",),
-        ("9. LLM — Qwen3-30B-A3B MoE (Q4/Q5/Q8): NPU Low/Mid/High vendor actuals: 29 / 38 / 50 tok/s Q4_K_M; duty-cycle chart quantifies vision+LLM coexistence",),
+        ("9. LLM — Qwen3-30B-A3B MoE (Q4/Q5/Q8): NPU Low / Mid+High stock: 29 / 38 tok/s Q4_K_M (Mid+High share the same LPDDR5X-8.4 stock memory class); + LPDDR5T-11.2 overlay → 50 tok/s; duty-cycle chart quantifies vision+LLM coexistence",),
         ("10. Multi-stream concurrency — TRT YOLO dynamic-batch: 4 streams @ 26 FPS each (not 9), 8 @ 15, batching amortizes kernel overhead",),
         ("11. [PARTIAL] SAM 3 Lite watch — community shipped EfficientSAM3 ES-EV-S Apr 2026; benched at 2.59 FPS @ 720p NPU Mid (6.5× over SAM 3, still 13× behind our recommended stack). Meta SAM 3.1 / distillations still data-center-only.",),
     ], font_size=9)
@@ -3448,37 +3462,40 @@ def slide_npu_tier_specs(prs: Presentation):
          "50 BF16 / 100 INT8 / 100 FP8",      "16 GB", "10 W", "— (projected)", "— (projected)"],
         ["NPU Mid",           "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
          "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "37.85 tok/s",   "0.351 s"],
+        ["NPU Mid (+LPDDR5T-11.2) ‡","128-bit LPDDR5T @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
+         "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "50.47 tok/s ‡", "0.351 s †"],
         ["NPU Mid (+LPDDR6-12) ‡",  "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
          "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "54.07 tok/s ‡", "0.351 s †"],
         ["NPU Mid (+LPDDR6-14) ‡",  "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
          "200 BF16 / 400 INT8 / 400 FP8",     "24 GB", "25 W", "63.08 tok/s ‡", "0.351 s †"],
-        ["NPU High",          "128-bit LPDDR5X @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "50.46 tok/s",   "0.176 s"],
+        ["NPU High",          "128-bit LPDDR5X @ 8.4 GT/s","134.4 GB/s","94.08 GB/s (70%)",
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "37.85 tok/s",   "0.176 s"],
+        ["NPU High (+LPDDR5T-11.2) ‡","128-bit LPDDR5T @ 11.2 GT/s","179.2 GB/s","125.44 GB/s (70%)",
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "50.47 tok/s ‡", "0.176 s †"],
         ["NPU High (+LPDDR6-12) ‡", "128-bit LPDDR6 @ 12 GT/s",  "192.0 GB/s","134.40 GB/s (70%)",
-         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "54.06 tok/s ‡", "0.176 s †"],
+         "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "54.07 tok/s ‡", "0.176 s †"],
         ["NPU High (+LPDDR6-14) ‡", "128-bit LPDDR6 @ 14 GT/s",  "224.0 GB/s","156.80 GB/s (70%)",
          "275 BF16 / 550 INT8 / 550 FP8",     "32 GB", "40 W", "63.08 tok/s ‡", "0.176 s †"],
         ["RTX 5090 (reference, measured) †", "512-bit GDDR7 @ 28 GT/s", "1792 GB/s", "1523.2 GB/s (85%)",
          "~105 BF16 / ~210 FP8 / INT8 DP4A",  "32 GB", "575 W", "250 tok/s",    "0.165 s"],
     ]
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP),
-                     Inches(CONTENT_W), Inches(3.4), headers, rows,
-                     highlight_rows=[5],   # NPU Mid — recommended target (LPDDR6 rows insert below it; index unchanged)
+                     Inches(CONTENT_W), Inches(3.7), headers, rows,
+                     highlight_rows=[5],   # NPU Mid — recommended target (upgrade rows insert below it; index unchanged)
                      font_size=8, header_font_size=10)
 
     # Context bullets + assumptions callout
-    add_bullet_box(slide, CONTENT_LEFT, 5.0, CONTENT_W, 2.0, [
-        ("How edge FPS / tok/s numbers in this deck are derived", C.ACCENT_BLUE, True),
-        ("• Edge ms projects via bandwidth ratio: edge_ms = 5090_ms × (5090_eff_bw / edge_eff_bw). 70% BW efficiency uniform across all NPU rows (5090 = 85%, datacenter-class). "
-         "No TOPS-based compute ceiling in the current math — every NPU row is treated as bandwidth-bound.",
+    add_bullet_box(slide, CONTENT_LEFT, 5.3, CONTENT_W, 1.75, [
+        ("Memory-upgrade overlay (‡) — same ladder available on either Mid or High", C.ACCENT_BLUE, True),
+        ("• Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s, 134.4 / 94.1 GB/s). NPU High differentiates on COMPUTE (1.375× TOPS) + CAPACITY (1.33× DRAM) + TDP, not memory bandwidth.",
          C.TEXT_BRIGHT),
-        ("‡ Memory-upgrade what-if (LPDDR6 @ 12 / 14 GT/s on the same 128-bit bus) — TOPS / DRAM / TDP unchanged from stock; LLM decode BW-scaled from stock measurement; TTFT held at stock value (compute-bound, not BW-improved).",
+        ("• Symmetric upgrade ladder: + LPDDR5T-11.2 → 179.2 / 125.4 GB/s (recovers what was previously NPU-High-stock)  •  + LPDDR6-12 → 192.0 / 134.4  •  + LPDDR6-14 → 224.0 / 156.8. TOPS / DRAM / TDP unchanged on swap; LLM decode BW-scaled (BW-bound); TTFT held (compute-bound). 70% BW efficiency uniform.",
          C.ACCENT_INDIGO),
         ("† Measured-silicon anchors. NPU i.MX 95 yolov8n-seg INT8 @ 1080p = 32 ms (29.2 FPS) measured — vs Low-LP5-32bit BW projection 18.3 FPS — the 1.6× delta is honest evidence pure-BW misses compute+overhead floor on weak silicon (Phase 2 compute-clamp anchor). RTX 5090 is every projection's measurement reference.",
          C.ACCENT_GREEN),
-        ("• Low-LP5-32bit and -64bit are the SAME silicon class (INT8-only, Neutron-class) on different bus widths. Low-LP5X through High have native BF16/FP8 tensor cores. LLM decode + TTFT are vendor-published measurements on Qwen3-30B-A3B Q4_K_M.",
+        ("• Low-LP5-32bit and -64bit are the SAME silicon class (INT8-only, Neutron-class) on different bus widths. Low-LP5X / Mid / High have native BF16/FP8 tensor cores. LLM decode + TTFT are vendor-published Qwen3-30B-A3B Q4_K_M measurements.",
          C.TEXT_DIM),
-    ], font_size=9)
+    ], font_size=8)
 
 
 def slide_platform_specs(prs: Presentation):

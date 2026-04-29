@@ -45,11 +45,16 @@ GPU_5090_PEAK_GBS = 1792.0
 GPU_5090_EFFICIENCY = 0.85
 NPU_BW_EFFICIENCY = 0.70
 
+# Both Mid and High carry the same set of (stock + upgrade) memory options
+# post-2026-04-29 NPU High redirect — see keyhole-sizer 239aa7e. High is now
+# BW-equal to Mid at stock; differentiates on TOPS / DRAM / TDP.
 MEMORY_BW_GBS = {
-    ("NPU Mid",  "LPDDR5X-8.4"):  134.4,   # stock
+    ("NPU Mid",  "LPDDR5X-8.4"):  134.4,   # stock for both tiers
+    ("NPU Mid",  "LPDDR5T-11.2"): 179.2,
     ("NPU Mid",  "LPDDR6-12"):    192.0,
     ("NPU Mid",  "LPDDR6-14"):    224.0,
-    ("NPU High", "LPDDR5X-11.2"): 179.2,
+    ("NPU High", "LPDDR5X-8.4"):  134.4,   # post-redirect: same memory class as Mid
+    ("NPU High", "LPDDR5T-11.2"): 179.2,
     ("NPU High", "LPDDR6-12"):    192.0,
     ("NPU High", "LPDDR6-14"):    224.0,
 }

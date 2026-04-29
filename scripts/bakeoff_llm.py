@@ -68,7 +68,8 @@ QUANT_RUNTIME = {
 # expert routing than a desktop GPU running llama.cpp).
 #   NPU_LOW:  64-bit LPDDR4 @ 4.0 GT/s   (~32  GB/s theoretical)
 #   NPU_MID:  128-bit LPDDR5X @ 8.4 GT/s (~134 GB/s theoretical — matches our EDGE_MPU_TARGET)
-#   NPU_HIGH: higher-BW bin (vendor-quoted)
+#   NPU_HIGH: SAME memory class as Mid post-2026-04-29 redirect (sizer 239aa7e). Differentiates on
+#             COMPUTE (1.375× TOPS, faster TTFT prefill) + CAPACITY (1.33× DRAM) + TDP — NOT memory BW.
 # Prefill is compute-bound; decode is bandwidth-bound. Values below are for
 # Qwen3-30B-A3B (3B active / 30B total) at 1K prompt / short response.
 NPU_TIER_ACTUALS = {
@@ -76,8 +77,8 @@ NPU_TIER_ACTUALS = {
                  "ttft_1k_sec": 1.67,     "decode_tok_s": 29.27},
     "NPU Mid":  {"bus": "128-bit LPDDR5X @ 8.4 GT/s",
                  "ttft_1k_sec": 0.351,    "decode_tok_s": 37.85},
-    "NPU High": {"bus": "vendor high-bin LPDDR5X",
-                 "ttft_1k_sec": 0.1755,   "decode_tok_s": 50.46},
+    "NPU High": {"bus": "128-bit LPDDR5X @ 8.4 GT/s",
+                 "ttft_1k_sec": 0.1755,   "decode_tok_s": 37.85},
 }
 
 N_BATCH = 512          # llama.cpp batch size for prefill
