@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
 import os
 import re
@@ -81,6 +82,30 @@ def _extract_nvtx_label(cell: str) -> str:
         return ""
     m = _NVTX_LABEL_RE.search(cell)
     return m.group(1).strip() if m else ""
+
+
+# TRT engines emit verbose NVTX entries with embedded JSON metadata
+# (`"TensorRT:{ForeignNode...}:JsonRegistered:{ ... per-layer ONNX node lists ... }`)
+# whose commas + newlines break csv.DictReader column alignment for medium/large
+# nets like ResNet-50. The user's Python NVTX (e.g. `<default domain>:resnet50_int8_trt__224:...`)
+# is always FIRST in the cell. This regex matches a TRT or myelin-exec NVTX entry
+# (`"TensorRT:..."` or `"myelin-exec:..."`, possibly multi-line) and lets us blank
+# them out so the cell collapses to just the user's NVTX label, preserving column
+# count for csv parsing. Multi-line tolerant via `re.DOTALL` and lazy quantifier.
+_TRT_NVTX_BLOB_RE = re.compile(
+    r'""(?:TensorRT|myelin-exec):.*?REGISTERED:[^"]*?""',
+    flags=re.DOTALL,
+)
+
+
+def _strip_trt_nvtx_metadata(raw_csv: str) -> str:
+    """Remove TRT/myelin verbose NVTX metadata blobs from an ncu CSV.
+
+    Leaves the user's Python NVTX (`<default domain>:label:...`) untouched
+    since it's first in the cell and uses simple `none:none:...` annotations
+    (no embedded JSON). Idempotent for CSVs without TRT NVTX content.
+    """
+    return _TRT_NVTX_BLOB_RE.sub('""', raw_csv)
 
 
 # Targeted metric list — keeps ncu overhead to ~2-5x. Enough for the
@@ -180,13 +205,24 @@ def _parse_csv(csv_path: Path) -> dict:
     # ncu CSV format (as of Nsight Compute 2024+):
     # skip any leading comment lines starting with '==', then a header row,
     # then one row per (kernel invocation × metric).
-    with csv_path.open() as f:
-        lines = [ln.rstrip("\n") for ln in f if ln.strip() and not ln.startswith("==")]
+    #
+    # Sanitizer: TRT engines emit NVTX entries containing huge JSON metadata
+    # blobs (per-layer ONNX node lists, datatype dicts) inside escaped quotes
+    # within an NVTX cell. Embedded commas + newlines in those blobs break
+    # standard csv.DictReader column alignment for medium/large nets (e.g.
+    # ResNet-50). The user's Python NVTX label `<domain>:label:...` is always
+    # FIRST in the cell — so we strip everything after the first
+    # space-separated NVTX entry per cell. Conservative; preserves backward
+    # compat for shorter TRT engines that didn't trip the bug.
+    raw = csv_path.read_text()
+    raw = _strip_trt_nvtx_metadata(raw)
+    with io.StringIO(raw) as f:
+        f_lines = [ln.rstrip("\n") for ln in f if ln.strip() and not ln.startswith("==")]
 
-    if not lines:
+    if not f_lines:
         raise SystemExit("CSV body empty after header-strip.")
 
-    reader = csv.DictReader(lines)
+    reader = csv.DictReader(f_lines)
     # Different ncu versions use slightly different column names. Probe:
     cols = reader.fieldnames or []
     # NVTX columns in ncu 2026+ look like

@@ -102,6 +102,11 @@ NVTX_DIVISORS: dict[str, dict[str, int]] = {
     "detr__720p":             {"source": "vit_alternatives", "n_forwards": 12},
     "owlv2__720p":            {"source": "vit_alternatives", "n_forwards": 12},
     "grounding_dino__720p":   {"source": "vit_alternatives", "n_forwards": 12},
+    # ─── resnet50: ResNet-50v1 INT8 TRT @ 224×224 (Kyle 2026-05-01 ask via [sizer] 12:31).
+    # 5090 anchor for sizer Phase 2 — slope test endpoint vs Low-LP5X measured
+    # 1125 FPS (ce03030). N_TIMED=10 forwards under app-replay (per
+    # bakeoff_resnet50.py defaults, mirroring vit_alternatives pattern).
+    "resnet50_int8_trt__224": {"source": "resnet50",        "n_forwards": 10},
 }
 
 

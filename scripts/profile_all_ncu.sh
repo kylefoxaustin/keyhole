@@ -177,6 +177,17 @@ if has yoloe26; then
         -- "$KEYHOLE_PY" scripts/bakeoff_yoloe26.py
 fi
 
+if has resnet50; then
+    # ResNet-50v1 INT8 TRT @ 224 — 5090 anchor for sizer (Kyle 2026-05-01 ask
+    # via [sizer] 12:31). TRT engine + sustained inference under app-replay.
+    # One NVTX range per forward → bundle entry resnet50_int8_trt__224 with
+    # n_forwards=N_TIMED on export_ncu_for_sizer.py side.
+    echo "==== [resnet50] ResNet-50v1 INT8 TRT @ 224×224 (5090 anchor) ===="
+    "$KEYHOLE_PY" scripts/profile_ncu.py \
+        --out "$OUT_DIR/resnet50.json" $KEEP_CSV_FLAG \
+        -- "$KEYHOLE_PY" scripts/bakeoff_resnet50.py
+fi
+
 if has vit_alternatives; then
     # ViT what-if candidates from Kyle's 2026-04-25 ask. Pure-PyTorch targets
     # (no TRT, no dynamic NMS) → app-replay is the right mode (matches the
