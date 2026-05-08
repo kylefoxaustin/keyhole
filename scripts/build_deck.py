@@ -861,7 +861,7 @@ def slide_exec_summary(prs: Presentation):
     card_w = (CONTENT_W - 0.5) / 3
     cards = [
         ("0.4 FPS",    "SAM 3 BF16 baseline",       "Bandwidth-bound on 134.4 GB/s — not feasible", C.ACCENT_RED),
-        ("36 FPS",     "Recommended stack (720p)",     "Hybrid V2 + YOLO-seg FP8 + CLIP FP8, all TensorRT",       C.ACCENT_GREEN),
+        ("36 FPS",     "Recommended (720p) — High",     "Full TRT stack: YOLO-seg FP8 + CLIP FP8 (FP-capable silicon)",       C.ACCENT_GREEN),
         ("90×",        "Edge FPS improvement",       "Architectural change — not just quantization",        C.ACCENT_INDIGO),
     ]
     for i, (big, label, note, col) in enumerate(cards):
@@ -907,8 +907,8 @@ def slide_exec_summary(prs: Presentation):
                  font_size=10, color=C.ACCENT_GREEN, bold=True)
     add_pipeline_strip(slide, [
         ("FFmpeg ingest", False),
-        ("YOLO-seg FP8 (TRT)", True),
-        ("CLIP FP8 (TRT) @ 1 Hz", True),
+        ("YOLO-seg INT8 (Mid) / FP8 (High) TRT", True),
+        ("CLIP FP8 (TRT, High) @ 1 Hz", True),
         ("SQLite + FTS5", False),
         ("Qwen3-30B-A3B MoE", False),
     ], top_in=after_label_y + 0.25)
@@ -920,19 +920,19 @@ def slide_exec_summary(prs: Presentation):
     col_w = (CONTENT_W - 0.25) / 2
 
     add_bullet_box(slide, CONTENT_LEFT, col_top, col_w, col_h, [
-        ("DO — the full recipe", C.ACCENT_GREEN, True),
+        ("DO — the full recipe (Mid: yolo11s INT8 only / High: full FP8 stack)", C.ACCENT_GREEN, True),
         ("• Replace SAM 3 with Hybrid V2 — YOLO-seg-s (det+seg, 10M) + OpenCLIP ViT-B-32 (open-vocab tags)",),
-        ("• Compile BOTH halves with TensorRT FP8 on Blackwell-class silicon (recall 1.00 / top-1 agree 0.96)",),
-        ("• Debounce CLIP at 1 Hz — cheap headroom; multi-stream: YOLO batch=N (4 streams → 26 FPS each)",),
-        ("• Co-host Qwen3-30B-A3B MoE (3B active) on the NPU for NLQ — duty-cycle share for short answers",),
+        ("• Compile YOLO-seg both ways: INT8 TRT for Mid silicon (200 TOPS INT8-only), FP8 TRT for High (400 FP8 TOPS, recall 1.00)",),
+        ("• Compile CLIP FP8 with TensorRT — pins the full open-vocab pipeline to NPU High (FP-capable). Mid runs detector-only.",),
+        ("• Debounce CLIP at 1 Hz; multi-stream: YOLO batch=N (4 streams → 26 FPS each); co-host Qwen3-30B-A3B MoE on the NPU",),
     ], font_size=9)
 
     add_bullet_box(slide, CONTENT_LEFT + col_w + 0.25, col_top, col_w, col_h, [
         ("DON'T — ruled out by bake-off", C.ACCENT_RED, True),
         ("• Run SAM 3 BF16 and hope — 0.4 FPS, FP8 activations only get you to ~1.2 FPS, still dead",),
+        ("• Deploy CLIP/EfficientSAM3/ViT alts on Mid silicon — INT8-only NPU, no FP path; needs INT8 ports we don't have",),
         ("• INT8 weight-only quant — doesn't touch bandwidth-bound activation traffic, zero edge gain",),
-        ("• Cut SAM 3 resolution or prompts — RoPE locked, edge stays bandwidth-bound regardless",),
-        ("• torchao FP8 on Conv-only models, or generative LLM on a busy vision NPU (RAG murders it)",),
+        ("• Cut SAM 3 resolution or prompts — RoPE locked; torchao FP8 on Conv-only models — tool-chain gap, use TensorRT",),
     ], font_size=9)
 
     # ── NPU tier sizing ────────────────────────────────────────────────────
@@ -954,19 +954,19 @@ def slide_exec_summary(prs: Presentation):
     tier_table_shape = add_styled_table(
                      slide, Inches(CONTENT_LEFT), Inches(tier_y + 0.3),
                      Inches(CONTENT_W), Inches(0.8),
-                     ["NPU tier", "Memory bus", "Vision (1-stream)", "Vision (4-stream, batch=4)",
+                     ["NPU tier", "Memory bus", "Vision (yolo11s 1-stream)", "Full open-vocab stack",
                       "LLM Q4_K_M decode", "Good for"],
                      [
-                         ["NPU Low-LP5-64bit",  "64-bit LPDDR5 @ 6.4 GT/s",    "~15 FPS",  "~10 FPS each",
+                         ["NPU Low-LP5-64bit",  "64-bit LPDDR5 @ 6.4 GT/s",    "~15 FPS (INT8)",  "🔴 INT8-only: detector only",
                           "29 tok/s",  "Dense INT8-only silicon (NXP Neutron class)"],
-                         ["NPU Mid",  "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
-                          "38 tok/s",  "Live multi-stream + occasional LLM"],
-                         ["NPU High", "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS",   "26 FPS each",
-                          "38 tok/s",  "Same BW class as Mid; FP-capable (200 BF16, 2× INT8 = 400, FP8 too) + 1.33× DRAM + 1.6× TDP"],
-                         ["+ LPDDR5T-11.2 overlay ‡", "(opt-in upgrade)",   "~48 FPS",  "~35 FPS each",
+                         ["NPU Mid",  "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS (INT8 TRT)",   "🔴 INT8-only: yolo11s INT8 only (CLIP needs INT8 port)",
+                          "38 tok/s",  "Single-stream INT8 detector + LLM"],
+                         ["NPU High", "128-bit LPDDR5X @ 8.4 GT/s",  "36 FPS (FP8 TRT)",   "✅ FP8 stack: yolo11s + CLIP, 26 FPS × 4 streams",
+                          "38 tok/s",  "FP-capable (200 BF16, 400 INT8/FP8) + 1.33× DRAM + 1.6× TDP — recommended for full pipeline"],
+                         ["+ LPDDR5T-11.2 overlay ‡", "(opt-in upgrade)",   "~48 FPS",  "BW lift on either tier",
                           "50 tok/s ‡", "Recovers vendor's 11.2 GT/s reading via memory overlay"],
                      ],
-                     highlight_rows=[2],   # NPU Mid — the recommended target
+                     highlight_rows=[3],   # NPU High — the recommended target for full open-vocab stack
                      font_size=8, header_font_size=9)
     # Force compact row heights so the table stays inside the 7.5" slide.
     # Without this LibreOffice / PowerPoint autogrow overshoots y=7.5 and
@@ -1878,7 +1878,12 @@ def slide_yolo_conv_quant(prs: Presentation):
 
 
 def slide_trt_yolo(prs: Presentation):
-    """Slide: Proper TensorRT FP8 on YOLO-seg — the full unblock."""
+    """Slide: Proper TensorRT FP8/INT8 on YOLO-seg — the full unblock.
+
+    Two deploy recipes per silicon class:
+      INT8 → Mid (INT8-only silicon, 200 TOPS, no FP)
+      FP8  → High (FP-capable silicon, 400 FP8 TOPS) — better quality, same BW
+    """
     path = Path("data/output/bakeoff/trt_yolo_edge_projection.json")
     if not path.exists():
         return
@@ -1886,12 +1891,12 @@ def slide_trt_yolo(prs: Presentation):
     proj = data["projections"]
 
     slide = new_slide(prs, bg_color=C.BG_DARK)
-    add_title_subtitle(slide, "TensorRT YOLO-seg — FP8 Unblocked, Real-Time Ceiling Broken",
+    add_title_subtitle(slide, "TensorRT YOLO-seg — INT8 (Mid) and FP8 (High), Real-Time Ceiling Broken",
                        "TRT 10.16 on RTX 5090 Blackwell: full-model Conv quantization that torchao couldn't reach")
-    add_pipeline_strip(slide, ["FFmpeg", ("YOLO-seg FP8 (TRT)", True),
-                                "CLIP FP8", "SQLite", "NLQ / LLM"])
+    add_pipeline_strip(slide, ["FFmpeg", ("YOLO-seg INT8/FP8 (TRT)", True),
+                                "CLIP FP8 (High)", "SQLite", "NLQ / LLM"])
 
-    headers = ["Res", "Recipe", "5090 ms", "Dets", "Box recall", "Matched IoU",
+    headers = ["Res", "Recipe", "Deploys on", "5090 ms", "Box recall", "Matched IoU",
                "Edge ms", "Edge FPS"]
     rows = []
     highlight = []
@@ -1902,31 +1907,35 @@ def slide_trt_yolo(prs: Presentation):
             if not p or "error" in p:
                 continue
             row_i += 1
+            deploys_on = {
+                "fp16": "5090 only",
+                "int8": "Mid + High",
+                "fp8":  "High",
+            }[recipe]
             rows.append([
                 res, recipe.upper(),
+                deploys_on,
                 f"{p['mean_frame_ms_5090']:.2f}",
-                f"{p.get('n_matched', 0) + p.get('n_fp', 0)}" if recipe != "fp16" else "—",
                 f"{p.get('box_recall', 0):.3f}" if recipe != "fp16" else "1.000",
                 f"{p.get('mean_matched_iou', 0):.3f}" if recipe != "fp16" else "1.000",
                 f"{p['projected_ms_edge']:.1f}",
                 f"{p['projected_fps_edge']:.1f}",
             ])
-            if res == "720p" and recipe == "fp8":
+            # Highlight the Mid-deploy INT8 row at 720p (the headline)
+            if res == "720p" and recipe == "int8":
                 highlight.append(row_i)
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                      Inches(CONTENT_W), Inches(3.1), headers, rows,
                      highlight_rows=highlight)
 
-    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.75, [
-        ("Key findings", C.ACCENT_BLUE, True),
-        ("• FP8 on YOLO-seg WORKS via TRT 10.16 on Blackwell (SM 12.0). Earlier torchao block was a tool-chain gap, not a fundamental one.", C.ACCENT_GREEN, True),
-        ("• FP8 quality essentially perfect — 100% box recall, matched IoU 0.998, indistinguishable from FP16.", C.ACCENT_GREEN, True),
-        ("• Edge FPS 720p: 18.6 FP16 → 36.8 FP8 (+98%). Full-stack = Hybrid V2 + 1 Hz CLIP + YOLO-FP8 ≈ 36 FPS edge (prior target 20, nearly 2×).", C.ACCENT_INDIGO, True),
-        ("• INT8 is viable too but drops low-confidence boxes (87-92% recall). FP8's wider range wins on detection-head logits.", C.ACCENT_AMBER, True),
+    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.85, [
+        ("Key findings — Mid-deployable INT8 + FP8 quality story on High", C.ACCENT_BLUE, True),
+        ("• INT8 + FP8 BOTH work via TRT 10.16 on Blackwell (SM 12.0). Earlier torchao block was a tool-chain gap. Edge FPS is identical (BW-bound, both 8-bit) — the difference is silicon and quality.", C.ACCENT_GREEN, True),
+        ("• Mid silicon (INT8-only, 200 TOPS) deploys via INT8 TRT — Edge 720p 18.6 FP16 → 36.8 INT8 (+98%). 87-92% recall: low-confidence boxes drop, but that's the Mid-mandatory recipe.", C.ACCENT_AMBER, True),
+        ("• High silicon (FP-capable, 400 FP8 TOPS) deploys via FP8 TRT — same 36.8 FPS edge (BW-equal stock memory class), but 100% recall + IoU 0.998, indistinguishable from FP16.", C.ACCENT_GREEN, True),
+        ("• Full-stack = Hybrid V2 + 1 Hz CLIP + YOLO-INT8/FP8 ≈ 36 FPS edge (prior target 20, nearly 2×). CLIP recipe (next slide) is FP-only on the toolchain we tested — pins the full pipeline to High.", C.ACCENT_INDIGO, True),
         ("Preprocessing: 640×640 letterbox runs on CPU, not GPU/NPU (not included in the ms/frame above).", C.ACCENT_ORANGE, True),
-        ("• Measured on 5090 host (i9-14900KF, cv2.resize bilinear, 1 thread): 0.17 / 0.32 / 0.33 ms at 720p / 1080p / 4K — ~0.5–1% of one core at 30 fps. Flat across source res (output size dominates).",
-         C.TEXT_BRIGHT),
-        ("• Edge ARM (Cortex-A55 ≈ 10× slower single-thread) → ~2–3 ms/frame, ~6–10% of one edge core at 30 fps. SoCs with a fixed-function ISP / 2D GPU (Qualcomm, MediaTek, NXP, Ambarella, Hailo) move this off-CPU entirely; pure-NPU boards (Coral) pay the full cost.",
+        ("• Measured on 5090 host (i9-14900KF, cv2.resize bilinear, 1 thread): 0.17 / 0.32 / 0.33 ms at 720p / 1080p / 4K — ~0.5–1% of one core at 30 fps. Edge ARM Cortex-A55 ≈ 10× slower → ~2–3 ms/frame, ~6–10% of one edge core. SoCs with a fixed-function ISP / 2D GPU move this off-CPU entirely.",
          C.TEXT_DIM),
     ], font_size=9)
 
@@ -2010,9 +2019,12 @@ def slide_yolov8n_comparison(prs: Presentation):
                     verdict = "ok"
             elif recipe == "fp8":
                 if rec == rec and rec >= 0.99:
-                    verdict = "recommended ✓"
+                    verdict = "High-deploy ✓"
                 else:
                     verdict = "check recall"
+            # INT8 verdict gets a Mid-deploy badge when quality is acceptable
+            if recipe == "int8" and verdict == "ok":
+                verdict = "Mid-deploy ✓"
             rows.append([
                 label if recipe == "fp16" else "",
                 recipe.upper(),
@@ -2027,10 +2039,12 @@ def slide_yolov8n_comparison(prs: Presentation):
                      Inches(CONTENT_W), Inches(1.9), headers, rows,
                      highlight_rows=highlight, font_size=10, header_font_size=10)
 
-    # Table 2: concurrency — edge batch ms side by side (both at FP8 recommended)
+    # Table 2: concurrency — edge batch ms side by side. Mid silicon is INT8-only;
+    # the dynamic-batch TRT engine is INT8-compiled for Mid deploy (FP8 is a High
+    # variant — same BW-bound batch ms since both are 8-bit).
     if conc8n_p.exists() and conc11_p.exists():
         add_text_box(slide, Inches(CONTENT_LEFT), Inches(4.25), Inches(CONTENT_W), Inches(0.3),
-                     "Multi-stream batching (FP8 recommended) — edge batch ms on NPU Mid",
+                     "Multi-stream batching (INT8 TRT — Mid-deployable recipe) — edge batch ms on NPU Mid",
                      font_size=12, color=C.ACCENT_PURPLE, bold=True)
         c8 = json.loads(conc8n_p.read_text())["batches_edge"]
         c11 = json.loads(conc11_p.read_text())["batches_edge"]
@@ -2069,7 +2083,13 @@ def slide_yolov8n_comparison(prs: Presentation):
 
 
 def slide_trt_clip(prs: Presentation):
-    """Slide: TRT-compile CLIP visual — FP8 halves the CLIP edge cost."""
+    """Slide: TRT-compile CLIP visual — FP8 halves the CLIP edge cost.
+
+    All recipes here (BF16, FP16, FP8) are FP-class — they require FP-capable
+    silicon. Mid is INT8-only (200 TOPS, no FP) so this entire workload pins
+    the full pipeline to High silicon (or to a future Mid + INT8 CLIP port,
+    which the toolchain we tested doesn't currently produce).
+    """
     path = Path("data/output/bakeoff/trt_clip_edge_projection.json")
     if not path.exists():
         return
@@ -2077,13 +2097,13 @@ def slide_trt_clip(prs: Presentation):
     proj = data["projections"]
 
     slide = new_slide(prs, bg_color=C.BG_DARK)
-    add_title_subtitle(slide, "TensorRT CLIP — Visual Tower Compiled, FP8 Halves Edge Cost",
-                       "Completes the Hybrid V2 TRT stack: YOLO-seg FP8 + CLIP ViT-B-32 FP8")
-    add_pipeline_strip(slide, ["FFmpeg", "YOLO-seg FP8 (TRT)",
-                                ("CLIP FP8 (TRT)", True), "SQLite", "NLQ / LLM"])
+    add_title_subtitle(slide, "TensorRT CLIP — Visual Tower Compiled, FP8 Halves Edge Cost (NPU High)",
+                       "Completes the Hybrid V2 TRT stack on FP-capable silicon. Mid (INT8-only) 🔴 dtype_mismatch: needs an INT8 CLIP port we don't yet have.")
+    add_pipeline_strip(slide, ["FFmpeg", "YOLO-seg INT8/FP8 (TRT)",
+                                ("CLIP FP8 (TRT, NPU High)", True), "SQLite", "NLQ / LLM"])
 
     headers = ["Res", "Recipe", "5090 ms", "Top-1 vs BF16",
-               "Edge CLIP ms", "CLIP-only FPS"]
+               "Edge CLIP ms (High)", "CLIP-only FPS (High)"]
     rows = []
     highlight = []
     row_i = 0
@@ -2118,17 +2138,17 @@ def slide_trt_clip(prs: Presentation):
     hz_frame_ms = yolo_edge_ms + fp8_720 / 30.0
     hz_fps = 1000.0 / hz_frame_ms if hz_frame_ms > 0 else 0.0
 
-    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.85, [
-        ("Key findings", C.ACCENT_BLUE, True),
+    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.95, [
+        ("Key findings — CLIP recipe is FP-only (pins full pipeline to NPU High)", C.ACCENT_BLUE, True),
         ("• CLIP visual TRT-compiled cleanly at FP16 + FP8 (180 MB engine). No QDQ nodes needed — TRT auto-selects FP8 layers.", C.ACCENT_GREEN, True),
-        (f"• FP8 edge CLIP drops from {bf16_720:.1f} ms (BF16/FP16) to {fp8_720:.1f} ms (+{fp8_pct}% CLIP-only FPS).", C.ACCENT_GREEN, True),
+        (f"• FP8 edge CLIP drops from {bf16_720:.1f} ms (BF16/FP16) to {fp8_720:.1f} ms (+{fp8_pct}% CLIP-only FPS) on NPU High (FP-capable).", C.ACCENT_GREEN, True),
         ("• Top-1 concept-tag agreement: TRT FP16 0.970, TRT FP8 0.964 — FP8 costs ~0.4 pts, noise-level.", C.TEXT_DIM),
-        ("• Earlier hybrid_v2 CLIP measurement (22 ms) included per-crop Python dispatch. Pure visual() kernel time is 2.3 ms BF16 — TRT exposes the honest number.", C.ACCENT_AMBER, True),
+        ("• 🔴 NPU Mid is INT8-only — none of these FP recipes deploy on Mid silicon directly. Path forward = an INT8 CLIP port (PTQ + activation calibration over a real text-image distribution); not in our current toolchain. Numbers shown project to NPU High (BW-equal stock memory, FP-capable silicon).", C.ACCENT_AMBER, True),
         "",
-        ("Recalibrated full-stack (720p Edge MPU)", C.ACCENT_INDIGO, True),
+        ("Recalibrated full-stack on NPU High (720p, FP-capable silicon)", C.ACCENT_INDIGO, True),
         (f"• YOLO-FP8 ({yolo_edge_ms:.1f} ms) + CLIP-FP8 every frame ({fp8_720:.1f} ms) = {every_frame_ms:.1f} ms → {every_frame_fps:.0f} FPS  — real-time with ZERO debouncing",),
         (f"• YOLO-FP8 + CLIP-FP8 at 1 Hz ({fp8_720/30.0:.2f} ms amortized) = {hz_frame_ms:.1f} ms → {hz_fps:.0f} FPS  — at the YOLO-only ceiling; CLIP is effectively free",),
-    ], font_size=11)
+    ], font_size=10)
 
 
 def slide_concurrency(prs: Presentation):
@@ -2376,6 +2396,341 @@ def slide_llm_duty_cycle(prs: Presentation):
     ], font_size=10)
 
 
+def slide_skippy_recipe_taxonomy(prs: Presentation):
+    """Slide: Skippy training campaign — 11 recipes, one verdict table.
+
+    Customer-template summary from [docs] 2026-05-07 13:17 wrap-up. Six core
+    recipes anchored on Skippy 7B v4 (currently shipping). Pass rate is
+    132-sample v2-RAG aggregate. Δ vs production = pp difference vs 7B v4.
+    """
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Skippy training campaign — 11 recipes, one verdict table",
+        "v2-RAG aggregate (132 samples) anchored on Skippy 7B v4 production. Δ = pp vs production reference.",
+    )
+    add_pipeline_strip(
+        slide,
+        ["data corpus (~6.5K)", "training recipe", ("Skippy 7B v4 — production", True),
+         "v2-RAG eval (132)", "verdict"],
+        accent_color=C.ACCENT_INDIGO,
+    )
+
+    headers = ["Recipe", "Architecture", "Pass rate", "Δ vs prod", "Recipe gate", "Verdict"]
+    rows = [
+        ["Skippy 7B v4 (production)",
+         "Dense 7B, Qwen2.5 base",
+         "0.705",  "—",
+         "voice + capability ✓",
+         "✅ SHIP — currently deployed"],
+        ["Skippy 14B v4",
+         "Dense 14B, Qwen2.5 base",
+         "0.727",  "+2.2pp",
+         "voice ✓ / capability caveat",
+         "⚠️  fabricates peripherals (partly base inheritance)"],
+        ["Skippy 32B v4 CLEAN",
+         "Dense 32B, Qwen2.5 base",
+         "0.636",  "−6.9pp",
+         "voice ✓ / capability fails",
+         "❌ trade not plateau — corpus too small for 32B"],
+        ["Skippy MoE attn-only (FT v1)",
+         "Qwen3-30B-A3B, attn LoRA",
+         "0.689",  "−1.6pp",
+         "capability fails",
+         "❌ catastrophic on multihop"],
+        ["Skippy MoE + router v1",
+         "Qwen3-30B-A3B, attn + router",
+         "0.674",  "−3.1pp",
+         "voice ✓ / capability ✓",
+         "✅ recommended MoE recipe"],
+        ["Skippy MoE + router + experts v1",
+         "Qwen3-30B-A3B, full FT",
+         "0.629",  "−7.6pp",
+         "capability fails",
+         "❌ over-fits, breaks rag_blog"],
+        ["Qwen2.5 32B Instruct (stock)",
+         "Dense 32B, no FT",
+         "0.682",  "−2.3pp",
+         "(base ref)",
+         "Apples-to-apples 32B base ref"],
+        ["Qwen2.5 7B Instruct (stock)",
+         "Dense 7B, no FT",
+         "0.674",  "−3.1pp",
+         "(base ref)",
+         "Confirms +3.1pp v4 fine-tune lift"],
+        ["Qwen3-30B-A3B Instruct-2507",
+         "MoE, no FT",
+         "0.712",  "+0.7pp",
+         "(sister base ref — Instruct)",
+         "Correct sister baseline for MoE"],
+        ["Qwen3-30B-A3B Thinking-2507",
+         "MoE thinking variant",
+         "0.636",  "−6.9pp",
+         "(sister base ref — Thinking)",
+         "🔴 wrong sister — confounded prior framing"],
+        ["Skippy dense FT pre-v4 (legacy 14B)",
+         "Dense 14B, old recipe",
+         "0.682",  "−2.3pp",
+         "(historical)",
+         "Pre-v4 baseline; recipe-taxonomy ref"],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.55),
+        Inches(CONTENT_W), Inches(3.7), headers, rows,
+        highlight_rows=[1, 5],   # 7B v4 production + MoE-router recommended
+        font_size=8, header_font_size=10,
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.4, CONTENT_W, 1.85, [
+        ("Recipe-taxonomy framework — voice gate × capability gate", C.ACCENT_BLUE, True),
+        ("• Voice gate = does the model write like Skippy? (refusal style, tone, customer template). Capability gate = can it answer technical RAG queries? Both gates must pass to ship.",
+         C.TEXT_BRIGHT),
+        ("• MoE recipe space splits cleanly: attn-only (FT v1) misses capability — multihop catastrophe. + router recovers reasoning (✓). + router + experts over-fits the experts and breaks rag_blog. Sweet-spot is router-only.",
+         C.ACCENT_GREEN),
+        ("• Dense 32B v4 'plateau' was actually a TRADE — corpus (~6.5K samples) too small to fine-tune 32B without catastrophic forgetting on uninstructed categories. Tier 3: larger corpus would unblock.",
+         C.ACCENT_AMBER),
+        ("• 14B v4 fabricates peripheral parts (made_up_peripheral 3/9). New finding: this is partly Qwen2.5 14B base behavior — v4 recipe inherits and amplifies rather than creating it. Mitigation: RAG-grounded refusal data (Tier 3 training task).",
+         C.TEXT_DIM),
+    ], font_size=9)
+
+
+def slide_skippy_sister_confound(prs: Presentation):
+    """Slide: sister-model baseline confound — why apples-to-apples matters.
+
+    Story: original framing "+5.3pp domain fine-tuning win" was MoE FT v1
+    vs Qwen3-30B-A3B-Thinking-2507. Wrong sister. Apples-to-apples vs
+    Qwen3-30B-A3B-Instruct-2507 = -2.3pp. The sister-model gap (Instruct
+    vs Thinking) is itself 7.6pp at the base. Resolved per [docs] 09:45.
+    """
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Sister-model baseline confound — why apples-to-apples matters",
+        "Original framing: '+5.3pp domain fine-tuning win'. Reality: wrong sister model. Apples-to-apples is −2.3pp.",
+    )
+
+    # Headline cards: the wrong-vs-right baselines side by side
+    card_y = 1.35
+    card_h = 0.95
+    card_w = (CONTENT_W - 0.5) / 3
+    cards = [
+        ("0.689",   "Skippy MoE FT v1",       "What we measured (no dispute)",                         C.ACCENT_INDIGO),
+        ("+5.3pp",  "vs Thinking-2507 (0.636)",  "🔴 WRONG sister — Thinking is broken at base on rag_email",  C.ACCENT_RED),
+        ("−2.3pp",  "vs Instruct-2507 (0.712)",  "✅ apples-to-apples — Instruct is the correct base ref",     C.ACCENT_GREEN),
+    ]
+    for i, (big, label, note, col) in enumerate(cards):
+        x = CONTENT_LEFT + i * (card_w + 0.25)
+        shp = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                                      Inches(x), Inches(card_y),
+                                      Inches(card_w), Inches(card_h))
+        shp.fill.solid(); shp.fill.fore_color.rgb = C.BG_SLIDE
+        shp.line.color.rgb = col; shp.line.width = Pt(2)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.05),
+                     Inches(card_w), Inches(0.45),
+                     big, font_size=28, color=col, bold=True,
+                     alignment=PP_ALIGN.CENTER)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.5),
+                     Inches(card_w), Inches(0.25),
+                     label, font_size=11, color=C.TEXT_BRIGHT, bold=True,
+                     alignment=PP_ALIGN.CENTER)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.72),
+                     Inches(card_w), Inches(0.25),
+                     note, font_size=9, color=C.TEXT_DIM,
+                     alignment=PP_ALIGN.CENTER)
+
+    # Per-category breakdown showing where the sister-model gap actually lives
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(2.6),
+                 Inches(CONTENT_W), Inches(0.3),
+                 "Where the 7.6pp Instruct-vs-Thinking gap lives — categories that diverge at the base",
+                 font_size=12, color=C.ACCENT_PURPLE, bold=True)
+    headers = ["Category", "Instruct-2507", "Thinking-2507", "Δ", "Skippy MoE FT v1", "Note"]
+    rows = [
+        ["rag_email",            "3/3 (1.000)", "0/3 (0.000)", "−100%",  "3/3 (1.000)",
+         "Thinking model is broken on rag_email — major sister gap"],
+        ["coding",               "6/6 (1.000)", "5/6 (0.833)", "−16.7pp", "6/6 (1.000)",
+         "Thinking weaker; FT recovers"],
+        ["numerical_precision",  "—",           "6/6 (1.000)", "—",       "3/6 (0.500)",
+         "Thinking SOTA on math; FT degrades — capability trade"],
+        ["refusal",              "6/9 (0.667)", "9/9 (1.000)", "+33.3pp", "7/9 (0.778)",
+         "Thinking SOTA refusal; FT regresses to mid"],
+        ["rag_datasheet",        "—",           "46/78 (0.59)", "—",      "54/78 (0.69)",
+         "Domain knowledge: where FT actually wins"],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(2.95),
+        Inches(CONTENT_W), Inches(1.7), headers, rows,
+        highlight_rows=[1],   # rag_email — the dramatic divergence
+        font_size=9, header_font_size=10,
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 4.85, CONTENT_W, 2.25, [
+        ("What this means", C.ACCENT_BLUE, True),
+        ("• 'Domain fine-tuning win' is a real story — +rag_datasheet (54/78 vs 46/78), preserved coding + general categories. Just 0.7pp behind Instruct-2507 stock, not 5.3pp ahead of Thinking-2507.",
+         C.ACCENT_GREEN),
+        ("• Recipe lesson: MoE fine-tuning has a refusal-quality regression that wasn't visible against the wrong sister. Thinking-2507's 9/9 refusal was the right ceiling; FT v1 sat at 7/9. The 14B v4 dense recipe has the same regression (9/9 → 7/9 in some recipes), suggesting it's a property of how attn-LoRA shifts the refusal head.",
+         C.TEXT_BRIGHT),
+        ("• Methodology lesson: ALWAYS validate FT recipes against BOTH sister models when one base family has Instruct + Thinking variants. Thinking-2507 is broken on rag_email at the base (0/3) — comparing recovery there gave artificially flat readings; the actual recovery surface lives in rag_datasheet + datasheet-flavored knowledge categories.",
+         C.ACCENT_AMBER),
+        ("• 14B v4 inherits the rag_email broken-at-base behavior (0/3) from the Qwen2.5 14B base — separate confound from the MoE story. Tier 3 training task: RAG-grounded refusal data should fix both regressions.",
+         C.TEXT_DIM),
+    ], font_size=10)
+
+
+def slide_dense_vs_moe_bandwidth(prs: Presentation):
+    """Slide: Dense vs MoE on 5090 — why MoE wins on bandwidth.
+
+    Uses Qwen 7B/32B dense anchors (5090) collected 2026-05-01, plus
+    Skippy MoE 30B-A3B Q4_K_M reference. Story: total weight footprint
+    sets the VRAM/disk ceiling; active params per forward sets the BW
+    cost per token. MoE 30B/3B-active beats dense 32B by 4.7× decode.
+    """
+    summary = Path("data/output/bakeoff/llm_summary.json")
+    anchors_dir = Path("data/output/bakeoff/llm_anchors")
+    if not summary.exists() or not anchors_dir.exists():
+        return
+    moe = json.loads(summary.read_text())
+
+    def _model_tok_s(payload: dict) -> tuple[float, float, float, float]:
+        """Return (gguf_gb, decode_256, rag_decode, prefill_2k)."""
+        rag = payload.get("rag", {})
+        dec256 = payload["decode_sweep"][-1]["decode_tok_s"]
+        pf2k = next((p["prefill_tok_s"] for p in payload["prefill_sweep"]
+                      if p["n_prompt"] == 2048), 0)
+        return (payload["gguf_size_gb"], dec256, rag.get("decode_tok_s", 0), pf2k)
+
+    def _load_anchor(model_id: str, quant: str) -> dict | None:
+        p = anchors_dir / model_id / f"{quant}.json"
+        if not p.exists():
+            return None
+        return json.loads(p.read_text())
+
+    moe_q4 = _model_tok_s(moe["Q4_K_M"])
+    q7 = _load_anchor("qwen2.5-7b-dense", "Q4_K_M")
+    q32 = _load_anchor("qwen2.5-32b-dense", "Q4_K_M")
+    q32_q5 = _load_anchor("qwen2.5-32b-dense", "Q5_K_M")
+    llama8 = _load_anchor("llama3.1-8b-dense", "Q4_K_M")
+    mistral7 = _load_anchor("mistral-7b-v0.3-dense", "Q4_K_M")
+    if not (q7 and q32 and q32_q5):
+        return
+    qwen7_q4 = _model_tok_s(q7)
+    qwen32_q4 = _model_tok_s(q32)
+    qwen32_q5 = _model_tok_s(q32_q5)
+    llama8_q4 = _model_tok_s(llama8) if llama8 else None
+    mistral7_q4 = _model_tok_s(mistral7) if mistral7 else None
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Dense vs MoE on 5090 — why MoE wins on bandwidth (cross-family validated)",
+        "Total params set VRAM ceiling; active params per forward set BW cost per token. Cross-family: Qwen / Llama / Mistral 7B-class all land in the same ~170-185 tok/s band — base architecture-class is BW-equivalent.",
+    )
+
+    headers = ["Model", "Total params", "Active / token", "Q4_K_M GGUF",
+                "Decode @256 (5090)", "RAG decode (5090)", "BW interpretation"]
+    rows = [
+        ["Skippy MoE (Qwen3-30B-A3B Q4_K_M)",
+         "30B", "3B (10× lighter per fwd)",
+         f"{moe_q4[0]:.1f} GB",
+         f"{moe_q4[1]:.0f} tok/s",
+         f"{moe_q4[2]:.0f} tok/s",
+         "VRAM-resident: 30B; per-token BW pays for 3B"],
+        ["Qwen 2.5 32B Instruct dense Q4_K_M",
+         "32.5B", "32.5B (every fwd)",
+         f"{qwen32_q4[0]:.1f} GB",
+         f"{qwen32_q4[1]:.0f} tok/s",
+         f"{qwen32_q4[2]:.0f} tok/s",
+         "Per-token BW pays for ALL 32.5B params"],
+        ["Qwen 2.5 32B Instruct dense Q5_K_M",
+         "32.5B", "32.5B",
+         f"{qwen32_q5[0]:.1f} GB",
+         f"{qwen32_q5[1]:.0f} tok/s",
+         f"{qwen32_q5[2]:.0f} tok/s",
+         "+17% bigger weights → −10% decode (BW cost)"],
+        ["Qwen 2.5 7B Instruct dense Q4_K_M",
+         "7.6B", "7.6B",
+         f"{qwen7_q4[0]:.1f} GB",
+         f"{qwen7_q4[1]:.0f} tok/s",
+         f"{qwen7_q4[2]:.0f} tok/s",
+         "Smallest Qwen-family BW cost"],
+    ]
+    if mistral7_q4 is not None:
+        rows.append(["Mistral 7B Instruct v0.3 Q4_K_M (cross-family)",
+                     "7.25B", "7.25B",
+                     f"{mistral7_q4[0]:.1f} GB",
+                     f"{mistral7_q4[1]:.0f} tok/s",
+                     f"{mistral7_q4[2]:.0f} tok/s",
+                     "Cross-family: matches Qwen 7B within 1% on RAG"])
+    if llama8_q4 is not None:
+        rows.append(["Meta Llama-3.1 8B Instruct Q4_K_M (cross-family)",
+                     "8.03B", "8.03B",
+                     f"{llama8_q4[0]:.1f} GB",
+                     f"{llama8_q4[1]:.0f} tok/s",
+                     f"{llama8_q4[2]:.0f} tok/s",
+                     "Cross-family: 7% slower than Qwen — pure BW (4.9 vs 4.7 GB)"])
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.5),
+        Inches(CONTENT_W), Inches(2.4), headers, rows,
+        highlight_rows=[1],   # MoE row — the headline
+        font_size=9, header_font_size=10,
+    )
+
+    # Edge-projection comparison: same models, projected to NPU Mid via BW ratio
+    bw_ratio = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.95),
+                 Inches(CONTENT_W), Inches(0.3),
+                 f"Edge projection — NPU Mid stock LPDDR5X (BW ratio 5090÷Mid = {bw_ratio:.2f}×). MoE vendor actual beats projection by ~2.5×.",
+                 font_size=11, color=C.ACCENT_PURPLE, bold=True)
+    headers2 = ["Model", "5090 RAG decode", "Mid BW projection", "Mid vendor actual / cross_class",
+                 "Verdict for short-answer UI (≤5 s)"]
+    moe_proj = moe_q4[2] / bw_ratio
+    qwen32_proj = qwen32_q4[2] / bw_ratio
+    qwen7_proj = qwen7_q4[2] / bw_ratio
+    rows2 = [
+        ["MoE 30B-A3B Q4_K_M",
+         f"{moe_q4[2]:.0f} tok/s",
+         f"{moe_proj:.1f} tok/s",
+         "37.85 tok/s 🟢 measured",
+         "✅ 200-tok in 5.3 s — fits"],
+        ["Dense 32B Q4_K_M",
+         f"{qwen32_q4[2]:.0f} tok/s",
+         f"{qwen32_proj:.1f} tok/s",
+         "(no anchor)",
+         "❌ ~3 tok/s edge → 67 s for 200 tok — too slow"],
+        ["Dense 7B Q4_K_M (Qwen)",
+         f"{qwen7_q4[2]:.0f} tok/s",
+         f"{qwen7_proj:.1f} tok/s",
+         "(no anchor)",
+         "✅ ~11 tok/s edge → 18 s for 200 tok — borderline"],
+    ]
+    if llama8_q4 is not None:
+        llama_proj = llama8_q4[2] / bw_ratio
+        # Sizer cross_class fallback projected 332.79 tok/s on 5090 (raw TOPS × util_factor)
+        # vs measured 171.0 — a 1.95× over-projection. Useful methodology callout.
+        cross_class_5090 = 332.79
+        over_factor = cross_class_5090 / llama8_q4[2]
+        rows2.append(["Dense 8B Q4_K_M (Llama-3.1)",
+                      f"{llama8_q4[2]:.0f} tok/s",
+                      f"{llama_proj:.1f} tok/s",
+                      f"🟠 cross_class fallback projects {cross_class_5090:.0f} tok/s on 5090 — {over_factor:.2f}× over-projection",
+                      "✅ ~11 tok/s edge — calibration check passed"])
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(4.25),
+        Inches(CONTENT_W), Inches(1.6), headers2, rows2,
+        highlight_rows=[1],
+        font_size=10,
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.95, CONTENT_W, 1.25, [
+        ("Cross-family architecture-class invariance + MoE bandwidth win", C.ACCENT_BLUE, True),
+        (f"• Skippy MoE 30B/3B-active = {moe_q4[2]:.0f} tok/s RAG decode on 5090, vs dense 32B = {qwen32_q4[2]:.0f} tok/s. {moe_q4[2]/qwen32_q4[2]:.1f}× speedup despite ~same total param count and ~same VRAM footprint — purely an active-params-per-token win.",
+         C.ACCENT_GREEN, True),
+        (f"• 7B-class dense decode is base-family-invariant: Qwen-7B {qwen7_q4[2]:.0f} / Mistral-7B {mistral7_q4[2] if mistral7_q4 else 0:.0f} / Llama-3.1-8B {llama8_q4[2] if llama8_q4 else 0:.0f} tok/s — within 7% across vendors. Differences track GGUF size (BW cost), not architecture. Cross-family accuracy stories ([docs] 22:28: Llama-3.1 -10.6pp on v2-RAG vs Qwen-7B) are PURELY model-quality calls, not perf calls.",
+         C.ACCENT_INDIGO),
+        ("• Edge-side calibration data point: sizer's cross_class fallback (raw TOPS × util_factor, no per-(model, tier) realization) over-projects ~1.95× on 5090 for Llama-3.1. The 🟠 cross_class badge correctly flags lower confidence; measured cells (🟢) replace these as bake-offs land. Dense ≥14B busts edge latency budget regardless of family; 7B/8B are borderline; MoE 30B/3B-active is the practical sweet spot.",
+         C.TEXT_DIM),
+    ], font_size=9)
+
+
 def slide_keyframe_debounce(prs: Presentation):
     """Slide: CLIP keyframe debouncing unlocks real-time on Hybrid V2."""
     path = Path("data/output/bakeoff/keyframe_debounce_summary.json")
@@ -2436,7 +2791,11 @@ def slide_keyframe_debounce(prs: Presentation):
 
 
 def slide_efficientsam3p1_textprompt(prs: Presentation):
-    """Slide: "EfficientSAM3.1 — the text-prompt-capable smaller variant" — SAM 3.1 student."""
+    """Slide: "EfficientSAM3.1 — the text-prompt-capable smaller variant" — SAM 3.1 student.
+
+    Recipe is BF16 (FP) — Mid (INT8-only) 🔴 dtype_mismatch. FPS shown
+    project to NPU High (FP-capable, BW-equal to Mid at stock memory class).
+    """
     path = Path("data/output/bakeoff/efficientsam3p1_summary.json")
     if not path.exists():
         return
@@ -2446,28 +2805,27 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(
         slide,
-        "EfficientSAM3.1 ES-EV-S — text-prompt-capable smaller variant",
-        "SAM 3.1 distilled student: 106M params (4× smaller than Option A). Keeps SAM 3's text-concept prompting natively.",
+        "EfficientSAM3.1 ES-EV-S — text-prompt-capable smaller variant (NPU High)",
+        "SAM 3.1 distilled student: 106M params (4× smaller than Option A). BF16-only — projects to NPU High; Mid 🔴 INT8-only.",
     )
     add_pipeline_strip(
         slide,
-        ["FFmpeg", "(text concept prompt)", ("EfficientSAM3.1 ES-EV-S BF16", True), "SQLite", "NLQ / LLM"],
+        ["FFmpeg", "(text concept prompt)", ("EfficientSAM3.1 ES-EV-S BF16 (High)", True), "SQLite", "NLQ / LLM"],
         accent_color=C.ACCENT_PURPLE,
     )
 
-    bw_ratio = bw_ratio_5090_to_npu("NPU Mid")   # stock = 16.19×
+    bw_ratio = bw_ratio_5090_to_npu("NPU High")   # stock = 16.19× (BW-equal to Mid)
 
-    # Primary table: per-resolution 5090 cost split + NPU Mid totals for n=1/5/20
-    # Dense (8 cols) so the FPS columns stay at stock memory; LPDDR6 lift is
-    # captured in the comparison table + bullets below.
+    # Primary table: per-resolution 5090 cost split + NPU High totals for n=1/5/20
+    # Recipe is BF16 — projects to FP-capable High (Mid INT8-only is dtype_mismatch).
     headers = ["Resolution",
                 "set_image ms (5090)",
                 "per-prompt ms (5090)",
                 "n=1 5090 ms",
                 "n=5 5090 ms",
                 "n=20 5090 ms",
-                "n=1 NPU Mid FPS",
-                "n=5 NPU Mid FPS"]
+                "n=1 NPU High FPS",
+                "n=5 NPU High FPS"]
     rows = []
     for res in ["720p", "1080p", "4K"]:
         if res not in by_res:
@@ -2476,14 +2834,14 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
         n1 = r["per_frame_5090_ms"]["n_1_concept"]
         n5 = r["per_frame_5090_ms"]["n_5_concepts"]
         n20 = r["per_frame_5090_ms"]["n_20_concepts_exhaustive"]
-        fps_n1_mid  = 1000.0 / (n1 * bw_ratio)
-        fps_n5_mid  = 1000.0 / (n5 * bw_ratio)
+        fps_n1_high = 1000.0 / (n1 * bw_ratio)
+        fps_n5_high = 1000.0 / (n5 * bw_ratio)
         rows.append([
             res,
             f"{r['set_image_5090_p50_ms']:.1f} ms",
             f"{r['per_prompt_5090_p50_ms']:.1f} ms",
             f"{n1:.1f}", f"{n5:.1f}", f"{n20:.1f}",
-            f"{fps_n1_mid:.2f}", f"{fps_n5_mid:.2f}",
+            f"{fps_n1_high:.2f}", f"{fps_n5_high:.2f}",
         ])
     add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.9),
                       Inches(CONTENT_W), Inches(1.8), headers, rows,
@@ -2527,7 +2885,12 @@ def slide_efficientsam3p1_textprompt(prs: Presentation):
 
 
 def slide_trt_yoloe26(prs: Presentation):
-    """Slide: "Does TRT FP8 close the YOLOE-26 gap?" — negative result, structural gap."""
+    """Slide: "Does TRT FP8 close the YOLOE-26 gap?" — negative result, structural gap.
+
+    All recipes here are FP (PyTorch FP16, TRT FP16, TRT FP8). NPU Mid is
+    INT8-only (200 TOPS, no FP) so these project to NPU High (FP-capable, BW-equal
+    to Mid at stock memory class). Mid would need an INT8 YOLOE-26 port we don't yet have.
+    """
     path = Path("data/output/bakeoff/trt_yoloe26_summary.json")
     if not path.exists():
         return
@@ -2538,21 +2901,23 @@ def slide_trt_yoloe26(prs: Presentation):
     add_title_subtitle(
         slide,
         "Does TRT FP8 close the one-model gap? — The honest answer: no.",
-        "YOLOE-26S-PF → TRT FP8 gives ~17% speedup, not 3×. Gap to recommended is structural.",
+        "YOLOE-26S-PF → TRT FP8 gives ~17% speedup, not 3×. FP recipes only — projects to NPU High (Mid is INT8-only 🔴).",
     )
     add_pipeline_strip(
         slide,
-        ["FFmpeg", ("YOLOE-26S-PF TRT FP8", True), "(no CLIP)", "SQLite", "NLQ / LLM"],
+        ["FFmpeg", ("YOLOE-26S-PF TRT FP8 (High)", True), "(no CLIP)", "SQLite", "NLQ / LLM"],
         accent_color=C.ACCENT_AMBER,
     )
 
-    bw_stock = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
-    bw_l6_12 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")     # 11.33×
-    bw_l6_14 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")     # 9.71×
+    # NPU High and NPU Mid share stock memory class (LPDDR5X-8.4) — BW ratios
+    # are identical. Project to High because recipes are all FP (Mid INT8-only).
+    bw_stock = bw_ratio_5090_to_npu("NPU High", "LPDDR5X-8.4")   # 16.19×
+    bw_l6_12 = bw_ratio_5090_to_npu("NPU High", "LPDDR6-12")     # 11.33×
+    bw_l6_14 = bw_ratio_5090_to_npu("NPU High", "LPDDR6-14")     # 9.71×
 
-    # Per-recipe per-resolution table — 3-column NPU Mid FPS for the LPDDR6 axis
+    # Per-recipe per-resolution table — 3-column NPU High FPS for the LPDDR6 axis
     headers = ["Recipe", "720p 5090 (p50)", "1080p 5090", "4K 5090",
-                "720p Mid · stock", "+LPDDR6-12", "⚡+LPDDR6-14",
+                "720p High · stock", "+LPDDR6-12", "⚡+LPDDR6-14",
                 "VRAM (5090)", "Speedup vs PT"]
     rows = []
     pt_ref_720 = recipes.get("pytorch_fp16", {}).get("by_resolution", {}).get("720p", {}).get("per_frame_ms_5090", {}).get("p50", 0)
@@ -2625,8 +2990,10 @@ def slide_yoloe26_onemodel(prs: Presentation):
 
     Post-ship watch on architectural simplification (Option B). YOLOE-26 collapses
     detector + open-vocab labeler into a single model with 4585-class built-in vocab.
-    Worth benching as a pipeline-simplification story even though we ship something
-    faster with the two-stage TRT FP8 stack.
+
+    Numbers are PyTorch FP16 → project to NPU High (FP-capable, BW-equal to
+    Mid at stock memory). NPU Mid (INT8-only) 🔴 dtype_mismatch — would need
+    an INT8 YOLOE-26 port (not yet existing in our toolchain).
     """
     path = Path("data/output/bakeoff/yoloe26_summary.json")
     if not path.exists():
@@ -2637,7 +3004,7 @@ def slide_yoloe26_onemodel(prs: Presentation):
     add_title_subtitle(
         slide,
         "Option-B watch: Ultralytics YOLOE-26 — one-model open-vocab",
-        "Single model replaces YOLO-seg + CLIP. 13 FPS NPU Mid @ 720p in PyTorch FP16 — 3× slower than our recommended stack, but 10× simpler.",
+        "Single model replaces YOLO-seg + CLIP. 13 FPS NPU High @ 720p in PyTorch FP16 — 3× slower than our recommended stack, but 10× simpler. Mid 🔴 INT8-only.",
     )
     add_pipeline_strip(
         slide,
@@ -2645,13 +3012,14 @@ def slide_yoloe26_onemodel(prs: Presentation):
         accent_color=C.ACCENT_AMBER,
     )
 
-    # Per-variant, per-resolution numbers — 3-column NPU Mid FPS for the LPDDR6 axis
-    bw_stock = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
-    bw_l6_12 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")     # 11.33×
-    bw_l6_14 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")     # 9.71×
+    # Per-variant, per-resolution numbers — 3-column NPU High FPS for the LPDDR6 axis
+    # (recipes are PyTorch FP16; Mid is INT8-only 🔴 — High BW-equal at stock)
+    bw_stock = bw_ratio_5090_to_npu("NPU High", "LPDDR5X-8.4")   # 16.19×
+    bw_l6_12 = bw_ratio_5090_to_npu("NPU High", "LPDDR6-12")     # 11.33×
+    bw_l6_14 = bw_ratio_5090_to_npu("NPU High", "LPDDR6-14")     # 9.71×
     headers = ["Variant", "Res", "Params",
                 "5090 ms (p50)",
-                "Mid · stock", "+LPDDR6-12", "⚡+LPDDR6-14",
+                "High · stock", "+LPDDR6-12", "⚡+LPDDR6-14",
                 "Recall vs YOLO11x"]
     rows = []
     tag_display = {
@@ -2684,7 +3052,7 @@ def slide_yoloe26_onemodel(prs: Presentation):
         font_size=9,
     )
 
-    # Head-to-head at 720p NPU Mid — 3-col FPS
+    # Head-to-head at 720p NPU High — 3-col FPS (FP-capable silicon)
     comp_headers = ["Architecture", "Stock", "+LPDDR6-12", "⚡+LPDDR6-14", "Models on the NPU", "Note"]
     def _fps3(stock: float) -> tuple[str, str, str]:
         return (f"{stock:.2f}", f"{stock * 1.43:.2f}", f"{stock * 1.67:.2f}")
@@ -2743,24 +3111,29 @@ def slide_vit_alternatives(prs: Presentation):
     rec = json.loads(rec_path.read_text()) if rec_path.exists() else {"variants": {}}
     ncu = json.loads(ncu_path.read_text()) if ncu_path.exists() else {"by_range": {}}
 
-    # 5090 → NPU Mid BW ratios — three memory variants for the LPDDR6 what-if columns.
-    bw_ratio_stock = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
-    bw_ratio_l6_12 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")     # 11.33×
-    bw_ratio_l6_14 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")     # 9.71×
+    # ViT candidates were measured in PyTorch FP16 — Mid (INT8-only) 🔴.
+    # Project to NPU High (FP-capable, BW-equal to Mid at stock memory class).
+    # The story is unchanged: Mid stock is currently INT8-only silicon, so ALL
+    # of these FP recipes would need INT8 ports to deploy on Mid (the toolchain
+    # we have today doesn't produce them). BW ratios are identical.
+    bw_ratio_stock = bw_ratio_5090_to_npu("NPU High", "LPDDR5X-8.4")   # 16.19×
+    bw_ratio_l6_12 = bw_ratio_5090_to_npu("NPU High", "LPDDR6-12")     # 11.33×
+    bw_ratio_l6_14 = bw_ratio_5090_to_npu("NPU High", "LPDDR6-14")     # 9.71×
     n_frames_per_range = 12   # 2 warmup + 10 timed, all NVTX-wrapped
 
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(
         slide,
-        "Vision transformers — could they replace YOLO-seg + SAM 3?",
-        "Two roles, four candidates. Camera ViTs miss real-time on stock memory — but ⚡LPDDR6-14 unlocks them. Agentic role: OWLv2 is the SAM 3 successor.",
+        "Vision transformers — could they replace YOLO-seg + SAM 3? (NPU High)",
+        "Four FP16 candidates → NPU High (FP-capable). Mid 🔴 INT8-only — needs INT8 ViT ports we don't yet have. ⚡LPDDR6-14 unlocks camera ViTs.",
     )
 
-    # Per-variant 720p results — 3-column NPU Mid FPS to surface the LPDDR6 lift
+    # Per-variant 720p results — 3-column NPU High FPS to surface the LPDDR6 lift
+    # (Mid INT8-only would need INT8 ViT ports we don't yet have)
     headers = [
         "Candidate", "Role", "Params",
         "5090 ms (p50)",
-        "NPU Mid FPS · stock",
+        "NPU High FPS · stock",
         "+LPDDR6-12 FPS",
         "⚡+LPDDR6-14 FPS",
         "DRAM / fwd",
@@ -2841,15 +3214,16 @@ def slide_vit_alternatives(prs: Presentation):
     )
 
     add_bullet_box(slide, CONTENT_LEFT, 5.6, CONTENT_W, 1.7, [
-        ("Net: 1-not-2 ViT on stock — but LPDDR6 changes the camera story", C.ACCENT_BLUE, True),
-        ("• Stock LPDDR5X-8.4: don't replace YOLO-seg + CLIP for cameras (ViT detectors are 10-13× heavier per frame, bust real-time even with TRT FP8). "
+        ("Net: 1-not-2 ViT on stock — but LPDDR6 + High-class silicon changes the camera story", C.ACCENT_BLUE, True),
+        ("• Stock LPDDR5X-8.4 NPU High: don't replace YOLO-seg + CLIP for cameras (ViT detectors are 10-13× heavier per frame, bust real-time even with TRT FP8). "
          "Replace SAM-3-lineage with OWLv2 for agentic prompts (42× lighter than SAM 3, fits the 1-Hz duty-cycle slot CLIP uses).",
          C.TEXT_BRIGHT),
-        ("⚡ LPDDR6 @ 14 GT/s flips the camera-ViT story: BW-bound ceiling jumps from 33-46 FPS → 55-77 FPS at NPU Mid. "
+        ("⚡ LPDDR6 @ 14 GT/s flips the camera-ViT story: BW-bound ceiling jumps from 33-46 FPS → 55-77 FPS at NPU High. "
          "Combined with TRT FP8 (closes ~3×), DETR ResNet-50 reaches ~28 FPS — within striking distance of 30 FPS real-time. "
          "All numbers are 🟠 cross-class projections (no NPU anchor for ViT-class workloads) at 100% NPU_share idle-best-case — multiply by 0.75 for typical-deployment NPU_share.",
          C.ACCENT_INDIGO),
-        ("• OWLv2 stays the agentic winner under any memory tier — duty-cycle math is so generous (240 ms × 1/min = 0.4% NPU) that BW upgrade is gravy.",
+        ("• 🔴 Mid (INT8-only 200 TOPS, same BW class as High): ALL these FP16 ViTs are dtype_mismatch on Mid silicon — would need INT8 ViT ports. None exist in our current toolchain. "
+         "OWLv2 stays the agentic winner under any memory tier — duty-cycle math is so generous (240 ms × 1/min = 0.4% NPU) that BW upgrade is gravy.",
          C.TEXT_DIM),
     ], font_size=9)
 
@@ -2857,11 +3231,8 @@ def slide_vit_alternatives(prs: Presentation):
 def slide_efficientsam3_community(prs: Presentation):
     """Slide: "The community finally shipped a SAM 3 Lite" — EfficientSAM3 ES-EV-S benched against our recommended stack.
 
-    Post-ship watch on roadmap item #9 (SAM 3 Lite). As of April 2026 the
-    community has released EfficientSAM3 (ES-EV-S, Apache-2.0, ~424M total /
-    26M vision backbone). We bench it against cached frames + YOLO prompt
-    boxes + SAM 3 reference masks from our existing bake-off to check whether
-    the community caught up.
+    Recipe is BF16 (FP) — Mid (INT8-only) 🔴 dtype_mismatch. Projects to
+    NPU High (FP-capable, BW-equal to Mid at stock memory class).
     """
     path = Path("data/output/bakeoff/efficientsam3_summary.json")
     if not path.exists():
@@ -2871,22 +3242,23 @@ def slide_efficientsam3_community(prs: Presentation):
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(
         slide,
-        "Post-ship watch: the community finally shipped a SAM 3 Lite",
-        "EfficientSAM3 ES-EV-S (Apr 2026, Apache-2.0) — 6.5× faster than SAM 3, still 13× behind our recommended stack.",
+        "Post-ship watch: the community finally shipped a SAM 3 Lite (NPU High)",
+        "EfficientSAM3 ES-EV-S (Apr 2026, Apache-2.0) — 6.5× faster than SAM 3, still 13× behind our recommended stack. BF16-only — Mid 🔴 INT8-only.",
     )
     add_pipeline_strip(
         slide,
-        ["FFmpeg", "YOLO 11x", ("EfficientSAM3 ES-EV-S BF16", True), "SQLite", "NLQ / LLM"],
+        ["FFmpeg", "YOLO 11x", ("EfficientSAM3 ES-EV-S BF16 (High)", True), "SQLite", "NLQ / LLM"],
         accent_color=C.ACCENT_PURPLE,
     )
 
-    # Per-resolution measured + projected numbers — 3-column NPU Mid FPS
+    # Per-resolution measured + projected numbers — 3-column NPU High FPS
+    # (Recipe is BF16 — FP-capable silicon. Mid INT8-only is dtype_mismatch.)
     by_res = data["by_resolution"]
-    bw_stock = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
-    bw_l6_12 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-12")     # 11.33×
-    bw_l6_14 = bw_ratio_5090_to_npu("NPU Mid", "LPDDR6-14")     # 9.71×
+    bw_stock = bw_ratio_5090_to_npu("NPU High", "LPDDR5X-8.4")   # 16.19×
+    bw_l6_12 = bw_ratio_5090_to_npu("NPU High", "LPDDR6-12")     # 11.33×
+    bw_l6_14 = bw_ratio_5090_to_npu("NPU High", "LPDDR6-14")     # 9.71×
     headers = ["Resolution", "5090 ms (p50)",
-                "Mid · stock FPS", "+LPDDR6-12", "⚡+LPDDR6-14",
+                "High · stock FPS", "+LPDDR6-12", "⚡+LPDDR6-14",
                 "Mean IoU vs SAM 3", "VRAM"]
     rows = []
     for res in ["720p", "1080p", "4K"]:
@@ -2977,31 +3349,35 @@ def slide_trt_takeaways(prs: Presentation):
     add_title_subtitle(
         slide,
         "TensorRT — where it pays and where it doesn't",
-        "Three TRT FP8 bake-offs, one rule of thumb: optimization loves big per-kernel work.",
+        "Three TRT FP8 bake-offs, one rule of thumb: optimization loves big per-kernel work. INT8 = Mid-deployable; FP8 = High-deployable.",
     )
     add_pipeline_strip(
         slide,
-        ["FFmpeg", ("YOLO-seg FP8 TRT", True), ("CLIP FP8 TRT", True), "SQLite", "NLQ / LLM"],
+        ["FFmpeg", ("YOLO-seg INT8 (Mid) / FP8 (High) TRT", True), ("CLIP FP8 TRT (High)", True), "SQLite", "NLQ / LLM"],
         accent_color=C.ACCENT_GREEN,
     )
 
-    # Decision matrix table
-    headers = ["Model", "Arch / bottleneck", "TRT FP8 result (720p edge)", "Verdict"]
+    # Decision matrix table — added "Deploys on" column to surface the silicon split.
+    # YOLO-seg has both INT8 (Mid) + FP8 (High) ports; CLIP + YOLOE-26 are FP-only.
+    headers = ["Model", "Arch / bottleneck", "TRT result (720p edge)", "Deploys on", "Verdict"]
     rows = [
         ["YOLO-seg 11s (10M params)",
          "Dense Conv backbone, matmul-bound",
-         f"{yolo_fp16_edge:.1f} FPS (FP16) → {yolo_fp8_edge:.1f} FPS (FP8), "
+         f"{yolo_fp16_edge:.1f} FPS (FP16) → {yolo_fp8_edge:.1f} FPS (INT8/FP8), "
          f"+{(yolo_fp8_edge/yolo_fp16_edge - 1)*100:.0f}% — full model activation halving works",
-         "RECOMMENDED — the core FP8 unblock"],
+         "Mid (INT8) + High (FP8)",
+         "RECOMMENDED — Mid-deployable + quality on High"],
         ["OpenCLIP ViT-B-32 visual (88M params)",
          "ViT attention + MLP, matmul-bound",
          f"{clip_bf16_edge_ms:.1f} ms BF16 → {clip_fp8_edge_ms:.1f} ms FP8, "
          f"{clip_bf16_edge_ms/clip_fp8_edge_ms:.1f}× faster — Top-1 agreement 0.964",
-         "RECOMMENDED — halves CLIP cost"],
+         "🔴 High only (FP-only port)",
+         "RECOMMENDED on High — halves CLIP cost"],
         ["YOLOE-26S-PF (16M params)",
          "Small model + complex open-vocab head, kernel-launch bound",
          f"PT {pt16_720:.1f} ms → TRT FP16 {tr16_720:.1f} ms ({pt16_720/tr16_720:.2f}×); "
          f"FP8 {tr8_720:.1f} ms — FP16→FP8 gains ~0% on the matmul",
+         "🔴 High only (FP-only port)",
          "DOESN'T close gap to recommended"],
     ]
     add_styled_table(
@@ -3012,14 +3388,14 @@ def slide_trt_takeaways(prs: Presentation):
 
     # Takeaways
     add_bullet_box(slide, CONTENT_LEFT, 4.35, CONTENT_W, 1.6, [
-        ("Rule of thumb: TRT FP8 pays off when the kernel is big", C.ACCENT_BLUE, True),
+        ("Rule of thumb: TRT FP8 pays off when the kernel is big — and silicon dictates dtype", C.ACCENT_BLUE, True),
         ("• WORKS: dense Conv (YOLO-seg), dense ViT (CLIP) — FP8 matmul throughput is the bottleneck, and TRT kernel fusion amortizes launch cost over real compute.",
          C.ACCENT_GREEN),
-        ("• UNDERPERFORMS: small param-count models with complex graphs (YOLOE-26 open-vocab head). "
-         "At 16M params the kernel-launch tax dominates; FP8 can't help with work that isn't matmul.",
+        ("• Deploy split: YOLO-seg has both INT8 (Mid) and FP8 (High) ports — same edge FPS (BW-bound), Mid takes the recall hit (87-92%), High keeps quality (recall 1.00). CLIP is FP-only in our toolchain → pins the full pipeline to High silicon.",
+         C.ACCENT_INDIGO),
+        ("• UNDERPERFORMS: small param-count models with complex graphs (YOLOE-26 open-vocab head). At 16M params the kernel-launch tax dominates; FP8 can't help with work that isn't matmul.",
          C.ACCENT_AMBER),
-        (f"• Orthogonal win: TRT FP8 still cuts VRAM ~{(1 - e26_vram_fp8/e26_vram_pt)*100:.0f}% on YOLOE-26 "
-         f"({e26_vram_pt:.0f} → {e26_vram_fp8:.0f} MB) — worth it for multi-stream even when latency gain is modest.",
+        (f"• Orthogonal win: TRT FP8 still cuts VRAM ~{(1 - e26_vram_fp8/e26_vram_pt)*100:.0f}% on YOLOE-26 ({e26_vram_pt:.0f} → {e26_vram_fp8:.0f} MB) — worth it for multi-stream even when latency gain is modest.",
          C.TEXT_DIM),
     ], font_size=10)
 
@@ -3057,8 +3433,14 @@ def _ncu_family(workload_id: str) -> str:
         return "Mask-model bake-off"
     if workload_id in {"yolo_seg", "yolo_seg_fp16_trt", "yolo_seg_fp8_trt", "clip_trt"}:
         return "Shipping (TRT two-stage)"
+    if workload_id.startswith("yolo_seg_yolov8n-seg"):
+        return "Cross-variant (yolov8n-seg)"
     if workload_id.startswith("yoloe26"):
         return "YOLOE-26 one-model"
+    if workload_id.startswith("resnet50"):
+        return "Path C anchor (5090 ref)"
+    if workload_id in {"rtdetr_l__720p", "detr__720p", "owlv2__720p", "grounding_dino__720p"}:
+        return "ViT alternatives (what-if)"
     return "Other"
 
 
@@ -3213,9 +3595,12 @@ def slide_ncu_workload_table(prs: Presentation):
         "Mask-model bake-off":          1,
         "Community SAM 3 Lite":         2,
         "Community SAM 3.1 Lite":       3,
-        "YOLOE-26 one-model":           4,
-        "Shipping (TRT two-stage)":     5,
-        "Other":                        6,
+        "ViT alternatives (what-if)":   4,
+        "YOLOE-26 one-model":           5,
+        "Shipping (TRT two-stage)":     6,
+        "Cross-variant (yolov8n-seg)":  7,
+        "Path C anchor (5090 ref)":     8,
+        "Other":                        9,
     }
     rows_raw = []
     for w in bundle["workloads"]:
@@ -3246,7 +3631,14 @@ def slide_ncu_workload_table(prs: Presentation):
         "yolo_seg":                             "YOLO11s-seg PyTorch FP32",
         "yolo_seg_fp16_trt":                    "YOLO11s-seg TRT FP16",
         "yolo_seg_fp8_trt":                     "YOLO11s-seg TRT FP8 ★ recommended",
+        "yolo_seg_yolov8n-seg_fp16_trt":        "yolov8n-seg TRT FP16 (cross-variant)",
+        "yolo_seg_yolov8n-seg_fp8_trt":         "yolov8n-seg TRT FP8 (cross-variant)",
         "clip_trt":                             "OpenCLIP visual TRT ★ recommended",
+        "resnet50_int8_trt__224":               "ResNet-50 INT8 TRT @224 (Path C anchor)",
+        "rtdetr_l__720p":                       "RT-DETR-L (Ultralytics ViT, 720p)",
+        "detr__720p":                           "DETR ResNet-50 (Facebook ViT, 720p)",
+        "owlv2__720p":                          "OWLv2-base (Google ViT, 720p)",
+        "grounding_dino__720p":                 "Grounding DINO Tiny (IDEA ViT, 720p)",
     }
 
     # FPS ceilings at three memory tiers — multipliers vs stock NPU Mid (94.08 GB/s eff):
@@ -3500,8 +3892,10 @@ def slide_npu_tier_specs(prs: Presentation):
          C.TEXT_BRIGHT),
         ("Badge legend: 🟢 measured / measured_anchor  •  🟡 same_class (BW-scaled within memory class)  •  🟠 cross_class (first-principles projection, no in-class anchor). Memory-upgrade overlays (LPDDR5T-11.2 / LPDDR6-12 / LPDDR6-14) are always 🟡 since they BW-scale within their tier's memory class. † TTFT held = prefill is compute-bound, doesn't move on memory upgrade.",
          C.ACCENT_INDIGO),
-        ("• Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s). NPU High differentiates on COMPUTE — FP-capable silicon (200 BF16/FP16, 400 INT8 via 2× MAC doubling, 400 FP8) vs Mid's INT8-only 200 TOPS — plus CAPACITY (1.33× DRAM) + TDP (1.6×). High is the inflection point where FP capability shows up; the same silicon naturally delivers 2× INT8 throughput on dense models. Both tiers share the upgrade ladder.",
+        ("• Mid + High share the SAME stock memory class (128-bit LPDDR5X @ 8.4 GT/s). NPU High differentiates on COMPUTE — FP-capable silicon (200 BF16/FP16, 400 INT8 via 2× MAC doubling, 400 FP8) vs Mid's INT8-only 200 TOPS — plus CAPACITY (1.33× DRAM) + TDP (1.6×). High is the inflection point where FP capability shows up. dtype gating: FP recipes (BF16/FP16/FP8) 🔴 dtype_mismatch on Mid — project to High. INT8 recipes deploy on either tier.",
          C.ACCENT_GREEN),
+        ("• Path C calibration validated end-to-end (2026-04-29): MAX(BW_floor, compute_floor) two-floor model + util_factor calibration per tier-class + 5090 cap (prevents Mid > 5090 on overhead-bound) + edge-anchor cap (prevents target > slower-edge-anchor) + 5th regime state for clamped overhead-bound cells. ResNet-50 INT8 TRT slope-test: predicted Mid = 2.74× Low-LP5X, measured 2.73× — within 0.4%.",
+         C.ACCENT_INDIGO),
         ("• Anchors today: NPU i.MX 95 yolov8n-seg INT8 = 32 ms / 31.25 FPS (vision); NPU Mid Skippy MoE Q4 = 37.85 tok/s decode / 351 ms TTFT @ 1K (LLM, INT8-native — Mid silicon is 200 TOPS INT8 only, no FP). RTX 5090 is every other projection's reference measurement. Low-LP5-64bit LLM 29.27 tok/s = vendor-published Qwen3-30B-A3B Q4_K_M.",
          C.TEXT_DIM),
     ], font_size=8)
@@ -3589,7 +3983,7 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
     hero.line.fill.background()
     add_text_box(slide, Inches(CONTENT_LEFT + 0.2), Inches(CONTENT_TOP + 0.1),
                  Inches(CONTENT_W - 0.4), Inches(0.5),
-                 "Recommended stack  •  Hybrid V2 + YOLO-seg FP8 + CLIP FP8 (all TensorRT)  •  720p Edge MPU (134.4 GB/s LPDDR5X)  •  36 FPS projected",
+                 "Recommended  •  YOLO-seg INT8 (Mid) ≡ FP8 (High) + CLIP FP8 (High only) — all TRT  •  720p (134.4 GB/s LPDDR5X)  •  36 FPS",
                  font_size=14, color=C.TEXT_WHITE, bold=True, alignment=PP_ALIGN.CENTER)
 
     items = [
@@ -3602,9 +3996,9 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
         ("16 FPS",    C.ACCENT_AMBER, True),
         ("  Hybrid V2 (YOLO-seg + CLIP) + FP8 CLIP + 1 Hz keyframe debounce. YOLO becomes the ceiling.",),
         ("24 FPS",    C.ACCENT_GREEN, True),
-        ("  YOLO-seg FP8 via TensorRT 10.16 on Blackwell (recall 1.00, IoU 0.998). CLIP FP8 every frame — no debounce needed.",),
+        ("  YOLO-seg FP8/INT8 via TensorRT 10.16 on Blackwell (FP8 recall 1.00, INT8 recall 0.875). CLIP FP8 every frame.",),
         ("36 FPS  ← recommended", C.ACCENT_INDIGO, True),
-        ("  Full TRT stack + CLIP @ 1 Hz. YOLO-only ceiling. Room for INT4/FP4 if the edge NPU exposes them.",),
+        ("  Full TRT stack + CLIP @ 1 Hz. YOLO-only ceiling. Mid silicon: INT8 yolo11s only (no CLIP toolchain). High silicon: full FP8 stack with CLIP.",),
     ]
     add_bullet_box(slide, CONTENT_LEFT, 2.2, CONTENT_W / 2 - 0.15, 4.6, items, font_size=11)
 
@@ -3612,18 +4006,21 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
         ("What we proved",  C.ACCENT_GREEN, True),
         "• Bandwidth — not compute — sets the edge ceiling for vision transformers",
         "• FP8 activation quant is near-lossless on ViT + detection heads on Blackwell",
+        "• INT8 + FP8 share the same BW-bound edge FPS at 8-bit — silicon dictates which dtype deploys",
         "• Hybrid pipelines (YOLO-seg + CLIP) beat a monolithic big-ViT mask model for edge",
-        "• CLIP keyframe debouncing is an optional lever, not a hard requirement once TRT-compiled",
+        "",
+        ("Silicon-class implications (Mid vs High)", C.ACCENT_INDIGO, True),
+        "• NPU Mid (INT8-only, 200 TOPS) deploys yolo11s INT8 TRT only — CLIP needs an INT8 port we don't yet have",
+        "• NPU High (FP-capable, 400 FP8 TOPS) deploys the full stack: yolo11s FP8 + CLIP FP8 + better recall",
         "",
         ("What we ruled out", C.ACCENT_RED, True),
         "• SAM 3 BF16 on 134.4 GB/s — not feasible without model replacement",
         "• INT8 weight-only quantization — doesn't touch activation traffic, no edge gain",
-        "• torchao FP8 on Conv-only models (YOLO-seg) — tool-chain gap, use TensorRT",
+        "• torchao FP8 on Conv-only models — tool-chain gap, use TensorRT",
         "",
         ("What remains open", C.ACCENT_AMBER, True),
-        "• Meta releasing quantized SAM 3 / SAM 3 Lite (passive watch)",
-        "• INT4/FP4 on detection head — accuracy risk; warrants targeted study if NPU ships with it",
-        "• Live streaming subsystem — architecture locked (MJPEG+WS, YOLO-FP8), ~500-line build when prioritized",
+        "• INT8 CLIP port (PTQ + activation calibration) — would unlock full pipeline on Mid",
+        "• Meta releasing quantized SAM 3 / SAM 3 Lite; INT4/FP4 on detection head if NPU exposes them",
     ]
     add_bullet_box(slide, CONTENT_LEFT + CONTENT_W / 2 + 0.15, 2.2,
                     CONTENT_W / 2 - 0.15, 4.6, right, font_size=11)
@@ -3793,6 +4190,15 @@ def build_deck(output, runs_dir, data_dir):
         slide_llm_bakeoff(prs)
         console.print("  Building: NPU duty-cycle trade-off")
         slide_llm_duty_cycle(prs)
+
+    # Skippy training campaign — recipe taxonomy + sister-model confound + dense-vs-MoE BW
+    console.print("  Building: Skippy recipe taxonomy")
+    slide_skippy_recipe_taxonomy(prs)
+    console.print("  Building: Skippy sister-model confound")
+    slide_skippy_sister_confound(prs)
+    if Path("data/output/bakeoff/llm_anchors").exists():
+        console.print("  Building: Dense vs MoE bandwidth")
+        slide_dense_vs_moe_bandwidth(prs)
 
     # Multi-stream concurrency (YOLO batching)
     if Path("data/output/bakeoff/concurrency_edge_projection.json").exists():
