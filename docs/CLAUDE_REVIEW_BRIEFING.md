@@ -471,6 +471,54 @@ LLM queries cost ~1 FPS on NPU Mid for short answers (200 tok), and full
 RAG (8K+2K decode) obliterates vision even on NPU High — reserve RAG for
 async or a second-NPU use case.
 
+### 4.1 Agentic role recommendation — OWLv2 when text-prompted segmentation is needed
+
+The shipping pipeline above handles **per-frame open-vocab labeling** at
+real-time rates — every frame is analyzed, every detected region is
+labeled against the user's vocabulary. This is the right pattern when
+the application asks "what's in the scene right now?" continuously.
+
+A different pattern shows up when the application asks "find the
+[arbitrary text concept] in this scene" *on-demand* (operator query,
+event-triggered analysis, periodic agentic prompt). For that role,
+**OWLv2 is the recommended SAM 3 successor** — additive to Hybrid V2,
+not a replacement.
+
+**Why OWLv2:**
+
+| Metric | OWLv2-base | SAM 3 BF16 | Shipping (yolo_seg_fp8_trt) |
+|---|---|---|---|
+| Total params | ~155M | 840M | 10M |
+| DRAM/forward (ncu-measured) | 2.82 GB | 119 GB | 217 MB |
+| 5090 ms @ 720p | 14.8 | 95 | 0.68 |
+| NPU Mid edge ms (BW floor) | 30 (2.82 / 0.094) | 1265 | 2.3 |
+| NPU Mid effective edge ms (with overhead) | ~240 | not deployable | ~27 |
+| Open-vocab text prompting | ✓ native | ✓ native | only via CLIP labeling |
+| License | Apache-2.0 | non-commercial | AGPL-3.0 (Ultralytics) |
+
+OWLv2 is **42× lighter than SAM 3** per forward (2.82 GB vs 119 GB) and
+**6× faster** on the 5090 reference. It retains SAM 3's text-prompted
+segmentation natively — the agentic capability that Hybrid V2's
+detector-then-labeler pattern doesn't cleanly preserve when the prompted
+concept doesn't surface from a COCO-class detector first.
+
+**Duty cycle.** At ~240 ms per agentic forward and 1 query/minute typical
+operator pace, OWLv2 occupies **0.4% NPU duty** — negligible impact on
+the per-frame vision pipeline. Slots into the same on-demand budget CLIP
+currently uses for the 1 Hz keyframe debounce.
+
+**Recommendation framing:** ship Hybrid V2 as the per-frame default
+(real-time, BW-budget-friendly). Add OWLv2 as the agentic-role on-demand
+secondary path **when** the application requires arbitrary text-prompted
+segmentation outside the Hybrid V2 detector's COCO vocabulary. Both can
+coexist on a single NPU — additive, not substitutive.
+
+**Open work for the OWLv2 path.** Currently characterized in PyTorch
+FP16 only. A TRT-FP8 OWLv2 port (analogous to our YOLO-seg + CLIP
+recipes) could push it to ~80 ms NPU High edge — making per-frame
+agentic queries viable rather than 1 Hz on-demand. KH-P2-001 in
+REMEDIATION_PLAN.md tracks this if/when an application case justifies it.
+
 ---
 
 ## 5. Cross-cutting findings
