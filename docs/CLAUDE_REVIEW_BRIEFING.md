@@ -675,6 +675,17 @@ where per-kernel overhead dominates.
   JSON field naming bumped to `box_recall_vs_fp16_engine` /
   `mean_matched_iou_vs_fp16_engine` to make this explicit (schema
   version 2). Legacy fields preserved as aliases for one cycle.
+- **Dtype gating applied to projection JSONs** (schema v3, KH-P0-002 in
+  REMEDIATION_PLAN.md). Per-recipe projection cells now carry
+  `dtype_mismatch_on_mid` (boolean) + `deployable_tiers` (list) +
+  `dtype_mismatch_reason` (string) fields. NPU Mid is INT8-only at
+  200 TOPS; FP-class recipes (`fp8`, `fp16`, `bf16`, `fp32`) are flagged
+  `dtype_mismatch_on_mid=True` and project to NPU High (BW-equal at stock
+  LPDDR5X-8.4 memory class). **Historical FP-on-Mid raw projection
+  numbers are preserved** alongside the gating flag — the reviewer's
+  guidance was render dtype mismatch as a flag, not delete data. The
+  matrix is in the bundle's `__meta__.tier_dtype_support` field and
+  rendered as a markdown table in the bundle MD § 4.
 - **5090 → NPU Mid scale = 16.19×.** Effective: (1792 × 0.85) / (134.4 ×
   0.70) = 1523.2 / 94.08 = 16.19. Used as the canonical scale factor
   across every edge projection. Sensitivity: ±10% on either efficiency

@@ -67,15 +67,107 @@ def _add_quality_aliases(payload: Any) -> Any:
     return payload
 
 
+# KH-P0-002 — Tier dtype support matrix.
+# Mid is INT8-only (200 TOPS, no FP path); High is FP-capable (200 BF16 / 400 INT8 / 400 FP8).
+TIER_DTYPE_SUPPORT = {
+    "NPU Low-LP4":       ["INT8"],
+    "NPU Low-LP5X":      ["INT8"],
+    "NPU Low-LP5-32bit": ["INT8"],
+    "NPU Mid":           ["INT8"],
+    "NPU High":          ["INT8", "FP16", "BF16", "FP8"],
+    "RTX 5090":          ["INT8", "FP16", "BF16", "FP8", "FP32"],
+}
+
+ALL_NPU_TIERS = ["NPU Low-LP4", "NPU Low-LP5X", "NPU Low-LP5-32bit", "NPU Mid", "NPU High"]
+
+
+def _classify_recipe(name: str) -> dict | None:
+    """Return a dtype-gating dict for a recipe key, or None if the key
+    doesn't look like a recipe label (e.g., it's a model name or resolution).
+    """
+    n = name.lower()
+    # INT8 path — deployable on every NPU tier
+    if "int8" in n:
+        return {
+            "dtype_class":           "int8",
+            "deployable_tiers":      ALL_NPU_TIERS + ["RTX 5090"],
+            "dtype_mismatch_on_mid": False,
+        }
+    # FP8 path — High only (Mid INT8-only)
+    if "fp8" in n:
+        return {
+            "dtype_class":           "fp8",
+            "deployable_tiers":      ["NPU High", "RTX 5090"],
+            "dtype_mismatch_on_mid": True,
+            "dtype_mismatch_reason": "NPU Mid is INT8-only (200 TOPS, no FP path); recipe requires FP8. Projects to NPU High (BW-equal at stock LPDDR5X).",
+        }
+    # FP16 / BF16 / FP32 — High only
+    if any(x in n for x in ("fp16", "bf16", "fp32")):
+        return {
+            "dtype_class":           "fp16-class",
+            "deployable_tiers":      ["NPU High", "RTX 5090"],
+            "dtype_mismatch_on_mid": True,
+            "dtype_mismatch_reason": "NPU Mid is INT8-only (200 TOPS, no FP path); recipe requires FP16/BF16. Projects to NPU High (BW-equal at stock LPDDR5X).",
+        }
+    return None
+
+
+def _looks_like_projection_leaf(payload: dict) -> bool:
+    """Heuristic: this is a per-recipe projection cell if it has a 5090
+    measurement + an edge-projection field together.
+    """
+    has_5090 = any(k.startswith(("mean_frame_ms_5090", "measured_frame_ms_5090"))
+                   for k in payload)
+    has_edge = any(k.startswith(("projected_ms_edge", "projected_fps_edge",
+                                  "bandwidth_limited_ms"))
+                   for k in payload)
+    return has_5090 and has_edge
+
+
+def _apply_dtype_gating(payload: Any, parent_key: str | None = None) -> Any:
+    """Walk a bake-off payload and tag each recipe-keyed projection leaf
+    with `dtype_mismatch_on_mid` + `deployable_tiers` per
+    TIER_DTYPE_SUPPORT.
+
+    Historical FP-on-Mid run data is preserved (per reviewer's
+    KH-P0-002 guidance: don't delete historical data; render dtype-mismatch
+    as a flag, not a deletion).
+    """
+    if isinstance(payload, dict):
+        # If this dict is a leaf projection AND its parent key looks like a
+        # recipe label, apply gating.
+        if parent_key is not None and _looks_like_projection_leaf(payload):
+            cls = _classify_recipe(parent_key)
+            if cls is not None and "dtype_mismatch_on_mid" not in payload:
+                payload.update(cls)
+        # Also check `recipe` field (some schemas put the dtype tag as a value)
+        if "recipe" in payload and "dtype_mismatch_on_mid" not in payload:
+            cls = _classify_recipe(str(payload["recipe"]))
+            if cls is not None:
+                payload.update(cls)
+        for k, v in payload.items():
+            _apply_dtype_gating(v, k)
+    elif isinstance(payload, list):
+        for v in payload:
+            _apply_dtype_gating(v, parent_key)
+    return payload
+
+
 def collect_bakeoff_summaries() -> dict[str, Any]:
     """Walk top-level bakeoff/*.json files. Skip subdirs and run traces.
 
-    Adds `*_vs_fp16_engine` aliases (engine-self-comparison clarification)
-    to every quality field — see KH-P0-003 in REMEDIATION_PLAN.md.
+    Adds:
+    - `*_vs_fp16_engine` aliases (engine-self-comparison clarification)
+      per KH-P0-003
+    - `dtype_mismatch_on_mid` + `deployable_tiers` per recipe leaf
+      per KH-P0-002 (don't delete historical FP-on-Mid data; tag it)
     """
     out: dict[str, Any] = {}
     for p in sorted(BAKEOFF.glob("*.json")):
-        out[p.stem] = _add_quality_aliases(_load_json(p))
+        payload = _load_json(p)
+        _add_quality_aliases(payload)
+        _apply_dtype_gating(payload)
+        out[p.stem] = payload
     return out
 
 
@@ -274,7 +366,33 @@ def render_md(bundle: dict) -> str:
     )
     md += _render_bakeoff_index(bundle.get("bakeoffs", {}))
 
-    md += _md_h(2, "4. Methodology notes")
+    md += _md_h(2, "4. Dtype gating per tier")
+    md += (
+        "Per-recipe projection cells in the JSON now carry "
+        "`dtype_mismatch_on_mid`, `deployable_tiers`, and "
+        "`dtype_mismatch_reason` fields (schema v3, KH-P0-002). The matrix:\n\n"
+    )
+    md += _md_table(
+        ["NPU tier", "Supported dtypes"],
+        [[t, ", ".join(d)] for t, d in TIER_DTYPE_SUPPORT.items()],
+    )
+    md += (
+        "- **INT8 recipes** (`int8`, `int8_1x1_swap`, etc.) deploy on every "
+        "NPU tier and the 5090.\n"
+        "- **FP-class recipes** (`fp8`, `fp16`, `bf16`, `fp32`) deploy only "
+        "on NPU High and the 5090. NPU Mid is INT8-only (200 TOPS, no FP "
+        "path). FP-class recipes flagged `dtype_mismatch_on_mid=True` "
+        "project to High at the same BW ceiling (BW-equal at stock "
+        "LPDDR5X-8.4 memory class).\n"
+        "- **Historical FP-on-Mid raw projection numbers are preserved** in "
+        "the JSON alongside the gating flag — the reviewer's KH-P0-002 "
+        "guidance is to render dtype mismatch as a flag, not delete data.\n"
+        "- This matrix doesn't apply to LLM bake-offs: Q4_K_M GGUF runs "
+        "INT8-native at runtime regardless of `compute_dtype` labels in "
+        "the per-quant JSONs.\n\n"
+    )
+
+    md += _md_h(2, "5. Methodology notes")
     md += (
         "- **5090 anchor reference.** All edge projections start from 5090 wall-time, "
         "scaled to NPU Mid by the BW ratio above. NPU Mid effective bandwidth = "
@@ -286,9 +404,11 @@ def render_md(bundle: dict) -> str:
         "- **Mid is INT8-only** (200 TOPS, no FP). High is FP-capable "
         "(200 BF16/FP16 + 400 INT8/FP8). Mid + High share the same stock "
         "LPDDR5X-8.4 memory class so BW-bound ceilings match; differentiator "
-        "is dtype gating.\n"
-        "- **dtype_mismatch flag** in projections means a recipe (e.g. FP8 CLIP) "
-        "can't deploy on Mid silicon and projects to High instead.\n"
+        "is dtype gating (see § 4).\n"
+        "- **Quality metrics** (`box_recall*`, `mean_matched_iou*`) measure "
+        "quantization drift vs the FP16 TRT engine on the same input frames "
+        "— NOT vs ground-truth labels. Aliased field names "
+        "`*_vs_fp16_engine` make this explicit (KH-P0-003).\n"
         "- **ncu replay mode.** Most workloads measured via app-replay (fast); "
         "TRT engines + dynamic NMS use kernel-replay (~80 min per target).\n"
     )
@@ -318,7 +438,7 @@ def main() -> int:
             "git_head": _git_head(),
             "bw_ratio_5090_to_npu_mid": BW_RATIO_5090_TO_NPU_MID,
             "npu_mid_effective_gbs": 94.08,
-            "schema_version": 2,
+            "schema_version": 3,
             "schema_v2_changes": (
                 "Bake-off quality fields gain `box_recall_vs_fp16_engine` and "
                 "`mean_matched_iou_vs_fp16_engine` aliases. These measure "
@@ -327,6 +447,18 @@ def main() -> int:
                 "field names (`box_recall`, `mean_matched_iou`) preserved "
                 "as aliases for one cycle. See KH-P0-003 in REMEDIATION_PLAN.md."
             ),
+            "schema_v3_changes": (
+                "Per-recipe projection cells gain `dtype_mismatch_on_mid`, "
+                "`deployable_tiers`, and (where applicable) "
+                "`dtype_mismatch_reason` fields. NPU Mid is INT8-only "
+                "(200 TOPS, no FP path); FP-class recipes (fp16, bf16, "
+                "fp8, fp32) are flagged dtype_mismatch_on_mid=True and "
+                "project to NPU High instead. Historical raw FP-on-Mid "
+                "projection numbers are preserved alongside the flag for "
+                "audit trail per the reviewer's KH-P0-002 guidance. See "
+                "REMEDIATION_PLAN.md."
+            ),
+            "tier_dtype_support": TIER_DTYPE_SUPPORT,
             "methodology_version": "2026-05-08-post-remediation",
         },
         "ncu": ncu,
