@@ -120,11 +120,15 @@ def _build_clip_runner(engine_path: Path):
     output_names = [n for n in tensor_names
                     if engine.get_tensor_mode(n) == trt.TensorIOMode.OUTPUT]
     in_shape = tuple(engine.get_tensor_shape(input_name))
+    # Resolve dynamic dims (e.g., dynamic batch) to concrete batch=1
+    in_shape = tuple(d if d > 0 else 1 for d in in_shape)
+    ctx.set_input_shape(input_name, in_shape)
     inp = torch.zeros(in_shape, dtype=torch.float32, device="cuda")
     outs = {}
     for n in output_names:
-        shp = engine.get_tensor_shape(n)
-        outs[n] = torch.zeros(tuple(shp), dtype=torch.float32, device="cuda")
+        shp = ctx.get_tensor_shape(n)
+        out_shape = tuple(d if d > 0 else 1 for d in shp)
+        outs[n] = torch.zeros(out_shape, dtype=torch.float32, device="cuda")
     ctx.set_tensor_address(input_name, int(inp.data_ptr()))
     for n in output_names:
         ctx.set_tensor_address(n, int(outs[n].data_ptr()))
@@ -253,6 +257,12 @@ def profile(video_path: Path, n_frames: int) -> dict:
                 n_clip_invocations += 1
 
             # 5. DB INSERT (1 row per detected event; assume avg ~3 dets/frame)
+            # Production pattern: BATCH commits across frames to amortize fsync.
+            # We measure the per-frame INSERT cost (cheap, ~10 us total per frame),
+            # not the commit cost (which is fsync-bound and only triggers every
+            # COMMIT_BATCH_FRAMES frames in production). Per-frame commit is the
+            # naive integration anti-pattern; the realistic projection below
+            # amortizes fsync over the batch.
             n_dets = 3
             t = time.perf_counter()
             for d in range(n_dets):
@@ -261,8 +271,12 @@ def profile(video_path: Path, n_frames: int) -> dict:
                     "box_x, box_y, box_w, box_h) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (frame_idx, frame_idx * 33.3, "person", 0.85, 0.1, 0.1, 0.5, 0.5),
                 )
-            db.commit()
+            # COMMIT every 30 frames (1 Hz fsync cadence — production pattern)
+            if (frame_idx + 1) % 30 == 0:
+                db.commit()
             timings["db_insert_ms"].append((time.perf_counter() - t) * 1000.0)
+        # Final commit for any pending inserts after loop
+        db.commit()
     finally:
         cap.release()
         db.close()

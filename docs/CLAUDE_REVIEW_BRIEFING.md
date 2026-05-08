@@ -668,34 +668,54 @@ CLIP TRT @ 1 Hz → SQLite event-log INSERT). KH-P3-002 fills the gap.
 stages project to NPU Mid via the standard 16.19× BW ratio; CPU stages
 (decode, preprocess, DB INSERT) project via 10× ARM Cortex-A55 single-
 thread slowdown documented in slide_trt_yolo's preprocessing footnote.
+DB commits batched at 1 Hz (every 30 frames) per production pattern
+— per-frame `commit()` would fsync per frame and crowd out the budget
+catastrophically.
 
-**Per-stage budget at 720p NPU Mid (will be filled in once GPU frees up
-from [docs]'s variance-bounds + Llama v4 training runs):**
+**Measured (200 frames, 720p_EW_clip, FP8 TRT engines):**
 
 | Stage | 5090 p50 ms | NPU Mid p50 ms | Class | Notes |
 |---|---|---|---|---|
-| ingest_decode | _TBD_ | _TBD_ | CPU | cv2 H.264 decode, single-thread |
-| preprocess | _TBD_ | _TBD_ | CPU | letterbox 720p → 640×640, normalize |
-| yolo_trt_infer | _TBD_ (~0.7) | _TBD_ (~11) | GPU | every-frame, BW-bound |
-| clip_trt_infer (× 1/30) | _TBD_ (~1.5) | _TBD_ (~25) | GPU | 1 Hz amortization |
-| db_insert (~3 dets/frame) | _TBD_ | _TBD_ | CPU | SQLite INSERT, no FTS5 indexing |
-| **per-frame total** | _TBD_ | _TBD_ | | |
-| **36 FPS budget** | — | **27.78 ms** | | |
-| **slack** | — | _TBD_ | | |
+| ingest_decode | 1.96 | **19.57** | CPU | cv2 H.264 decode, single-thread |
+| preprocess | 1.20 | **11.99** | CPU | letterbox 720p → 640×640, normalize |
+| yolo_trt_infer | 1.03 | 16.69 | GPU | dynbatch=1 engine, includes input copy |
+| clip_trt_infer (× 1/30) | 0.79 | 0.43 | GPU | 1 Hz amortization (12.82 ms full × 1/30) |
+| db_insert (~3 dets/frame) | 0.02 | 0.20 | CPU | SQLite INSERT, batched commits |
+| **per-frame total** | **4.23** | **48.88** | | |
+| **5090 sustained** | **236 FPS** | | | |
+| **NPU Mid 36 FPS budget** | — | **27.78 ms** | | |
+| **NPU Mid slack** | — | **−21.10 ms** | | over budget |
 
-(Numbers populate from `data/output/bakeoff/e2e_pipeline_summary.json`
-on next GPU-available run.)
+**Headline finding: CPU stages crowd out the 36 FPS NPU Mid budget on a
+pure-NPU board.** The GPU stages (yolo + amortized clip) total ~17 ms,
+well within the 27.78 ms budget. The CPU stages (decode + preprocess +
+DB) total ~32 ms, which alone exceeds the budget. This is a real
+integration-architecture finding the YOLO+CLIP-only headline doesn't
+expose.
 
-**Pre-run expectation:** YOLO TRT FP8 dominates the GPU side (~11 ms NPU
-Mid via existing bake-off). CLIP @ 1 Hz amortizes to <1 ms/frame
-contribution. CPU stages should be in the 1–3 ms range each on the 5090
-host, scaling to 10–30 ms on edge ARM. **Total budget pressure most
-likely lands on either (a) preprocess on a slow ARM core, or (b)
-SQLite + FTS5 indexing if it triggers per-INSERT** — both are
-mitigatable (preproc → fixed-function ISP / 2D GPU on most SoCs;
-FTS5 → batch-insert + lazy index rebuild). A reviewer should expect
-this slide to clarify that the 36 FPS headline isn't crowded out by
-non-NPU stages, and to identify where to push if it is.
+**Production-realistic projection.** SoCs with fixed-function ISP and
+2D GPU (Qualcomm Hexagon, MediaTek Genio, NXP i.MX, Ambarella, Hailo)
+move decode + preprocess off-CPU entirely:
+
+- ingest_decode → ~0.3 ms via NVDEC / hardware video decoder block
+- preprocess → ~0.5 ms via 2D-GPU letterbox + ISP normalize
+
+With those offloads and batched commits, NPU Mid p50 total ≈ **17.6 ms
+= 56 FPS sustained**, well under the 36 FPS budget with ~10 ms
+headroom for multi-stream batching or higher source resolution.
+
+**Pure-NPU boards** (Coral, some development kits) without fixed-function
+ISP / 2D GPU pay the full CPU cost. For those targets, the practical
+deployment recipe is to either (a) lower source resolution to 480p (cuts
+decode + preprocess in half), or (b) drop to a smaller detector
+(yolov8n-seg, ncu floor 106 MB/forward — half of yolo11s-seg).
+
+**Reviewer takeaways.** The 36 FPS headline is achievable end-to-end
+on production SoCs that ship hardware decode + 2D GPU, with comfortable
+headroom. It is *not* achievable on a pure-NPU board running CPU
+software-decode — the integration-architecture matters as much as the
+NPU spec. The deck's prior framing didn't quantify this; § 5.8 + the
+new `slide_e2e_latency_budget` deck slide do.
 
 ---
 
