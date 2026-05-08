@@ -1,0 +1,150 @@
+{
+  "__meta__": {
+    "generated_at": "2026-05-08T17:45:24+00:00",
+    "repo": "keyhole",
+    "git_head": "fe79c87c1c36",
+    "schema_version": 1,
+    "methodology_version": "2026-05-08-post-remediation",
+    "description": "Canonical 5090 LLM measurement cells. Cells keyed by measurement_alias (the same key sizer / pai-sizer use in RTX_5090_REFERENCE.measured_llm). Use this file as the authoritative source rather than walking individual per-quant JSONs; same data, easier to consume.",
+    "harness": "scripts/bakeoff_llm_anchors.py + scripts/bakeoff_llm.py",
+    "host": "RTX 5090 + i9-14900KF, llama-cpp-python 0.3.20 (CUDA, n_ctx=16384)",
+    "n_anchors": 5
+  },
+  "anchors": {
+    "llama_3_1_8b_dense": {
+      "model_id": "llama3.1-8b-dense",
+      "model_arch": "llama-dense",
+      "n_params_active_b": 8.03,
+      "n_params_total_b": 8.03,
+      "compute_dtype": "fp16",
+      "quants": {
+        "Q4_K_M": {
+          "gguf_size_gb": 4.920739232,
+          "decode_tok_s_n256": 211.53242071661523,
+          "decode_tok_s_rag_8k_2k": 170.97906148495832,
+          "prefill_tok_s_at_2k": 10161.573939033413,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 13.330818674061447,
+          "source_path": "data/output/bakeoff/llm_anchors/llama3.1-8b-dense/Q4_K_M.json"
+        }
+      }
+    },
+    "mistral_7b_v03_dense": {
+      "model_id": "mistral-7b-v0.3-dense",
+      "model_arch": "mistral-dense",
+      "n_params_active_b": 7.25,
+      "n_params_total_b": 7.25,
+      "compute_dtype": "fp16",
+      "quants": {
+        "Q4_K_M": {
+          "gguf_size_gb": 4.372812,
+          "decode_tok_s_n256": 239.3655234137713,
+          "decode_tok_s_rag_8k_2k": 182.6689858610533,
+          "prefill_tok_s_at_2k": 10216.726704526323,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 12.556480967905372,
+          "source_path": "data/output/bakeoff/llm_anchors/mistral-7b-v0.3-dense/Q4_K_M.json"
+        }
+      }
+    },
+    "qwen_2_5_32b_dense": {
+      "model_id": "qwen2.5-32b-dense",
+      "model_arch": "qwen-dense",
+      "n_params_active_b": 32.5,
+      "n_params_total_b": 32.5,
+      "compute_dtype": "fp16",
+      "quants": {
+        "Q4_K_M": {
+          "gguf_size_gb": 19.851336576,
+          "decode_tok_s_n256": 62.38413253239626,
+          "decode_tok_s_rag_8k_2k": 52.6880076980146,
+          "prefill_tok_s_at_2k": 2855.2922309844553,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 43.101706475019455,
+          "source_path": "data/output/bakeoff/llm_anchors/qwen2.5-32b-dense/Q4_K_M.json"
+        },
+        "Q5_K_M": {
+          "gguf_size_gb": 23.262157696,
+          "decode_tok_s_n256": 55.524332324043414,
+          "decode_tok_s_rag_8k_2k": 47.67544541504144,
+          "prefill_tok_s_at_2k": 2734.6679673732515,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 47.30519581306726,
+          "source_path": "data/output/bakeoff/llm_anchors/qwen2.5-32b-dense/Q5_K_M.json"
+        }
+      }
+    },
+    "qwen_2_5_7b_dense": {
+      "model_id": "qwen2.5-7b-dense",
+      "model_arch": "qwen-dense",
+      "n_params_active_b": 7.62,
+      "n_params_total_b": 7.62,
+      "compute_dtype": "fp16",
+      "quants": {
+        "Q4_K_M": {
+          "gguf_size_gb": 4.68307424,
+          "decode_tok_s_n256": 211.67875079058,
+          "decode_tok_s_rag_8k_2k": 183.87142440555974,
+          "prefill_tok_s_at_2k": 10865.43658585445,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 12.271979819051921,
+          "source_path": "data/output/bakeoff/llm_anchors/qwen2.5-7b-dense/Q4_K_M.json"
+        },
+        "Q5_K_M": {
+          "gguf_size_gb": 5.444831936,
+          "decode_tok_s_n256": 207.5283597560584,
+          "decode_tok_s_rag_8k_2k": 169.98116289404493,
+          "prefill_tok_s_at_2k": 11613.945358421315,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 13.183803309919313,
+          "source_path": "data/output/bakeoff/llm_anchors/qwen2.5-7b-dense/Q5_K_M.json"
+        },
+        "Q8_0": {
+          "gguf_size_gb": 8.098525888,
+          "decode_tok_s_n256": 161.04779112007884,
+          "decode_tok_s_rag_8k_2k": 137.20338541122754,
+          "prefill_tok_s_at_2k": 12364.66398780442,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 16.02217521611601,
+          "source_path": "data/output/bakeoff/llm_anchors/qwen2.5-7b-dense/Q8_0.json"
+        }
+      }
+    },
+    "skippy_moe_30b_a3b": {
+      "model_id": "qwen3-30b-a3b-moe",
+      "model_arch": "moe",
+      "n_params_active_b": 3.0,
+      "n_params_total_b": 30.0,
+      "compute_dtype": "fp16",
+      "quants": {
+        "Q4_K_M": {
+          "gguf_size_gb": 18.556686752,
+          "decode_tok_s_n256": 249.7857794219613,
+          "decode_tok_s_rag_8k_2k": 158.95418753554927,
+          "prefill_tok_s_at_2k": 6228.172335361168,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 15.033711546999257,
+          "source_path": "data/output/bakeoff/llm_summary.json"
+        },
+        "Q5_K_M": {
+          "gguf_size_gb": 21.725581728,
+          "decode_tok_s_n256": 239.27674178162724,
+          "decode_tok_s_rag_8k_2k": 163.2379282824099,
+          "prefill_tok_s_at_2k": 6072.492148131649,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 14.758874352995917,
+          "source_path": "data/output/bakeoff/llm_summary.json"
+        },
+        "Q8_0": {
+          "gguf_size_gb": 32.483932576,
+          "decode_tok_s_n256": 55.30710788925654,
+          "decode_tok_s_rag_8k_2k": 28.981912858319266,
+          "prefill_tok_s_at_2k": 1368.2463645083135,
+          "ttft_1k_sec": null,
+          "rag_total_sec": 77.0499364860043,
+          "source_path": "data/output/bakeoff/llm_summary.json"
+        }
+      }
+    }
+  }
+}
