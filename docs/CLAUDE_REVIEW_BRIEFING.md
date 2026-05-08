@@ -766,8 +766,17 @@ questions.
   across every edge projection. Sensitivity: ±10% on either efficiency
   factor changes edge FPS by ±15%.
 - **0.70 BW efficiency** uniform across all 4 NPU tiers. Reconciled to
-  this value 2026-04-21; earlier deck snapshots used 0.75/0.80. Derivation
-  doc pending (KH-P1-001 in REMEDIATION_PLAN.md).
+  this value 2026-04-21; earlier deck snapshots used 0.75/0.80. Full
+  derivation + sensitivity analysis + caveats in
+  `docs/methodology/bw_efficiency_derivation.md` (KH-P1-001). Headline:
+  0.70 was picked as the most defensibly-conservative single value across
+  three drifting prior assumptions (0.75 / 0.80 / 0.80), not from a
+  per-tier calibration measurement. The single biggest informal
+  validation is the NPU Mid vendor LLM anchor (37.85 tok/s) which
+  projects within ballpark from the 5090 anchor under the 0.70 assumption.
+  For BW-bound vision workloads (yolo_seg_fp8_trt, clip_trt) no edge
+  ground-truth exists yet; the headline 36 FPS rests on this assumption
+  plus the bake-off projection methodology.
 - **Vendor anchors override BW-only projections.** 5090 → NPU Mid was
   2.3× pessimistic on LLM decode vs vendor numbers; sizer uses vendor
   anchors when they exist.
