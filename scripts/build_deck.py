@@ -2494,7 +2494,7 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          C.ACCENT_GREEN),
         ("• Dense 32B v4 'plateau' was actually a TRADE — corpus (~6.5K samples) too small to fine-tune 32B without catastrophic forgetting on uninstructed categories. Tier 3: larger corpus would unblock.",
          C.ACCENT_AMBER),
-        ("• 14B v4 fabricates peripheral parts (made_up_peripheral 3/9). New finding: this is partly Qwen2.5 14B base behavior — v4 recipe inherits and amplifies rather than creating it. Mitigation: RAG-grounded refusal data (Tier 3 training task).",
+        ("• 14B v4 fabricates peripheral parts (made_up_peripheral 3/9). New finding: this is partly Qwen2.5 14B base behavior — v4 recipe inherits and amplifies rather than creating it. Cross-family scoreboard: Qwen 32B / Llama-3.1 8B / Mistral 7B v0.3 all stock at ~6/9 on the same probes BEFORE FT — confident fabrication is a base-model property, not a recipe artifact, and customers can't escape it by switching vendors. Layered mitigation: RAG-grounded refusal data (training-side) + cite-every-claim grounding enforcement (system-side); ship-smaller is the pragmatic dodge.",
          C.TEXT_DIM),
         ("• Recipe transfer is base-family-coupled (new 2026-05-08): same recipe + same 6.5K corpus + only the base swapped → Qwen 7B +3.1pp / Qwen 14B +5.3pp / Qwen 32B −4.6pp / MoE-attn-only −9.8pp / Mistral 7B −3.8pp. Voice + safety lifts (refusal, rag_email, numerical_precision) transfer cleanly across families; capability cost varies wildly. Hypothesis: chat-template patching for non-Qwen bases reweights away from RAG-following.",
          C.ACCENT_INDIGO),
