@@ -860,9 +860,9 @@ def slide_exec_summary(prs: Presentation):
     card_h = 0.95
     card_w = (CONTENT_W - 0.5) / 3
     cards = [
-        ("0.4 FPS",    "SAM 3 BF16 baseline",       "Bandwidth-bound on 134.4 GB/s — not feasible", C.ACCENT_RED),
-        ("36 FPS",     "Recommended (720p) — High",     "Full TRT stack: YOLO-seg FP8 + CLIP FP8 (FP-capable silicon)",       C.ACCENT_GREEN),
-        ("90×",        "Edge FPS improvement",       "Architectural change — not just quantization",        C.ACCENT_INDIGO),
+        ("549×",       "DRAM reduction (ncu-measured)",       "Per primary forward: 217 MB shipping vs 119 GB SAM 3 — architectural replacement", C.ACCENT_INDIGO),
+        ("36 FPS",     "Recommended (720p) — NPU High",     "Full TRT stack: YOLO-seg FP8 + CLIP FP8 (FP-capable silicon)",       C.ACCENT_GREEN),
+        ("0.4 FPS",    "SAM 3 BF16 baseline",       "BW-bound at 134.4 GB/s — not feasible at any quant",        C.ACCENT_RED),
     ]
     for i, (big, label, note, col) in enumerate(cards):
         x = CONTENT_LEFT + i * (card_w + 0.25)
@@ -903,7 +903,7 @@ def slide_exec_summary(prs: Presentation):
     after_label_y = 3.4
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(after_label_y),
                  Inches(CONTENT_W), Inches(0.22),
-                 "AFTER — recommended recipe (36 FPS, 90× edge FPS, real-time)",
+                 "AFTER — recommended recipe (36 FPS, 549× lower DRAM/forward, real-time)",
                  font_size=10, color=C.ACCENT_GREEN, bold=True)
     add_pipeline_strip(slide, [
         ("FFmpeg ingest", False),
@@ -3979,10 +3979,10 @@ def slide_platform_specs(prs: Presentation):
 
 
 def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
-    """Final summary slide — the 90× journey from 0.4 to 36 FPS."""
+    """Final summary slide — architectural replacement story (549× DRAM reduction)."""
     slide = new_slide(prs, bg_color=C.BG_DARK)
-    add_title_subtitle(slide, "Summary & Key Findings — 0.4 FPS → 36 FPS (90× Edge Improvement)",
-                       "What Keyhole proved, ruled out, and what we recommend")
+    add_title_subtitle(slide, "Summary & Key Findings — 549× DRAM reduction via architectural replacement (SAM 3 → Hybrid V2)",
+                       "0.4 → 36 FPS at 720p NPU Mid; 90× FPS is downstream of the DRAM win")
 
     # Hero stat bar (indigo)
     hero = slide.shapes.add_shape(

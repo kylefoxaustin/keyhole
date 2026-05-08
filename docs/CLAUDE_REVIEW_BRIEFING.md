@@ -25,22 +25,34 @@ to push than either alone.
 
 ## TL;DR
 
-We took an open-vocab vision pipeline targeted at edge-class NPU silicon
-(LPDDR5X-class memory, ~134 GB/s) from **0.4 FPS unusable** to **36 FPS
-real-time** at 720p — a **90× improvement** — through a sequence of 8
-sequential bake-offs and 3 follow-on investigations.
+**The headline framing:** SAM 3 (Meta's 840M-param open-vocab segmenter)
+is bandwidth-bound on every plausible edge memory subsystem and cannot be
+saved by quantization alone. We replaced it with a Hybrid V2 pipeline
+(YOLO-seg + CLIP @ 1 Hz) at **549× lower DRAM per primary forward** (217
+MB shipping detector vs 119,000 MB SAM 3 — measured via Nsight Compute,
+not projected). The replacement achieves **36 FPS at 720p on NPU Mid
+stock LPDDR5X**, vs SAM 3's 0.4 FPS edge ceiling.
 
-The headline architectural call: **SAM 3 (Meta's 840M-param open-vocab
-segmenter) is bandwidth-bound on every plausible edge memory subsystem and
-cannot be saved by quantization alone**. The shipping pipeline replaces it
-with a two-stage Hybrid V2: a lightweight detector-segmenter (YOLO-seg, 10M
-params) + an open-vocab labeler (OpenCLIP ViT-B/32) running at 1 Hz keyframe
-debounce. Both halves compile cleanly to TensorRT FP8 with negligible
-quantization drift vs the FP16 reference engine (`box_recall_vs_fp16_engine`
-1.000, `mean_matched_iou_vs_fp16_engine` 0.998 for FP8; CLIP top-1 agreement
-vs BF16 = 0.964). **These are engine-self-consistency metrics, not absolute
-task accuracy** — open-vocab segmentation quality on novel concepts is not
-characterized in this study (see § 8 methodology + § 9 question 8).
+**This is an architectural-replacement story, not an optimization
+journey.** No amount of quantization gets SAM 3 from 0.4 FPS to 30 FPS —
+a 119 GB DRAM/forward workload at 134 GB/s edge memory has a physical
+floor of ~890 ms/frame regardless of bit-width. The engineering win is
+recognizing the workload was on the wrong side of the BW physics and
+finding a structurally lighter pipeline that meets the open-vocab
+capability requirement (scoped to embedded-world inspection — see § 4).
+
+**Headline numbers:** 549× DRAM reduction (per primary forward, ncu-
+measured); 515× per full-pipeline frame including 1 Hz CLIP amortization
+(231 MB total); 90× edge FPS (0.4 → 36 FPS). The 549× DRAM reduction is
+the primary engineering outcome; 90× FPS is downstream.
+
+The shipping pipeline compiles cleanly to TensorRT FP8 with negligible
+quantization drift vs the FP16 reference engine
+(`box_recall_vs_fp16_engine` 1.000, `mean_matched_iou_vs_fp16_engine`
+0.998 for FP8; CLIP top-1 agreement vs BF16 = 0.964). **These are
+engine-self-consistency metrics, not absolute task accuracy** — open-
+vocab segmentation quality on novel concepts is not characterized in this
+study (see § 8 methodology + § 9 question 8).
 
 Two surprising secondary findings:
 
@@ -59,10 +71,14 @@ Two surprising secondary findings:
    Voice + safety lifts (refusal, rag_email, numerical_precision) transfer
    cleanly across families; capability cost varies by base.
 
-The ncu (NVIDIA Nsight Compute) measurements close the loop: shipping
-pipeline = **231 MB DRAM per frame**, vs SAM 3 = **119,000 MB per frame**.
-A **515× DRAM reduction** is the engineering win — not optimization, but
-architectural replacement.
+The ncu (NVIDIA Nsight Compute) measurements close the loop:
+- **Shipping primary forward** (yolo_seg_fp8_trt) = 217 MB DRAM
+- **Shipping per frame** (with CLIP @ 1 Hz amortized = 14 MB/frame) = 231 MB DRAM
+- **SAM 3 baseline forward** = 118,975 MB DRAM
+
+So **549× DRAM reduction per primary forward** (the architectural win) and
+**515× per full-pipeline frame** including 1 Hz CLIP. Both numbers measured,
+not projected — see § 5.7.
 
 ---
 
@@ -574,9 +590,22 @@ lists all 23 workloads. Highlights, sorted by DRAM/forward (light → heavy):
 | **Grounding DINO Tiny** | 38,508 | **2.4** |
 | **SAM 3 BF16** | **118,975** | **0.8** |
 
-The 515× DRAM reduction from SAM 3 → shipping is the *measured* engineering
-win, not a sized projection. ncu replay-mode caveat: TRT engines + dynamic
-NMS use kernel-replay (slow but robust); PyTorch targets use app-replay.
+The DRAM reduction from SAM 3 → shipping is the *measured* engineering
+win, not a sized projection. Two framings:
+
+- **549× per primary forward** (217 MB yolo_seg_fp8_trt vs 118,975 MB
+  SAM 3) — apples-to-apples per primary detector forward.
+- **515× per full pipeline frame** (231 MB total: 217 MB YOLO + 14 MB
+  amortized CLIP at 1 Hz, vs 118,975 MB SAM 3) — accounts for the CLIP
+  open-vocab tower in the shipping pipeline.
+
+The 549× framing is what makes the architectural-replacement story land:
+the shipping detector forward alone is 549× lighter than the SAM 3
+forward it replaces, and the CLIP tower amortizes to a small marginal
+addition.
+
+ncu replay-mode caveat: TRT engines + dynamic NMS use kernel-replay (slow
+but robust); PyTorch targets use app-replay.
 
 ---
 
