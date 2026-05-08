@@ -685,7 +685,53 @@ where per-kernel overhead dominates.
   numbers are preserved** alongside the gating flag — the reviewer's
   guidance was render dtype mismatch as a flag, not delete data. The
   matrix is in the bundle's `__meta__.tier_dtype_support` field and
-  rendered as a markdown table in the bundle MD § 4.
+  rendered as a markdown table in the bundle MD § 5.
+
+### 8.1 Two BW estimates — when to use which (KH-P0-001 reconciliation)
+
+Same workload, same target tier, two different numbers — this came up in
+the external review. They answer different questions:
+
+- **`bw_floor_ms_npu_mid`** (ncu side): pure DRAM-bytes/forward ÷ NPU
+  effective BW. Best-case minimum; **cannot be achieved in practice**
+  because real silicon pays kernel-launch overhead, NMS dispatch, memory
+  hierarchy stalls, sync overhead.
+- **`effective_edge_ms_with_overhead`** (bake-off side): 5090 GPU-kernel
+  wall-time × BW ratio (16.19×) + 5090-derived CPU overhead. Captures all
+  the overhead the 5090 actually paid; **assumes that overhead profile
+  transfers to edge silicon** (probably pessimistic since edge ARM +
+  tightly-integrated NPU may have lighter dispatch tax than 5090 + x86
+  CPU).
+
+**Real edge latency sits BETWEEN the two.** The bake-off projection is
+the more conservative (slower) estimate and is what the deck + sizer use
+as the headline FPS. The BW floor is the engineering lower bound — useful
+for "is this workload BW-bound or compute-bound?" questions.
+
+| Workload (720p) | DRAM MB/fwd | BW floor ms (Mid) | Effective edge ms (Mid, w/ overhead) | Overhead ratio |
+|---|---|---|---|---|
+| yolo_seg_fp8_trt (shipping) | 217 | 2.30 | 27.19 | 11.8× |
+| yolo_seg_fp16_trt (was the 22.7× discrepancy reviewer caught) | 219 | 2.32 | 53.63 | **23.1×** |
+| clip_trt (shipping) | 433 | 4.61 | 15.57 | 3.4× |
+| sam3_bf16_reference | 119,000 | 1265 | (not deployable) | n/a |
+
+**Reading this:** `yolo_seg_fp16_trt` was the headline discrepancy — 23.1×
+between the two methodologies because at 219 MB DRAM/forward the
+workload is overhead-dominated, not BW-bound. The shipping `_fp8_trt`
+variant lands at 11.8× because halving activation bytes drops the
+overhead-fraction modestly but doesn't change the absolute overhead pool.
+`clip_trt` at 3.4× is the cleanest BW-bound case in the table (433 MB/
+forward = enough DRAM traffic that overhead amortizes well).
+
+`sam3_bf16_reference` has no bake-off projection (we don't deploy it) —
+the 1265 ms BW floor alone tells the story: at 119 GB DRAM/forward, real-
+time is physically impossible at any plausible edge BW.
+
+**For reviewers:** if you want to challenge the headline 36 FPS shipping
+number, the right attack is "is the bake-off projection methodology's
+overhead model right for edge silicon?" — not "your numbers don't
+match." The numbers don't match by design; they answer different
+questions.
 - **5090 → NPU Mid scale = 16.19×.** Effective: (1792 × 0.85) / (134.4 ×
   0.70) = 1523.2 / 94.08 = 16.19. Used as the canonical scale factor
   across every edge projection. Sensitivity: ±10% on either efficiency
