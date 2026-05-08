@@ -3,6 +3,13 @@
 **Audience:** Claude (browser session) doing an independent review of the
 keyhole project's findings. Self-contained — assumes no prior context.
 
+**Sister briefing:** `personal-ai-framework/docs/skippy-claude-briefing.md`
+covers the LLM training-side findings (recipe taxonomy, voice/safety/
+capability gates, cross-family fine-tunes). The two briefings are
+non-overlapping but share one finding (recipe-base-coupling, see § 5.5
+here and gotcha #7 there) — a reviewer who reads both has a stronger case
+to push than either alone.
+
 **Companion artifacts:**
 
 - `data/output/keyhole_data_bundle.md` — every measurement summary, rendered
@@ -28,16 +35,22 @@ segmenter) is bandwidth-bound on every plausible edge memory subsystem and
 cannot be saved by quantization alone**. The shipping pipeline replaces it
 with a two-stage Hybrid V2: a lightweight detector-segmenter (YOLO-seg, 10M
 params) + an open-vocab labeler (OpenCLIP ViT-B/32) running at 1 Hz keyframe
-debounce. Both halves compile cleanly to TensorRT FP8, achieving recall
-1.000 with ~0.4 pp top-1 quality loss vs BF16.
+debounce. Both halves compile cleanly to TensorRT FP8 with negligible
+quantization drift vs the FP16 reference engine (`box_recall_vs_fp16_engine`
+1.000, `mean_matched_iou_vs_fp16_engine` 0.998 for FP8; CLIP top-1 agreement
+vs BF16 = 0.964). **These are engine-self-consistency metrics, not absolute
+task accuracy** — open-vocab segmentation quality on novel concepts is not
+characterized in this study (see § 8 methodology + § 9 question 8).
 
 Two surprising secondary findings:
 
 1. **FP8 and INT8 share the BW-bound edge FPS at 8-bit precision** — the
    silicon dictates which dtype deploys (Mid is INT8-only at 200 TOPS; High
    is FP-capable at 400 FP8/INT8 TOPS, both share LPDDR5X-8.4 stock memory).
-   INT8 buys silicon reach but takes a recall hit (0.875 vs 1.000 at 720p);
-   FP8 keeps quality but pins the pipeline to High-class silicon.
+   INT8 buys silicon reach but produces detections that match the FP16
+   engine on only ~87.5% of boxes at 720p (low-confidence boxes drop); FP8
+   matches the FP16 engine essentially perfectly. Both numbers are
+   engine-self-consistency, not ground-truth recall.
 
 2. **Recipe transfer is base-family-coupled.** Same fine-tuning recipe +
    same 6,517-example corpus on different LLM bases produces wildly
@@ -207,20 +220,25 @@ torchao Conv gap?
 
 **Outcome — the breakthrough:**
 
-| Resolution | Recipe | 5090 ms | Edge ms (NPU Mid) | Edge FPS | Box recall | Matched IoU |
+| Resolution | Recipe | 5090 ms | Edge ms (NPU Mid) | Edge FPS | Box recall vs FP16 engine | Matched IoU vs FP16 engine |
 |---|---|---|---|---|---|---|
-| 720p | FP16 | 3.32 | 53.7 | 18.6 | 1.000 | 1.000 |
+| 720p | FP16 | 3.32 | 53.7 | 18.6 | (reference) | (reference) |
 | 720p | INT8 | 1.68 | 27.2 | **36.8** | **0.875** | 0.998 |
 | 720p | FP8 | 1.68 | 27.2 | **36.8** | **1.000** | 0.998 |
 
 **Two clean conclusions:**
 
 - INT8 and FP8 share the BW-bound edge FPS at 8-bit (both ~27 ms/frame).
-  The dtype choice is a *quality vs silicon-class* trade-off, not a
-  speed trade-off.
-- FP8 preserves recall perfectly (1.000 vs FP16's 1.000); INT8 drops
-  low-confidence boxes (recall 0.875). FP8's wider dynamic range wins on
-  detection-head logits.
+  The dtype choice is a *quality-preservation vs silicon-class* trade-off,
+  not a speed trade-off.
+- **Quality metrics here are engine-self-consistency.** Recall and matched
+  IoU compare the quantized engine's output to the FP16 engine's output on
+  the same input frames — they measure quantization drift, not ground-truth
+  task accuracy. FP8 produces detection sets that match the FP16 engine
+  perfectly at IoU 0.998. INT8 matches on 87.5% of boxes; the 12.5% drop is
+  low-confidence boxes that fall below score threshold under INT8's tighter
+  dynamic range. Open-vocab segmentation quality on novel concepts is not
+  characterized in this study (see § 9 question 8).
 
 ### 3.8 TensorRT CLIP visual (`bakeoff_trt_clip.py`)
 
@@ -417,6 +435,19 @@ FFmpeg ingest → YOLO-seg INT8 (TRT) → SQLite + FTS5 → optional Qwen3-30B-A
 217 MB + clip_trt 433 MB ÷ 30 frames at 1 Hz debounce = 14 MB amortized).
 SAM 3 reference per forward = **118,975 MB**. **515× DRAM reduction.**
 
+**Capability scope of this recommendation.** Hybrid V2 (YOLO-seg + CLIP)
+matches SAM 3's *labeling-on-detected-regions* pattern — the YOLO-seg head
+proposes boxes and masks from a fixed COCO-class detector, and CLIP scores
+each crop against the user's text concepts. Open-vocab labeling capability
+is preserved structurally. **What is *not* characterized in this study:**
+SAM 3's open-vocab *segmentation* on novel concepts (unfamiliar object
+categories where COCO-class detection misses the proposal entirely). For
+applications where text-prompted segmentation of arbitrary concepts is the
+binding capability requirement, see § 7 (OWLv2 as the agentic-role
+successor) and the limitations note in § 9 question 8. The "Hybrid V2
+matches SAM 3 capability" claim is scoped to our embedded-world
+inspection workload, not a general assertion.
+
 **LLM co-host:** Qwen3-30B-A3B Q4_K_M at 38 tok/s decode on NPU Mid (vendor
 anchor) supports occasional NLQ queries (~5 s for 200 tokens). Per-frame
 LLM is not viable on a busy vision NPU; duty-cycle modeling shows 1 Hz
@@ -441,13 +472,20 @@ PTQ problem, it's a tool-chain maturity problem. TRT solved it.
 
 At 8-bit precision the matmul throughput is BW-bound on edge LPDDR5X-class
 memory; quantized weights + activations at 8-bit set the ceiling
-regardless of dtype. **The choice between INT8 and FP8 is a quality-vs-
-silicon-class trade-off:**
+regardless of dtype. **The choice between INT8 and FP8 is a
+quantization-drift-vs-silicon-class trade-off:**
 
-- **INT8** deploys on Mid (200 TOPS INT8-only). Recall 0.875 at 720p — low-
-  confidence boxes drop. Fine for high-volume coarse detection.
-- **FP8** deploys only on High (FP-capable). Recall 1.000 at 720p — perfect
-  preservation. The "right" recipe when silicon supports it.
+- **INT8** deploys on Mid (200 TOPS INT8-only). Box-recall vs FP16 engine =
+  0.875 at 720p — 12.5% of low-confidence boxes drop below score threshold
+  under INT8's tighter dynamic range. Fine for high-volume coarse detection
+  where the dropped boxes are noise.
+- **FP8** deploys only on High (FP-capable). Box-recall vs FP16 engine =
+  1.000 at 720p — quantization drift is essentially zero. The "right"
+  recipe when silicon supports it.
+
+**Caveat (engine-self-comparison).** "Recall 0.875" and "recall 1.000" both
+mean *vs the FP16 engine output*, not *vs ground-truth labels*. They
+quantify quantization drift, not absolute task accuracy.
 
 This was *not* obvious going in — we expected FP8 to be visibly faster
 than INT8 on Blackwell. It isn't. Both are BW-bound at 8-bit weights.
@@ -626,12 +664,24 @@ where per-kernel overhead dominates.
 
 ## 8. Methodology notes (worth scrutiny)
 
+- **Quality metrics are engine-self-comparison, not ground-truth task
+  accuracy.** When this briefing reports "FP8 box recall 1.000" or
+  "matched IoU 0.998," the reference is the FP16 TRT engine output on the
+  same input frames — *not* hand-labeled ground truth. These metrics
+  measure quantization drift (how faithfully the quantized engine
+  reproduces the FP16 engine's outputs), not absolute task accuracy.
+  Open-vocab segmentation quality on novel concepts is uncharacterized in
+  this study; see § 9 question 8 for what would be needed to measure it.
+  JSON field naming bumped to `box_recall_vs_fp16_engine` /
+  `mean_matched_iou_vs_fp16_engine` to make this explicit (schema
+  version 2). Legacy fields preserved as aliases for one cycle.
 - **5090 → NPU Mid scale = 16.19×.** Effective: (1792 × 0.85) / (134.4 ×
   0.70) = 1523.2 / 94.08 = 16.19. Used as the canonical scale factor
   across every edge projection. Sensitivity: ±10% on either efficiency
   factor changes edge FPS by ±15%.
 - **0.70 BW efficiency** uniform across all 4 NPU tiers. Reconciled to
-  this value 2026-04-21; earlier deck snapshots used 0.75/0.80.
+  this value 2026-04-21; earlier deck snapshots used 0.75/0.80. Derivation
+  doc pending (KH-P1-001 in REMEDIATION_PLAN.md).
 - **Vendor anchors override BW-only projections.** 5090 → NPU Mid was
   2.3× pessimistic on LLM decode vs vendor numbers; sizer uses vendor
   anchors when they exist.

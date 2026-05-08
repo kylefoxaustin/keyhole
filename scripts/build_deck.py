@@ -922,7 +922,7 @@ def slide_exec_summary(prs: Presentation):
     add_bullet_box(slide, CONTENT_LEFT, col_top, col_w, col_h, [
         ("DO — the full recipe (Mid: yolo11s INT8 only / High: full FP8 stack)", C.ACCENT_GREEN, True),
         ("• Replace SAM 3 with Hybrid V2 — YOLO-seg-s (det+seg, 10M) + OpenCLIP ViT-B-32 (open-vocab tags)",),
-        ("• Compile YOLO-seg both ways: INT8 TRT for Mid silicon (200 TOPS INT8-only), FP8 TRT for High (400 FP8 TOPS, recall 1.00)",),
+        ("• Compile YOLO-seg both ways: INT8 TRT for Mid silicon (200 TOPS INT8-only), FP8 TRT for High (400 FP8 TOPS, FP8 box-recall vs FP16 engine = 1.00 — quantization drift essentially zero)",),
         ("• Compile CLIP FP8 with TensorRT — pins the full open-vocab pipeline to NPU High (FP-capable). Mid runs detector-only.",),
         ("• Debounce CLIP at 1 Hz; multi-stream: YOLO batch=N (4 streams → 26 FPS each); co-host Qwen3-30B-A3B MoE on the NPU",),
     ], font_size=9)
@@ -1896,7 +1896,8 @@ def slide_trt_yolo(prs: Presentation):
     add_pipeline_strip(slide, ["FFmpeg", ("YOLO-seg INT8/FP8 (TRT)", True),
                                 "CLIP FP8 (High)", "SQLite", "NLQ / LLM"])
 
-    headers = ["Res", "Recipe", "Deploys on", "5090 ms", "Box recall", "Matched IoU",
+    headers = ["Res", "Recipe", "Deploys on", "5090 ms",
+               "Box recall vs FP16", "Matched IoU vs FP16",
                "Edge ms", "Edge FPS"]
     rows = []
     highlight = []
@@ -1916,8 +1917,8 @@ def slide_trt_yolo(prs: Presentation):
                 res, recipe.upper(),
                 deploys_on,
                 f"{p['mean_frame_ms_5090']:.2f}",
-                f"{p.get('box_recall', 0):.3f}" if recipe != "fp16" else "1.000",
-                f"{p.get('mean_matched_iou', 0):.3f}" if recipe != "fp16" else "1.000",
+                f"{p.get('box_recall', 0):.3f}" if recipe != "fp16" else "(ref)",
+                f"{p.get('mean_matched_iou', 0):.3f}" if recipe != "fp16" else "(ref)",
                 f"{p['projected_ms_edge']:.1f}",
                 f"{p['projected_fps_edge']:.1f}",
             ])
@@ -1928,11 +1929,12 @@ def slide_trt_yolo(prs: Presentation):
                      Inches(CONTENT_W), Inches(3.1), headers, rows,
                      highlight_rows=highlight)
 
-    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.85, [
-        ("Key findings — Mid-deployable INT8 + FP8 quality story on High", C.ACCENT_BLUE, True),
-        ("• INT8 + FP8 BOTH work via TRT 10.16 on Blackwell (SM 12.0). Earlier torchao block was a tool-chain gap. Edge FPS is identical (BW-bound, both 8-bit) — the difference is silicon and quality.", C.ACCENT_GREEN, True),
-        ("• Mid silicon (INT8-only, 200 TOPS) deploys via INT8 TRT — Edge 720p 18.6 FP16 → 36.8 INT8 (+98%). 87-92% recall: low-confidence boxes drop, but that's the Mid-mandatory recipe.", C.ACCENT_AMBER, True),
-        ("• High silicon (FP-capable, 400 FP8 TOPS) deploys via FP8 TRT — same 36.8 FPS edge (BW-equal stock memory class), but 100% recall + IoU 0.998, indistinguishable from FP16.", C.ACCENT_GREEN, True),
+    add_bullet_box(slide, CONTENT_LEFT, 5.25, CONTENT_W, 1.95, [
+        ("Key findings — Mid-deployable INT8 + FP8 quantization-drift story", C.ACCENT_BLUE, True),
+        ("• INT8 + FP8 BOTH work via TRT 10.16 on Blackwell (SM 12.0). Earlier torchao block was a tool-chain gap. Edge FPS is identical (BW-bound, both 8-bit) — the difference is silicon and quantization drift.", C.ACCENT_GREEN, True),
+        ("• Mid silicon (INT8-only, 200 TOPS) deploys via INT8 TRT — Edge 720p 18.6 FP16 → 36.8 INT8 (+98%). 87-92% box-match vs FP16 engine: low-confidence boxes drop below score threshold under INT8's tighter dynamic range. Mid-mandatory recipe; the dropped boxes are noise.", C.ACCENT_AMBER, True),
+        ("• High silicon (FP-capable, 400 FP8 TOPS) deploys via FP8 TRT — same 36.8 FPS edge (BW-equal stock memory class), 100% box-match + matched-IoU 0.998 vs FP16 — quantization drift essentially zero.", C.ACCENT_GREEN, True),
+        ("• Recall + matched-IoU columns measure quantization drift vs the FP16 engine on the SAME input frames. Engine-self-consistency, NOT vs ground-truth labels. Open-vocab segmentation quality on novel concepts is uncharacterized in this study.", C.ACCENT_AMBER),
         ("• Full-stack = Hybrid V2 + 1 Hz CLIP + YOLO-INT8/FP8 ≈ 36 FPS edge (prior target 20, nearly 2×). CLIP recipe (next slide) is FP-only on the toolchain we tested — pins the full pipeline to High.", C.ACCENT_INDIGO, True),
         ("Preprocessing: 640×640 letterbox runs on CPU, not GPU/NPU (not included in the ms/frame above).", C.ACCENT_ORANGE, True),
         ("• Measured on 5090 host (i9-14900KF, cv2.resize bilinear, 1 thread): 0.17 / 0.32 / 0.33 ms at 720p / 1080p / 4K — ~0.5–1% of one core at 30 fps. Edge ARM Cortex-A55 ≈ 10× slower → ~2–3 ms/frame, ~6–10% of one edge core. SoCs with a fixed-function ISP / 2D GPU move this off-CPU entirely.",
@@ -3398,7 +3400,7 @@ def slide_trt_takeaways(prs: Presentation):
         ("Rule of thumb: TRT FP8 pays off when the kernel is big — and silicon dictates dtype", C.ACCENT_BLUE, True),
         ("• WORKS: dense Conv (YOLO-seg), dense ViT (CLIP) — FP8 matmul throughput is the bottleneck, and TRT kernel fusion amortizes launch cost over real compute.",
          C.ACCENT_GREEN),
-        ("• Deploy split: YOLO-seg has both INT8 (Mid) and FP8 (High) ports — same edge FPS (BW-bound), Mid takes the recall hit (87-92%), High keeps quality (recall 1.00). CLIP is FP-only in our toolchain → pins the full pipeline to High silicon.",
+        ("• Deploy split: YOLO-seg has both INT8 (Mid) and FP8 (High) ports — same edge FPS (BW-bound). Quantization drift vs FP16 engine: Mid INT8 = 87-92% box-match (low-confidence boxes drop), High FP8 ≈ 100% box-match. CLIP is FP-only in our toolchain → pins the full pipeline to High silicon.",
          C.ACCENT_INDIGO),
         ("• UNDERPERFORMS: small param-count models with complex graphs (YOLOE-26 open-vocab head). At 16M params the kernel-launch tax dominates; FP8 can't help with work that isn't matmul.",
          C.ACCENT_AMBER),
@@ -3706,7 +3708,7 @@ def slide_optimization_roadmap(prs: Presentation):
         ["Hybrid V2 + FP8/INT8 on CLIP",       "~2× on CLIP half",           "4.9 FPS",   "MEASURED (48/72 Linears)"],
         ["Hybrid V2 + CLIP @ 1 Hz (N=30)",      "~30× on CLIP amortized",    "16.0 FPS",  "MEASURED — 93% of YOLO ceiling"],
         ["YOLO-seg INT8 via torchao 1×1 swap",   "~22% BW savings on YOLO",   "23.8 FPS",  "MEASURED — 49/50 swapped (44% wts)"],
-        ["YOLO-seg FP8 via TensorRT 10.16",       "~50% on YOLO (full model)", "36.8 FPS",  "MEASURED — recall 1.00, IoU 0.998"],
+        ["YOLO-seg FP8 via TensorRT 10.16",       "~50% on YOLO (full model)", "36.8 FPS",  "MEASURED — quantization drift vs FP16 engine: ≈0 (box-match 1.00, IoU 0.998)"],
         ["CLIP visual FP8 via TensorRT 10.16",     "~50% on CLIP (full model)", "66.3 FPS",  "MEASURED — top-1 agree 0.964"],
         ["Hybrid V2 + CLIP every-frame (all TRT)", "stacked, no debounce",       "24 FPS",    "PROJECTED — real-time, simplest"],
         ["Hybrid V2 + 1 Hz CLIP (all TRT)",        "stacked, debounced",         "36 FPS",    "PROJECTED — at YOLO ceiling"],
@@ -3726,7 +3728,7 @@ def slide_optimization_roadmap(prs: Presentation):
         ("Bake-off sequence — all measurements complete", C.ACCENT_PURPLE, True),
         ("1-3. ES-Small quant: FP8 (94/95) & plain INT8 both → 4.9 FPS edge; SmoothQuant CONVERT blocked by torchao 0.17",),
         ("4-5. Hybrid V2 CLIP torchao FP8/INT8 (48/72) → 4.9 FPS; 1 Hz keyframe debounce → 16 FPS (93% of YOLO ceiling)",),
-        ("6-7. YOLO-seg Conv: torchao 1×1 swap INT8 → 23.8 FPS (partial); TRT 10.16 full Conv-FP8 → 36.8 FPS (+98%, recall 1.00)",),
+        ("6-7. YOLO-seg Conv: torchao 1×1 swap INT8 → 23.8 FPS (partial); TRT 10.16 full Conv-FP8 → 36.8 FPS (+98%, FP8 quantization drift ≈0 vs FP16 engine)",),
         ("8. CLIP visual FP8 via TRT → 29.8 → 15.1 ms edge (+120% CLIP FPS); full TRT stack projects 36 FPS recommended",),
         ("9. LLM — Qwen3-30B-A3B MoE (Q4/Q5/Q8): NPU Low / Mid+High stock: 29 / 38 tok/s Q4_K_M (Mid+High share the same LPDDR5X-8.4 stock memory class); + LPDDR5T-11.2 overlay → 50 tok/s; duty-cycle chart quantifies vision+LLM coexistence",),
         ("10. Multi-stream concurrency — TRT YOLO dynamic-batch: 4 streams @ 26 FPS each (not 9), 8 @ 15, batching amortizes kernel overhead",),
@@ -4003,7 +4005,7 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
         ("16 FPS",    C.ACCENT_AMBER, True),
         ("  Hybrid V2 (YOLO-seg + CLIP) + FP8 CLIP + 1 Hz keyframe debounce. YOLO becomes the ceiling.",),
         ("24 FPS",    C.ACCENT_GREEN, True),
-        ("  YOLO-seg FP8/INT8 via TensorRT 10.16 on Blackwell (FP8 recall 1.00, INT8 recall 0.875). CLIP FP8 every frame.",),
+        ("  YOLO-seg FP8/INT8 via TensorRT 10.16 on Blackwell. Quantization drift vs FP16 engine: FP8 = 0 (box-match 1.00); INT8 = 12.5% boxes drop (match 0.875).",),
         ("36 FPS  ← recommended", C.ACCENT_INDIGO, True),
         ("  Full TRT stack + CLIP @ 1 Hz. YOLO-only ceiling. Mid silicon: INT8 yolo11s only (no CLIP toolchain). High silicon: full FP8 stack with CLIP.",),
     ]

@@ -45,11 +45,37 @@ def _load_json(path: Path) -> dict[str, Any] | list[Any] | None:
         return {"__load_error__": str(exc), "__path__": str(path)}
 
 
+def _add_quality_aliases(payload: Any) -> Any:
+    """Walk a bake-off payload and add `*_vs_fp16_engine` aliases for any
+    `box_recall` / `mean_matched_iou` fields. The legacy fields measure
+    quantization drift vs the FP16 TRT engine on the same input frames —
+    not vs ground-truth labels. The aliased field names make this explicit
+    in user-facing artifacts.
+
+    Mutates in place; returns the payload for chaining.
+    """
+    if isinstance(payload, dict):
+        if "box_recall" in payload and "box_recall_vs_fp16_engine" not in payload:
+            payload["box_recall_vs_fp16_engine"] = payload["box_recall"]
+        if "mean_matched_iou" in payload and "mean_matched_iou_vs_fp16_engine" not in payload:
+            payload["mean_matched_iou_vs_fp16_engine"] = payload["mean_matched_iou"]
+        for v in payload.values():
+            _add_quality_aliases(v)
+    elif isinstance(payload, list):
+        for v in payload:
+            _add_quality_aliases(v)
+    return payload
+
+
 def collect_bakeoff_summaries() -> dict[str, Any]:
-    """Walk top-level bakeoff/*.json files. Skip subdirs and run traces."""
+    """Walk top-level bakeoff/*.json files. Skip subdirs and run traces.
+
+    Adds `*_vs_fp16_engine` aliases (engine-self-comparison clarification)
+    to every quality field — see KH-P0-003 in REMEDIATION_PLAN.md.
+    """
     out: dict[str, Any] = {}
     for p in sorted(BAKEOFF.glob("*.json")):
-        out[p.stem] = _load_json(p)
+        out[p.stem] = _add_quality_aliases(_load_json(p))
     return out
 
 
@@ -292,7 +318,16 @@ def main() -> int:
             "git_head": _git_head(),
             "bw_ratio_5090_to_npu_mid": BW_RATIO_5090_TO_NPU_MID,
             "npu_mid_effective_gbs": 94.08,
-            "schema_version": 1,
+            "schema_version": 2,
+            "schema_v2_changes": (
+                "Bake-off quality fields gain `box_recall_vs_fp16_engine` and "
+                "`mean_matched_iou_vs_fp16_engine` aliases. These measure "
+                "quantization drift relative to the FP16 TRT engine on the "
+                "same input frames — NOT vs ground-truth labels. Legacy "
+                "field names (`box_recall`, `mean_matched_iou`) preserved "
+                "as aliases for one cycle. See KH-P0-003 in REMEDIATION_PLAN.md."
+            ),
+            "methodology_version": "2026-05-08-post-remediation",
         },
         "ncu": ncu,
         "llm_anchors": llm_anchors,
