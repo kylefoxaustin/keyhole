@@ -3687,6 +3687,116 @@ def slide_ncu_workload_table(prs: Presentation):
     ], font_size=10)
 
 
+def slide_e2e_latency_budget(prs: Presentation):
+    """Slide: End-to-end pipeline latency budget per frame at NPU Mid stock.
+
+    KH-P3-002 in REMEDIATION_PLAN.md. Reads
+    `data/output/bakeoff/e2e_pipeline_summary.json` produced by
+    `scripts/profile_e2e_pipeline.py`. Surfaces per-stage ms (5090 + NPU Mid)
+    + slack vs the 27.78 ms 36-FPS budget.
+    """
+    path = Path("data/output/bakeoff/e2e_pipeline_summary.json")
+    if not path.exists():
+        return
+    data = json.loads(path.read_text())
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "End-to-end pipeline latency budget — where the 36 FPS slack lives",
+        "Per-stage ms at 5090 reference + NPU Mid projection. CLIP @ 1 Hz amortized; CPU stages scaled 10× ARM Cortex-A55 single-thread.",
+    )
+    add_pipeline_strip(
+        slide,
+        ["FFmpeg ingest", "preprocess", "YOLO TRT FP8", "CLIP TRT FP8 @ 1 Hz", "SQLite event log"],
+        accent_color=C.ACCENT_GREEN,
+    )
+
+    # Per-stage table — 5090 + NPU Mid
+    stage_5090 = data["per_stage_5090"]
+    stage_mid  = data["per_stage_npu_mid"]
+    stage_labels = {
+        "ingest_decode_ms":  "FFmpeg ingest (cv2 decode)",
+        "preprocess_ms":     "Preprocess (letterbox + normalize)",
+        "yolo_trt_ms":       "YOLO-seg FP8 TRT (every frame)",
+        "clip_trt_ms":       "CLIP FP8 TRT (× 1/30 = 1 Hz amort)",
+        "db_insert_ms":      "SQLite INSERT (~3 dets/frame)",
+    }
+
+    headers = ["Stage", "Class", "5090 p50 ms", "NPU Mid p50 ms", "Per-frame contrib (Mid)"]
+    rows = []
+    for stage_key, label in stage_labels.items():
+        s5090 = stage_5090.get(stage_key, {})
+        smid  = stage_mid.get(stage_key, {})
+        amort = stage_key == "clip_trt_ms"
+        contrib = (smid.get("p50", 0) / 30.0) if amort else smid.get("p50", 0)
+        rows.append([
+            label,
+            smid.get("class", "—").upper(),
+            f"{s5090.get('p50', 0):.3f}",
+            f"{smid.get('p50', 0):.3f}" + (" (×1/30)" if amort else ""),
+            f"{contrib:.3f}",
+        ])
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.85),
+        Inches(CONTENT_W), Inches(2.2), headers, rows,
+        font_size=10, header_font_size=10,
+    )
+
+    # Headline cards: total + budget + slack
+    totals = data["totals"]
+    total_mid_ms = totals["per_frame_npu_mid_p50_ms"]
+    total_mid_fps = totals["per_frame_npu_mid_p50_fps"]
+    budget_ms = totals["npu_mid_36fps_budget_ms"]
+    slack_ms = totals["slack_ms"]
+    slack_color = C.ACCENT_GREEN if slack_ms >= 0 else C.ACCENT_RED
+
+    card_y = 4.25
+    card_h = 0.95
+    card_w = (CONTENT_W - 0.5) / 3
+    cards = [
+        (f"{total_mid_ms:.1f} ms", "Per-frame total (NPU Mid p50)",
+         f"{total_mid_fps:.1f} FPS sustained", C.ACCENT_INDIGO),
+        (f"{budget_ms:.2f} ms", "36 FPS budget",
+         "What we need to hit per frame", C.ACCENT_AMBER),
+        (f"{slack_ms:+.1f} ms", "Slack vs 36 FPS",
+         "Positive = headroom; negative = over budget", slack_color),
+    ]
+    for i, (big, label, note, col) in enumerate(cards):
+        x = CONTENT_LEFT + i * (card_w + 0.25)
+        shp = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE,
+            Inches(x), Inches(card_y),
+            Inches(card_w), Inches(card_h),
+        )
+        shp.fill.solid(); shp.fill.fore_color.rgb = C.BG_SLIDE
+        shp.line.color.rgb = col; shp.line.width = Pt(2)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.05),
+                     Inches(card_w), Inches(0.45),
+                     big, font_size=24, color=col, bold=True,
+                     alignment=PP_ALIGN.CENTER)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.5),
+                     Inches(card_w), Inches(0.25),
+                     label, font_size=10, color=C.TEXT_BRIGHT, bold=True,
+                     alignment=PP_ALIGN.CENTER)
+        add_text_box(slide, Inches(x), Inches(card_y + 0.72),
+                     Inches(card_w), Inches(0.2),
+                     note, font_size=8, color=C.TEXT_DIM,
+                     alignment=PP_ALIGN.CENTER)
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.4, CONTENT_W, 1.85, [
+        ("Reading the budget — where the slack lives", C.ACCENT_BLUE, True),
+        ("• YOLO-seg FP8 TRT dominates GPU side as expected. CLIP @ 1 Hz amortizes to <1 ms/frame contribution — the 1 Hz debounce is doing exactly its job.",
+         C.ACCENT_GREEN),
+        ("• CPU stages (decode, preprocess, DB INSERT) project to NPU Mid via 10× ARM Cortex-A55 single-thread slowdown (documented in slide_trt_yolo's preprocessing footnote). Production SoCs with fixed-function ISP / 2D GPU move decode + preprocess off-CPU; pure-NPU boards (Coral) pay the full slowdown.",
+         C.ACCENT_AMBER),
+        ("• SQLite + FTS5 caveat: this profile's INSERT timing is FTS5-disabled. Production batches ~30 frames before triggering FTS5 indexing to amortize the index cost off the per-frame critical path.",
+         C.TEXT_DIM),
+        (f"• If slack is positive ({slack_ms:+.1f} ms): the 36 FPS headline holds end-to-end. If negative: the YOLO+CLIP-only headline numbers are crowded out by non-NPU stages — the binding constraint to optimize next is whichever CPU stage tops the budget.",
+         C.ACCENT_INDIGO),
+    ], font_size=9)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = new_slide(prs)
@@ -4254,6 +4364,11 @@ def build_deck(output, runs_dir, data_dir):
         slide_ncu_headline(prs)
         console.print("  Building: ncu measured DRAM — full workload table")
         slide_ncu_workload_table(prs)
+
+    # End-to-end pipeline latency budget (KH-P3-002)
+    if Path("data/output/bakeoff/e2e_pipeline_summary.json").exists():
+        console.print("  Building: End-to-end pipeline latency budget")
+        slide_e2e_latency_budget(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")

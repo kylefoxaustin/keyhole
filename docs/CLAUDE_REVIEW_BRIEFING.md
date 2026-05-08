@@ -655,6 +655,48 @@ addition.
 ncu replay-mode caveat: TRT engines + dynamic NMS use kernel-replay (slow
 but robust); PyTorch targets use app-replay.
 
+### 5.8 End-to-end pipeline latency budget (KH-P3-002)
+
+The deck headline "36 FPS at 720p NPU Mid" implies <28 ms total per frame.
+Bake-off projections cover the YOLO + CLIP inference stages but don't
+break out the full pipeline (FFmpeg ingest → preprocess → YOLO TRT →
+CLIP TRT @ 1 Hz → SQLite event-log INSERT). KH-P3-002 fills the gap.
+
+**Profile harness:** `scripts/profile_e2e_pipeline.py` runs the canonical
+720p_EW_clip on the 5090 reference platform with `time.perf_counter()`
++ `torch.cuda.synchronize()` instrumentation around each stage. GPU
+stages project to NPU Mid via the standard 16.19× BW ratio; CPU stages
+(decode, preprocess, DB INSERT) project via 10× ARM Cortex-A55 single-
+thread slowdown documented in slide_trt_yolo's preprocessing footnote.
+
+**Per-stage budget at 720p NPU Mid (will be filled in once GPU frees up
+from [docs]'s variance-bounds + Llama v4 training runs):**
+
+| Stage | 5090 p50 ms | NPU Mid p50 ms | Class | Notes |
+|---|---|---|---|---|
+| ingest_decode | _TBD_ | _TBD_ | CPU | cv2 H.264 decode, single-thread |
+| preprocess | _TBD_ | _TBD_ | CPU | letterbox 720p → 640×640, normalize |
+| yolo_trt_infer | _TBD_ (~0.7) | _TBD_ (~11) | GPU | every-frame, BW-bound |
+| clip_trt_infer (× 1/30) | _TBD_ (~1.5) | _TBD_ (~25) | GPU | 1 Hz amortization |
+| db_insert (~3 dets/frame) | _TBD_ | _TBD_ | CPU | SQLite INSERT, no FTS5 indexing |
+| **per-frame total** | _TBD_ | _TBD_ | | |
+| **36 FPS budget** | — | **27.78 ms** | | |
+| **slack** | — | _TBD_ | | |
+
+(Numbers populate from `data/output/bakeoff/e2e_pipeline_summary.json`
+on next GPU-available run.)
+
+**Pre-run expectation:** YOLO TRT FP8 dominates the GPU side (~11 ms NPU
+Mid via existing bake-off). CLIP @ 1 Hz amortizes to <1 ms/frame
+contribution. CPU stages should be in the 1–3 ms range each on the 5090
+host, scaling to 10–30 ms on edge ARM. **Total budget pressure most
+likely lands on either (a) preprocess on a slow ARM core, or (b)
+SQLite + FTS5 indexing if it triggers per-INSERT** — both are
+mitigatable (preproc → fixed-function ISP / 2D GPU on most SoCs;
+FTS5 → batch-insert + lazy index rebuild). A reviewer should expect
+this slide to clarify that the 36 FPS headline isn't crowded out by
+non-NPU stages, and to identify where to push if it is.
+
 ---
 
 ## 6. What we ruled out
