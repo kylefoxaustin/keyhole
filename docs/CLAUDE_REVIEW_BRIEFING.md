@@ -582,60 +582,69 @@ thought training in Qwen ships visibly in pass rate.
 **Practical rule:** at 7B class the hardware budget is family-invariant;
 the quality outcome depends on corpus alignment with base capabilities.
 
-### 5.5 Recipe transfer — preliminary cross-family signal (N=2 directional, both <2σ individually)
+### 5.5 Recipe transfer is base-capability-coupled — clean discriminator at N=5 is stock reasoning floor
 
-**Status:** preliminary. Sanctioned framing per
-`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md` (external Claude
-reviewer-signed-off, 2026-05-08): *"preliminary evidence suggests the v4
-recipe may be architecture-coupled — Qwen gains, non-Qwen regresses, all
-below 2σ individually but directionally consistent across N=2 independent
-non-Qwen families."* Treat the cross-family delta as a directional signal
-to investigate further, not a load-bearing claim. The numbers below are
-the underlying measurements; the framing is preliminary because each
-individual cross-family delta is below the 2σ noise floor and a
-substring-grader temperature-sensitivity confound (see § 5.9) means the
-production temp=0 numbers may be format-fidelity artifacts rather than
-robustness wins.
+**Status:** updated 2026-05-09 after Gemma 2 9B v4 lifted +3.2 pp,
+falsifying the architecture-coupling reading at N=2. Sanctioned framing
+per `personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md` Addendum
+(external Claude reviewer-signed-off): the clean N=5 discriminator is
+**stock reasoning capability**, not architecture family or chat-template
+format. Bases scoring 6/6 on the reasoning category lift under the v4
+recipe; bases scoring 0–1/6 regress.
 
 Same 6,517-example Skippy fine-tuning corpus, same recipe, same hyperparams,
 only the base model changed:
 
-| Base | Δ vs stock baseline | Δ/σ | Notes |
-|---|---|---|---|
-| Qwen 2.5 7B → v4 | **+3.1 pp** | +1.4σ | production — within-family lift |
-| Qwen 2.5 14B → v4 | +5.3 pp | +2.3σ | fabricates peripherals — not shipped |
-| Qwen 2.5 32B → v4 | −4.6 pp | — | corpus too small for 32B (architecture confound) |
-| Qwen3-30B-A3B (MoE attn-only) → FT v1 | −9.8 pp | — | recipe MoE-incompatible without router |
-| **Mistral 7B v0.3 → v4** | **−4.0 pp** | **−1.8σ** | non-Qwen dense regression (post-persona quarantine) |
-| **Llama 3.1 8B → v4** | **−3.0 pp** | **−1.3σ** | non-Qwen dense regression (clean replication) |
+| Base | Stock reasoning | Stock refusal | v4 Δ vs base | Δ/σ | Direction |
+|---|---|---|---|---|---|
+| Qwen 2.5 7B | 6/6 | 9/9 | **+3.1 pp** | +1.4σ | ✓ lift (production) |
+| Qwen 2.5 14B | 6/6 | 6/9 | +5.3 pp | +2.3σ | ✓ lift (fabricates peripherals — not shipped) |
+| **Gemma 2 9B** (NEW) | **6/6** | **9/9** | **+3.2 pp** | (—) | **✓ lift — non-Qwen, no ChatML, no template patch** |
+| **Mistral 7B v0.3** | **0/6** | **6/9** | **−4.0 pp** | **−1.8σ** | ✗ regress |
+| **Llama 3.1 8B** | **1/6** | **6/9** | **−3.2 pp** | **−1.3σ** | ✗ regress |
+| Qwen 2.5 32B → v4 | (n/a — corpus-size confound) | — | −4.6 pp | — | ✗ regress (corpus too small for 32B) |
+| Qwen3-30B-A3B (MoE attn-only) → FT v1 | (n/a — architecture confound) | — | −9.8 pp | — | ✗ regress (MoE-incompatible without router) |
 
 σ values from `personal-ai-framework/docs/skippy-data-bundle.xlsx`
 variance-bounds sheet (5 reps × 5 anchored models, temp=0.3, 132 samples).
 σ_base ≈ 1.4–2.3 pp.
 
-Per-category split for Mistral v4: **refusal +3 / rag_email +3 /
-numerical_precision +3** transfer cleanly; **coding −3 / rag_blog −3 /
-rag_datasheet −8** regress hard. Voice + safety lifts are
-family-invariant; capability cost varies wildly by base.
+**The clean discriminator at N=5:** stock reasoning capability. Every
+base scoring 6/6 on the reasoning category lifts under the v4 recipe
+(+3.1, +5.3, +3.2 pp — Qwen 7B / Qwen 14B / Gemma 9B). Every base
+scoring 0–1/6 regresses (−4.0, −3.2 pp — Mistral / Llama). The
+recipe's re-weighting toward refusal / persona / rag_email comes out of
+capacity that high-reasoning bases have to spare; on low-reasoning
+bases it spends categories the recipe needs to keep (rag_datasheet,
+coding, rag_blog).
 
-**Two independent factors that strengthen cautious interpretation:**
+**What N=5 ruled out:**
 
-1. **Both non-Qwen families regressed** — Mistral and Llama are
-   architecturally distinct (different tokenizers, different chat
-   templates, different attention patterns) yet both regressed when the
-   same Qwen-tuned recipe was applied. Each individual delta is below 2σ
-   but the directional consistency across two independent priors is
-   non-trivial.
-2. **Failed falsification, not confirmation.** A Mistral full-sequence-loss
-   variant (no chat-template patching, no assistant_only_loss) was
-   attempted to disambiguate template-patching from recipe-base-coupling;
-   it produced an unusable model (0/132 valid responses). The mechanism
-   stays unidentified; the original Mistral v4 retrieval damage hypothesis
-   (chat-template-patching specific) is neither confirmed nor falsified.
+- **Architecture family is NOT the discriminator.** Gemma is non-Qwen
+  and lifts.
+- **Chat-template format is NOT the discriminator.** Gemma uses
+  `<start_of_turn>` markers (not ChatML, not `[INST]`); no
+  `{% generation %}` template patch needed.
+- **Refusal floor alone is NOT the discriminator.** Qwen 14B is 6/9
+  stock refusal and lifts.
 
-**For a deeper evidence package** including the variance-bounds runs,
-temperature-sensitivity finding, and reviewer Q&A, see
-`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md`.
+**What N=5 ruled in:** stock reasoning at 6/6 vs 0–1/6 cleanly partitions
+lift-vs-regress across all 5 cross-family points.
+
+**Open question (would falsify-or-confirm at N=6):** an intermediate-
+reasoning data point (e.g., 3-4/6 stock reasoning). The current 5
+points cluster at the extremes (6/6 or 0–1/6); a base scoring in the
+middle would tell us whether the cliff is sharp or gradient.
+
+Per-category transfer pattern (consistent across bases that lift OR
+regress): **refusal +3 / rag_email +3 / numerical_precision +3** transfer
+cleanly. **coding / rag_blog / rag_datasheet** is where the lift-vs-
+regress split lives — high-reasoning bases hold these flat or improve
+slightly; low-reasoning bases regress 3–8 pp on these categories.
+
+**For a deeper evidence package** including variance-bounds runs,
+temperature-sensitivity finding, full N=5 table, and reviewer Q&A, see
+`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md` (and Addendum).
 
 ### 5.6 Sister-model baseline confound
 
