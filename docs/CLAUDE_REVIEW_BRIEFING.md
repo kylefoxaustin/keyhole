@@ -582,69 +582,106 @@ thought training in Qwen ships visibly in pass rate.
 **Practical rule:** at 7B class the hardware budget is family-invariant;
 the quality outcome depends on corpus alignment with base capabilities.
 
-### 5.5 Recipe transfer is base-capability-coupled — clean discriminator at N=5 is stock reasoning floor
+### 5.5 Recipe produces no LLM-judge-corroborated capability gain across N=5
 
-**Status:** updated 2026-05-09 after Gemma 2 9B v4 lifted +3.2 pp,
-falsifying the architecture-coupling reading at N=2. Sanctioned framing
-per `personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md` Addendum
-(external Claude reviewer-signed-off): the clean N=5 discriminator is
-**stock reasoning capability**, not architecture family or chat-template
-format. Bases scoring 6/6 on the reasoning category lift under the v4
-recipe; bases scoring 0–1/6 regress.
+**Status:** load-bearing finding as of 2026-05-09. Sanctioned framing per
+`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md` (Reviewer follow-up
+section + Judge-on-N=5 Verdict, signed off on customer-template
+publication 2026-05-09 commit `7c48f6a`). The framing here mirrors that
+document end-to-end.
 
-Same 6,517-example Skippy fine-tuning corpus, same recipe, same hyperparams,
-only the base model changed:
+**Headline:** *Across N=5 cells, the v4 recipe produced no LLM-judge-
+corroborated capability gain. Substring lifts on Qwen 7B (+3.1pp),
+Qwen 14B (+8.7pp), and Gemma 9B (+3.2pp) all went to flat or negative on
+judge evaluation; substring regressions on Mistral 7B (−3.8pp) and Llama
+8B (−3.2pp) were corroborated as real capability damage. The substring
+grader at temp=0 measures format fidelity, not capability lift, for
+fine-tunes on this recipe.* The cleanest demonstration is Qwen 14B:
+**largest substring lift (+8.7pp), most evaporative judge result
+(Δ=±0.000)** — directly showing that substring-lift magnitude does not
+predict judge-corroborated capability gain.
 
-| Base | Stock reasoning | Stock refusal | v4 Δ vs base | Δ/σ | Direction |
+**Same 6,517-example Skippy fine-tuning corpus, same recipe, same
+hyperparams, only the base model changed:**
+
+| Base | Stock reasoning | Stock refusal | Substring Δ | Judge Δ (0–8) | Reading |
 |---|---|---|---|---|---|
-| Qwen 2.5 7B | 6/6 | 9/9 | **+3.1 pp** | +1.4σ | ✓ lift (production) |
-| Qwen 2.5 14B | 6/6 | 6/9 | +5.3 pp | +2.3σ | ✓ lift (fabricates peripherals — not shipped) |
-| **Gemma 2 9B** (NEW) | **6/6** | **9/9** | **+3.2 pp** | (—) | **✓ lift — non-Qwen, no ChatML, no template patch** |
-| **Mistral 7B v0.3** | **0/6** | **6/9** | **−4.0 pp** | **−1.8σ** | ✗ regress |
-| **Llama 3.1 8B** | **1/6** | **6/9** | **−3.2 pp** | **−1.3σ** | ✗ regress |
-| Qwen 2.5 32B → v4 | (n/a — corpus-size confound) | — | −4.6 pp | — | ✗ regress (corpus too small for 32B) |
-| Qwen3-30B-A3B (MoE attn-only) → FT v1 | (n/a — architecture confound) | — | −9.8 pp | — | ✗ regress (MoE-incompatible without router) |
+| Qwen 2.5 7B | 6/6 | 9/9 | **+3.1 pp** | **−0.350** | substring lift reverses |
+| Qwen 2.5 14B | **3/6** | **9/9** | **+8.7 pp** | **±0.000** | substring lift erased (largest, cleanest demo) |
+| Gemma 2 9B | 6/6 | 9/9 | **+3.2 pp** | **−0.620** | substring lift reverses (strong) |
+| Mistral 7B v0.3 | 0/6 | 6/9 | **−3.8 pp** | **−0.218** | regress holds on judge |
+| Llama 3.1 8B | 1/6 | 6/9 | **−3.2 pp** | **−1.165** | regress widens on judge (strong) |
 
-σ values from `personal-ai-framework/docs/skippy-data-bundle.xlsx`
-variance-bounds sheet (5 reps × 5 anchored models, temp=0.3, 132 samples).
-σ_base ≈ 1.4–2.3 pp.
+Judge: Claude Sonnet 4.6 / 4.7 via Anthropic API, semantic rubric
+(faithfulness to RAG context + instruction-following + correctness),
+50-sample held-out subset of `prompts_v2.json`. Full per-cell breakdown
+in `personal-ai-framework/eval/results/asymmetry_n5_judge_vs_substring.md`.
 
-**The clean discriminator at N=5:** stock reasoning capability. Every
-base scoring 6/6 on the reasoning category lifts under the v4 recipe
-(+3.1, +5.3, +3.2 pp — Qwen 7B / Qwen 14B / Gemma 9B). Every base
-scoring 0–1/6 regresses (−4.0, −3.2 pp — Mistral / Llama). The
-recipe's re-weighting toward refusal / persona / rag_email comes out of
-capacity that high-reasoning bases have to spare; on low-reasoning
-bases it spends categories the recipe needs to keep (rag_datasheet,
-coding, rag_blog).
+**Mechanism (consistent across lift cells):** faithfulness to RAG
+context drops on v4 (Qwen 7B −0.43, Qwen 14B −0.26, Gemma −0.20 on the
+0–2 faithfulness dimension), while conciseness and instruction-following
+hold. The substring grader does not penalise the faithfulness loss
+because trained phrasings still match gold tokens; the judge does.
 
-**What N=5 ruled out:**
+**Qwen 14B data correction note:** the previous N=5 table cited Qwen 14B
+at 6/6 reasoning / 6/9 refusal / +5.3pp Δ headline (interpolated values).
+Running the asymmetry test required a fresh apples-to-apples 14B base
+eval. Corrected values: **3/6 reasoning, 9/9 refusal, +8.7pp Δ**. The
+correction repositions 14B from the "ceiling-reasoning lift" group to
+the "intermediate-reasoning lift" group and strengthens the asymmetry
+hypothesis (largest substring lift, most evaporative judge result).
+Provenance audit confirmed all other 5 base JSONs are apples-to-apples
+(temp=0, RAG=on, prompts_v2, 132-sample basis); 14B was the sole cell
+with interpolated values.
 
-- **Architecture family is NOT the discriminator.** Gemma is non-Qwen
-  and lifts.
-- **Chat-template format is NOT the discriminator.** Gemma uses
-  `<start_of_turn>` markers (not ChatML, not `[INST]`); no
-  `{% generation %}` template patch needed.
-- **Refusal floor alone is NOT the discriminator.** Qwen 14B is 6/9
-  stock refusal and lifts.
+**Predictor framing (granular N-per-band, sanctioned wording):**
 
-**What N=5 ruled in:** stock reasoning at 6/6 vs 0–1/6 cleanly partitions
-lift-vs-regress across all 5 cross-family points.
+> Bases with stock reasoning at floor (0–1/6, N=2: Mistral 7B, Llama 8B)
+> regressed on substring and on judge. Bases at higher stock reasoning
+> (3/6, N=1: Qwen 14B; 6/6, N=2: Qwen 7B, Gemma 9B) lifted on substring
+> but the lift erased on judge. Bases at 2/6, 4/6, or 5/6 stock
+> reasoning have not been characterized.
 
-**Open question (would falsify-or-confirm at N=6):** an intermediate-
-reasoning data point (e.g., 3-4/6 stock reasoning). The current 5
-points cluster at the extremes (6/6 or 0–1/6); a base scoring in the
-middle would tell us whether the cliff is sharp or gradient.
+**Predictor-vs-proxy caveat (reviewer Q1):** at N=5, "reasoning floor
+predicts the substring-direction" is the cleanest predictor identified,
+**not necessarily the predictor**. Stock overall pass rate doesn't
+cleanly split (Gemma 61.9% lifts, Mistral 60.6% regresses on a 1.3pp
+gap), so reasoning floor is meaningfully sharper than obvious
+alternatives — but at N=5, alternatives that happen to correlate
+(overall base capability, training-data overlap with eval corpus,
+instruction-tuning recipe similarity to v4 targets) cannot be ruled
+out. Treat as a strong directional indicator on substring direction,
+not a causal claim.
 
-Per-category transfer pattern (consistent across bases that lift OR
-regress): **refusal +3 / rag_email +3 / numerical_precision +3** transfer
-cleanly. **coding / rag_blog / rag_datasheet** is where the lift-vs-
-regress split lives — high-reasoning bases hold these flat or improve
-slightly; low-reasoning bases regress 3–8 pp on these categories.
+**Earlier framings superseded but preserved for audit:** the 2026-05-08
+"preliminary base-family-coupled" framing (N=2) and the 2026-05-09
+"reasoning-floor discriminator" framing (N=5 substring-only) are both
+correct-at-the-time but superseded by the judge-corroborated view.
+Supersession documented in the GOTCHA_7_RESOLUTION.md Addendum +
+Reviewer follow-up sections.
 
-**For a deeper evidence package** including variance-bounds runs,
-temperature-sensitivity finding, full N=5 table, and reviewer Q&A, see
-`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md` (and Addendum).
+**Methodology hardening — future work, not blocking:**
+
+- **Cross-judge corroboration with a non-Anthropic model** (GPT-4 /
+  DeepSeek / Llama-405B-as-judge). Highest-value single hardening;
+  queued.
+- **Judge-at-temp=0.3 explicitly NOT pursued.** Reviewer's reasoning:
+  temp=0.3 already shows fine-tune fragility (per § 5.9
+  temperature-sensitivity); rerunning judge there conflates confounds
+  rather than separating them. Production decoding regime (temp=0) is
+  where judge stays orthogonal.
+
+**Customer recommendation:** expect the v4 recipe to teach voice and
+refusal patterns reliably across base families, but do not expect
+underlying capability lift on bases that already perform competently on
+the eval. Run a stock baseline on your eval before transferring this
+recipe to a new base; budget a full iteration cycle for any base in the
+2–5/6 intermediate-reasoning range (uncharacterized at N=5).
+
+**For the full evidence package** (judge per-cell breakdown, mechanism
+analysis, reviewer Q&A, customer-template wording, methodology
+hardening notes), see
+`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md`.
 
 ### 5.6 Sister-model baseline confound
 
