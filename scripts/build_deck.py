@@ -2454,7 +2454,7 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          "Dense 7B, Mistral v0.3 base",
          "0.568",  "−13.7pp",
          "voice ✓ / safety ✓ / capability fails",
-         "❌ recipe base-family-coupled — breaks rag_datasheet (−8) + rag_blog (−3) + coding (−3)"],
+         "❌ −4.0pp vs Mistral stock (−1.8σ); breaks rag_datasheet (−8) + rag_blog (−3) + coding (−3) — see GOTCHA_7_RESOLUTION.md"],
         ["Qwen2.5 32B Instruct (stock)",
          "Dense 32B, no FT",
          "0.682",  "−2.3pp",
@@ -2498,8 +2498,8 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          C.ACCENT_AMBER),
         ("• 14B v4 fabricates peripheral parts (made_up_peripheral 3/9). New finding: this is partly Qwen2.5 14B base behavior — v4 recipe inherits and amplifies rather than creating it. Cross-family scoreboard: Qwen 32B / Llama-3.1 8B / Mistral 7B v0.3 all stock at ~6/9 on the same probes BEFORE FT — confident fabrication is a base-model property, not a recipe artifact, and customers can't escape it by switching vendors. Layered mitigation: RAG-grounded refusal data (training-side) + cite-every-claim grounding enforcement (system-side); ship-smaller is the pragmatic dodge.",
          C.TEXT_DIM),
-        ("• Recipe transfer is base-family-coupled (new 2026-05-08): same recipe + same 6.5K corpus + only the base swapped → Qwen 7B +3.1pp / Qwen 14B +5.3pp / Qwen 32B −4.6pp / MoE-attn-only −9.8pp / Mistral 7B −3.8pp. Voice + safety lifts (refusal, rag_email, numerical_precision) transfer cleanly across families; capability cost varies wildly. Hypothesis: chat-template patching for non-Qwen bases reweights away from RAG-following.",
-         C.ACCENT_INDIGO),
+        ("• Recipe transfer — preliminary cross-family signal (N=2 directional, individually <2σ): same recipe + same 6.5K corpus + only the base swapped → Qwen 7B +3.1pp / Qwen 14B +5.3pp / Qwen 32B −4.6pp / MoE-attn-only −9.8pp / Mistral 7B −4.0pp (−1.8σ) / Llama 3.1 8B −3.0pp (−1.3σ). Both non-Qwen families regressed — directionally consistent across independent priors. Voice + safety lifts (refusal, rag_email, numerical_precision) transfer cleanly. Mistral full-seq falsification was attempted to disambiguate template-patching vs recipe-base-coupling but produced an unusable model (mechanism unidentified). Sanctioned framing per personal-ai-framework GOTCHA_7_RESOLUTION.md (external reviewer signed off): \"preliminary, may be architecture-coupled.\" Treat as directional signal, not load-bearing claim.",
+         C.ACCENT_AMBER),
     ], font_size=9)
 
 

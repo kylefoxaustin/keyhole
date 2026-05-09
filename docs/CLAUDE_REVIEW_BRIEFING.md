@@ -582,28 +582,60 @@ thought training in Qwen ships visibly in pass rate.
 **Practical rule:** at 7B class the hardware budget is family-invariant;
 the quality outcome depends on corpus alignment with base capabilities.
 
-### 5.5 Recipe transfer is base-family-coupled (new, 2026-05-08)
+### 5.5 Recipe transfer — preliminary cross-family signal (N=2 directional, both <2σ individually)
+
+**Status:** preliminary. Sanctioned framing per
+`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md` (external Claude
+reviewer-signed-off, 2026-05-08): *"preliminary evidence suggests the v4
+recipe may be architecture-coupled — Qwen gains, non-Qwen regresses, all
+below 2σ individually but directionally consistent across N=2 independent
+non-Qwen families."* Treat the cross-family delta as a directional signal
+to investigate further, not a load-bearing claim. The numbers below are
+the underlying measurements; the framing is preliminary because each
+individual cross-family delta is below the 2σ noise floor and a
+substring-grader temperature-sensitivity confound (see § 5.9) means the
+production temp=0 numbers may be format-fidelity artifacts rather than
+robustness wins.
 
 Same 6,517-example Skippy fine-tuning corpus, same recipe, same hyperparams,
 only the base model changed:
 
-| Base | Δ vs stock baseline |
-|---|---|
-| Qwen 2.5 7B → v4 | **+3.1 pp** (production) |
-| Qwen 2.5 14B → v4 | +5.3 pp (fabricates peripherals — not shipped) |
-| Qwen 2.5 32B → v4 | −4.6 pp (corpus too small for 32B) |
-| Qwen3-30B-A3B (MoE attn-only) → FT v1 | −9.8 pp (recipe MoE-incompatible without router) |
-| **Mistral 7B v0.3 → v4** | **−3.8 pp** (recipe damages retrieval on non-Qwen dense) |
+| Base | Δ vs stock baseline | Δ/σ | Notes |
+|---|---|---|---|
+| Qwen 2.5 7B → v4 | **+3.1 pp** | +1.4σ | production — within-family lift |
+| Qwen 2.5 14B → v4 | +5.3 pp | +2.3σ | fabricates peripherals — not shipped |
+| Qwen 2.5 32B → v4 | −4.6 pp | — | corpus too small for 32B (architecture confound) |
+| Qwen3-30B-A3B (MoE attn-only) → FT v1 | −9.8 pp | — | recipe MoE-incompatible without router |
+| **Mistral 7B v0.3 → v4** | **−4.0 pp** | **−1.8σ** | non-Qwen dense regression (post-persona quarantine) |
+| **Llama 3.1 8B → v4** | **−3.0 pp** | **−1.3σ** | non-Qwen dense regression (clean replication) |
+
+σ values from `personal-ai-framework/docs/skippy-data-bundle.xlsx`
+variance-bounds sheet (5 reps × 5 anchored models, temp=0.3, 132 samples).
+σ_base ≈ 1.4–2.3 pp.
 
 Per-category split for Mistral v4: **refusal +3 / rag_email +3 /
 numerical_precision +3** transfer cleanly; **coding −3 / rag_blog −3 /
 rag_datasheet −8** regress hard. Voice + safety lifts are
 family-invariant; capability cost varies wildly by base.
 
-**Hypothesis (untested):** Mistral's chat template required
-`{% generation %}` patching before training (similar to Qwen3-MoE). The
-patched template + assistant_only_loss combination may reweight away from
-RAG-following more than it did on Qwen 2.5 dense.
+**Two independent factors that strengthen cautious interpretation:**
+
+1. **Both non-Qwen families regressed** — Mistral and Llama are
+   architecturally distinct (different tokenizers, different chat
+   templates, different attention patterns) yet both regressed when the
+   same Qwen-tuned recipe was applied. Each individual delta is below 2σ
+   but the directional consistency across two independent priors is
+   non-trivial.
+2. **Failed falsification, not confirmation.** A Mistral full-sequence-loss
+   variant (no chat-template patching, no assistant_only_loss) was
+   attempted to disambiguate template-patching from recipe-base-coupling;
+   it produced an unusable model (0/132 valid responses). The mechanism
+   stays unidentified; the original Mistral v4 retrieval damage hypothesis
+   (chat-template-patching specific) is neither confirmed nor falsified.
+
+**For a deeper evidence package** including the variance-bounds runs,
+temperature-sensitivity finding, and reviewer Q&A, see
+`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md`.
 
 ### 5.6 Sister-model baseline confound
 
@@ -716,6 +748,40 @@ headroom. It is *not* achievable on a pure-NPU board running CPU
 software-decode — the integration-architecture matters as much as the
 NPU spec. The deck's prior framing didn't quantify this; § 5.8 + the
 new `slide_e2e_latency_budget` deck slide do.
+
+### 5.9 Temperature sensitivity in LLM accuracy citations (caveat)
+
+LLM accuracy citations in this briefing (§ 3.10, § 3.11, § 5.4, § 5.5)
+are temp=0 production-grading numbers (greedy decoding + substring
+grader). Skippy-side variance-bounds work (see
+`personal-ai-framework/docs/skippy-claude-briefing.md` § temperature-
+sensitivity) measured the same models at temp=0.3 with stochastic
+sampling and found:
+
+- **Base models are temperature-flat** (qwen-7b-base ±1.7 pp; mistral-7b-
+  base ±2.9 pp).
+- **Fine-tuned models are temperature-brittle.** Skippy 7B v4 dropped
+  from 70.5% (temp=0) to 44.5% (temp=0.3), a **−26 pp swing**. Skippy
+  Mistral v4 dropped −5.5 pp.
+
+**Interpretation (per [docs]):** the fine-tunes learned high-fidelity
+output patterns the substring grader rewards at temp=0; stochastic
+sampling at temp=0.3 breaks those patterns even when the answer is
+semantically correct. The temp=0 production headline numbers may
+therefore reflect format fidelity rather than absolute task accuracy.
+
+**Implication for this briefing:** the LLM-accuracy citations are
+mechanical pass-rate measurements as graded, and the percentages stand
+as reported. But "fine-tune adds X pp lift" claims should be read as
+"fine-tune adds X pp lift *under temp=0 substring grading*" — a
+narrower scope than absolute capability. The cross-family regression
+finding (§ 5.5) is partially insulated from this caveat because both
+sides of the cross-family comparison are graded the same way; the
+relative direction holds even if absolute magnitudes are
+substring-grader-coupled.
+
+For the full grader-methodology deep dive, see the Skippy briefing
+linked above.
 
 ---
 
