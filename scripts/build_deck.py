@@ -2465,6 +2465,11 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          "0.538",  "−3.2pp substring vs Llama stock",
          "voice ✓ / safety ✓ / capability fails (cross-judge corroborated)",
          "❌ Sonnet −1.165 / GPT-4o −1.524 — strongest regression on both judges, capability damage confirmed"],
+        ["Skippy v4 recipe on Yi-1.5-9B-Chat (cross-family, CATASTROPHIC regress)",
+         "Dense 9B, Yi-1.5 base, 3/6 reasoning, cross-family (not Qwen)",
+         "0.397",  "−28.6pp substring vs Yi stock — LARGEST in dataset",
+         "voice ✓ / safety ✓ / capability CATASTROPHIC FAIL",
+         "⚠️ Sonnet −0.848 / GPT-4o −0.714 (both judges corroborate); per-category: rag_datasheet 55→29 (−26), multihop 6→0, coding 4→0; falsifies N=5 single-factor predictor; load-bearing for the two-factor model — see GOTCHA_7_RESOLUTION.md"],
         ["Qwen2.5 32B Instruct (stock)",
          "Dense 32B, no FT",
          "0.682",  "−2.3pp",
@@ -2508,7 +2513,7 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          C.ACCENT_AMBER),
         ("• 14B v4 fabricates peripheral parts (made_up_peripheral 3/9). New finding: this is partly Qwen2.5 14B base behavior — v4 recipe inherits and amplifies rather than creating it. Cross-family scoreboard: Qwen 32B / Llama-3.1 8B / Mistral 7B v0.3 all stock at ~6/9 on the same probes BEFORE FT — confident fabrication is a base-model property, not a recipe artifact, and customers can't escape it by switching vendors. Layered mitigation: RAG-grounded refusal data (training-side) + cite-every-claim grounding enforcement (system-side); ship-smaller is the pragmatic dodge.",
          C.TEXT_DIM),
-        ("• v4 recipe — STRONGEST claim cross-judge: REGRESSION IS REAL CAPABILITY DAMAGE (Mistral + Llama). Both judges ≤ 0 on both regression cells; Llama widens under GPT-4o (Sonnet −1.165, GPT-4o −1.524) — if regressions were judge-bias artifacts, cross-judge would have surfaced disagreement; instead it doubled down. Lift cells: Qwen 7B (substring +3.1pp / Sonnet −0.35 / GPT-4o −0.69), Qwen 14B (+8.7pp / ±0.000 / −0.214) — both corroborated by BOTH judges as flat-or-negative. Qwen 14B is the cleanest demo (biggest substring lift, most evaporative judge result, ROBUST under both judges). Gemma 9B (+3.2pp / Sonnet −0.620 / GPT-4o +0.119) is the SINGLE judge-sensitive cell — disagreement isolated to RAG-faithfulness scoring (both judges agree on correctness, instruction-following, conciseness). Standing methodology: TWO JUDGES BY DEFAULT (no marginal-Δ qualifier — Gemma at Sonnet −0.620 was meaningfully-negative yet still cross-judge-unstable; the marginal-Δ filter would have missed it). Customer rec: expect voice + refusal to transfer reliably; do NOT expect capability lift on competent bases; characterize RAG-faithfulness under multiple judges before deploying.",
+        ("• Two-factor model (N=6, reviewer-final 2026-05-10): substring lift requires CEILING stock reasoning (6/6) OR FAMILY-MATCH to the corpus source distribution. Cross-family bases without ceiling reasoning REGRESS — Yi-1.5-9B-Chat at 3/6 cross-family produced −28.6pp substring regression (largest in dataset), both judges corroborate (Sonnet −0.848 / GPT-4o −0.714). Customer rule: lift expected if 6/6 reasoning OR family-matched; regression expected if cross-family AND below-ceiling. 11 of 12 judge passes confirm v4 ≤ base across N=6. Cleanest cross-judge demo: Qwen 14B largest substring lift (+8.7pp), most evaporative judge result, ROBUST under both judges (±0.000 / −0.214). Gemma 9B is the single judge-sensitive cell (Sonnet −0.620 / GPT-4o +0.119, disagreement isolated to RAG-faithfulness). Two damage profiles: lift cells lose RAG-faithfulness; regression cells (esp Yi) lose correctness + instruction-following. Standing methodology: TWO JUDGES BY DEFAULT (no marginal-Δ qualifier — Gemma at −0.620 was meaningfully-negative yet still judge-unstable). Phi-4 queued as falsification: two-factor predicts regression on third 3/6 cross-family.",
          C.ACCENT_INDIGO),
     ], font_size=9)
 

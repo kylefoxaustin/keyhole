@@ -582,88 +582,120 @@ thought training in Qwen ships visibly in pass rate.
 **Practical rule:** at 7B class the hardware budget is family-invariant;
 the quality outcome depends on corpus alignment with base capabilities.
 
-### 5.5 Recipe produces no LLM-judge-corroborated capability gain across N=5
+### 5.5 Recipe transfer: two-factor model — lift requires ceiling reasoning OR family-match
 
-**Status:** load-bearing finding as of 2026-05-09. Sanctioned framing per
-`personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md` (Reviewer follow-up
-section + Judge-on-N=5 Verdict, signed off on customer-template
-publication 2026-05-09 commit `7c48f6a`). The framing here mirrors that
-document end-to-end.
+**Status:** load-bearing finding as of 2026-05-10 N=6 publication.
+Sanctioned framing per `personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md`
+(Reviewer-blessed two-factor refinement subsection, commit `6398944`).
+Customer-template publication shipped reviewer-final.
 
-**Headline (cross-judge corroborated 2026-05-10):** *Across 10 judge passes
-(5 cells × 2 judges, Claude Sonnet + GPT-4o), 9 of 10 confirm v4 ≤ base.
-Substring lifts on Qwen 7B (+3.1pp), Qwen 14B (+8.7pp), and Gemma 9B
-(+3.2pp) all go to flat or negative on at least one judge; two of three
-(Qwen 7B, Qwen 14B) are corroborated by both judges. Substring
-regressions on Mistral 7B (−3.8pp) and Llama 8B (−3.2pp) are
-corroborated as real capability damage by both judges. The substring
-grader at temp=0 measures format fidelity, not capability lift, for
-fine-tunes on this recipe.* The cleanest demonstration is Qwen 14B:
-**largest substring lift (+8.7pp), most evaporative judge result
-(Sonnet ±0.000, GPT-4o −0.214 — both judges agree)** — directly showing
-that substring-lift magnitude does not predict judge-corroborated
-capability gain. **Robust under both judges.**
+**Headline (N=6 cross-judge, 2026-05-10):** *Across 12 judge passes
+(6 cells × 2 judges, Claude Sonnet + GPT-4o), 11 of 12 confirm v4 ≤
+base. The N=6 data is consistent with a parsimonious **two-factor
+model**: substring lift requires either **ceiling stock reasoning
+(6/6)** OR **family-match to the corpus source distribution
+(Qwen-family in our case)**. Cross-family bases without ceiling
+reasoning regress, regardless of intermediate reasoning headroom.*
+
+**Falsifiable prediction:** a third cross-family 3/6 base should
+regress. Phi-4 (Microsoft, distinct family, 128K context) is running
+now on the [docs] side as the falsification candidate. Falsification
+outcome: lift on Phi-4 → two-factor model breaks → 'Yi-specific
+quirk' framing returns. Reviewer-named expected outcome: regression
+(corroborates two-factor model).
 
 **Same 6,517-example Skippy fine-tuning corpus, same recipe, same
 hyperparams, only the base model changed:**
 
-| Base | Stock reasoning | Stock refusal | Substring Δ | Sonnet Δ | GPT-4o Δ | Cross-judge agree? |
+| Base | Stock reasoning | Family-match | Substring Δ | Sonnet Δ | GPT-4o Δ | Reading |
 |---|---|---|---|---|---|---|
-| Qwen 2.5 7B | 6/6 | 9/9 | **+3.1 pp** | **−0.350** | **−0.690** | ✓ both ≤ 0 |
-| Qwen 2.5 14B | **3/6** | **9/9** | **+8.7 pp** | **±0.000** | **−0.214** | ✓ both ≤ 0 (robust demo) |
-| Gemma 2 9B | 6/6 | 9/9 | **+3.2 pp** | **−0.620** | **+0.119** | **✗ DISAGREE (judge-sensitive)** |
-| Mistral 7B v0.3 | 0/6 | 6/9 | **−3.8 pp** | **−0.218** | **−0.048** | ✓ both ≤ 0 |
-| Llama 3.1 8B | 1/6 | 6/9 | **−3.2 pp** | **−1.165** | **−1.524** | ✓ both ≤ 0 (strongest both judges) |
+| Qwen 2.5 7B | **6/6** | Qwen | **+3.1 pp** | −0.350 | −0.690 | ceiling — lift erases on both judges |
+| Qwen 2.5 14B | 3/6 | **Qwen** | **+8.7 pp** | ±0.000 | −0.214 | family-match — lift erases (cleanest demo, both robust) |
+| Gemma 2 9B | **6/6** | cross | **+3.2 pp** | −0.620 | +0.119 | ceiling — judge-sensitive on faithfulness only |
+| **Yi-1.5-9B-Chat** | **3/6** | **cross** | **−28.6 pp** | **−0.848** | **−0.714** | **two-factor predicts regression — confirmed (catastrophic)** |
+| Mistral 7B v0.3 | 0/6 | cross | **−3.8 pp** | −0.218 | −0.048 | floor — regress confirmed both judges |
+| Llama 3.1 8B | 1/6 | cross | **−3.2 pp** | −1.165 | −1.524 | floor — regress strongest both judges |
 
 Judges: Claude Sonnet 4.6/4.7 via Anthropic API + GPT-4o via OpenAI API.
 Same semantic rubric (faithfulness to RAG context + instruction-following
 + correctness), same 50-sample held-out subset of `prompts_v2.json`. Full
 per-cell breakdown in
-`personal-ai-framework/eval/results/asymmetry_n5_judge_vs_substring.md`
-(Sonnet) and `cross_judge_n5_gpt4o.md` (GPT-4o cross-corroboration).
+`personal-ai-framework/eval/results/yi_n6_falsifies_substring_predictor.md`
++ earlier N=5 analysis files.
 
-**Mechanism (consistent across lift cells):** faithfulness to RAG
-context drops on v4 (Qwen 7B −0.43, Qwen 14B −0.26, Gemma −0.20 on the
-0–2 faithfulness dimension), while conciseness and instruction-following
-hold. The substring grader does not penalise the faithfulness loss
-because trained phrasings still match gold tokens; the judge does.
+**The Yi result is load-bearing.** Largest substring regression in the
+dataset (−28.6pp). Both cross-judges corroborate at −0.7 to −0.9
+magnitude. Per-category damage: rag_datasheet 55→29/78 (−26), multihop
+6→0/9, coding 4→0/6, numerical_precision 6→3/6. Only gain: refusal
+6→9/9 (+3). **A customer running this recipe in good faith on an
+intermediate cross-family base could ship a model 28pp worse than the
+base** — that's not marginal or preliminary, it's a real-world risk
+the campaign has now characterized.
 
-**Qwen 14B data correction note:** the previous N=5 table cited Qwen 14B
+**Two damage profiles — same recipe, different mechanisms by direction:**
+
+- **Lift cells (Qwen 7B / Qwen 14B / Gemma 9B):** lose RAG-citation
+  discipline. Faithfulness to RAG context drops on v4 (Qwen 7B −0.43,
+  Qwen 14B −0.26, Gemma −0.20 on the 0–2 dimension), while conciseness
+  and instruction-following hold. Substring grader doesn't penalise
+  because trained phrasings still match gold tokens; judges do.
+- **Regression cells, especially Yi:** lose capability on the question
+  itself. Yi v4: correctness Sonnet −0.470 / GPT-4o −0.214, instruction-
+  following Sonnet −0.502 / GPT-4o −0.476. Faithfulness *holds* on Yi
+  (+0.091 / +0.071). The recipe damages different things on different
+  bases — both directions show real damage, just on different axes.
+
+Customer implication: a judge weighted toward faithfulness catches
+lift-cell damage; a judge weighted toward correctness catches regression-
+cell damage. Single-judge runs miss whichever axis that judge
+underweights — another reason for two judges by default.
+
+**Predictor framing (sanctioned wording per reviewer-blessed two-factor
+model):**
+
+> Bases at floor stock reasoning (0–1/6, N=2: Mistral 7B, Llama 8B)
+> regressed on substring AND on judge. Bases at ceiling stock reasoning
+> (6/6, N=2: Qwen 7B, Gemma 9B) lifted on substring but the lift erased
+> on judge. Bases at intermediate stock reasoning (3/6, N=2) split by
+> family-match: Qwen 14B (Qwen-family, same as corpus source) lifted
+> +8.7pp on substring; Yi-1.5-9B-Chat (cross-family) regressed −28.6pp
+> with both judges corroborating. The N=6 data is consistent with a
+> two-factor model: lift requires either ceiling reasoning OR
+> family-match to the corpus source distribution. Customers fine-tuning
+> cross-family bases without ceiling stock reasoning should expect
+> regression on this recipe.
+
+**Predictor-vs-proxy caveat (Q1, partially superseded by N=6):** at N=5,
+"reasoning floor predicts substring direction" was the cleanest single-
+factor predictor identified, but Yi falsified it cleanly — same 3/6
+band as Qwen 14B, opposite substring direction. The two-factor model
+restores parsimony AND adds falsifiability (Phi-4 third 3/6 cross-family
+prediction). At N=6, the two-factor model is a strong directional
+predictor; alternatives that happen to correlate (e.g., specific
+training-data overlap with eval corpus) still cannot be ruled out
+without further cells.
+
+**Qwen 14B data correction note:** the original N=5 table cited Qwen 14B
 at 6/6 reasoning / 6/9 refusal / +5.3pp Δ headline (interpolated values).
 Running the asymmetry test required a fresh apples-to-apples 14B base
-eval. Corrected values: **3/6 reasoning, 9/9 refusal, +8.7pp Δ**. The
-correction repositions 14B from the "ceiling-reasoning lift" group to
-the "intermediate-reasoning lift" group and strengthens the asymmetry
-hypothesis (largest substring lift, most evaporative judge result).
+eval. Corrected values: **3/6 reasoning, 9/9 refusal, +8.7pp Δ**.
 Provenance audit confirmed all other 5 base JSONs are apples-to-apples
 (temp=0, RAG=on, prompts_v2, 132-sample basis); 14B was the sole cell
-with interpolated values.
+with interpolated values. The correction was load-bearing for the
+two-factor model — repositioning 14B from "ceiling-reasoning lift" to
+"intermediate-reasoning Qwen-family lift" is what made the family-match
+factor visible when Yi at the same 3/6 band regressed catastrophically.
 
-**Predictor framing (granular N-per-band, sanctioned wording):**
+**Earlier framings superseded but preserved for audit:**
+1. 2026-05-08 evening: "preliminary base-family-coupled" (N=2 directional)
+2. 2026-05-09 00:13: "reasoning-floor discriminator" (N=5 substring-only)
+3. 2026-05-09 15:49: "no judge-corroborated lift in N=5 cells" (Sonnet)
+4. 2026-05-10 00:21: "9/10 cross-judge corroborated; Gemma judge-sensitive"
+5. **2026-05-10 14:20: "two-factor model — ceiling reasoning OR family-match"** (current)
 
-> Bases with stock reasoning at floor (0–1/6, N=2: Mistral 7B, Llama 8B)
-> regressed on substring and on judge. Bases at higher stock reasoning
-> (3/6, N=1: Qwen 14B; 6/6, N=2: Qwen 7B, Gemma 9B) lifted on substring
-> but the lift erased on judge. Bases at 2/6, 4/6, or 5/6 stock
-> reasoning have not been characterized.
-
-**Predictor-vs-proxy caveat (reviewer Q1):** at N=5, "reasoning floor
-predicts the substring-direction" is the cleanest predictor identified,
-**not necessarily the predictor**. Stock overall pass rate doesn't
-cleanly split (Gemma 61.9% lifts, Mistral 60.6% regresses on a 1.3pp
-gap), so reasoning floor is meaningfully sharper than obvious
-alternatives — but at N=5, alternatives that happen to correlate
-(overall base capability, training-data overlap with eval corpus,
-instruction-tuning recipe similarity to v4 targets) cannot be ruled
-out. Treat as a strong directional indicator on substring direction,
-not a causal claim.
-
-**Earlier framings superseded but preserved for audit:** the 2026-05-08
-"preliminary base-family-coupled" framing (N=2) and the 2026-05-09
-"reasoning-floor discriminator" framing (N=5 substring-only) are both
-correct-at-the-time but superseded by the judge-corroborated view.
-Supersession documented in the GOTCHA_7_RESOLUTION.md Addendum +
-Reviewer follow-up sections.
+Each was correct-at-the-time and superseded as new data fired. Full
+supersession trail in the GOTCHA_7_RESOLUTION.md Addendum + Reviewer
+follow-up sections.
 
 **Methodology hardening — cross-judge ran 2026-05-10:**
 
@@ -674,11 +706,12 @@ Reviewer follow-up sections.
   cross-judge would have surfaced disagreement; instead it doubled
   down. The regression-is-real reading is the most strengthened claim
   under cross-judge.**
-- **Cross-judge corroboration with GPT-4o EXECUTED** (was reviewer Q1
-  future-work item). 9 of 10 judge passes confirm v4 ≤ base. Direction
-  agrees on 4 of 5 cells; Gemma 9B is the single judge-sensitive cell.
-  The Qwen 14B "biggest substring lift, most evaporative judge result"
-  demo is **robust under both judges**.
+- **Cross-judge corroboration with GPT-4o + Sonnet EXECUTED** across N=6.
+  **11 of 12 judge passes confirm v4 ≤ base.** Direction agrees on 5 of 6
+  cells; Gemma 9B remains the single judge-sensitive cell. The Qwen 14B
+  "biggest substring lift, most evaporative judge result" demo is
+  **robust under both judges**. The Yi −28.6pp regression is corroborated
+  at −0.7 to −0.9 magnitude under both judges (no judge-sensitivity).
 - **Standing methodology going forward: two judges by default.** No
   marginal-Δ qualifier. Reviewer-corrected 2026-05-10 from an earlier
   draft that triggered cross-judge only on marginal Δ. Justification:
@@ -719,29 +752,48 @@ it's optimizing for honest characterization, not clean conclusions."
 
 **Stock-baseline measurement on N=6 candidates (2026-05-09):** Phi-3-
 mini-4k-instruct, Yi-1.5-9B-Chat, and Gemma 2 2B-it measured for stock
-baseline. All three landed at 3/6 reasoning. Yi-1.5-9B-Chat is the
-cleanest N=6 fine-tune candidate (different family, no context
-handicap; Phi-3-mini disqualified by 4K-context saturation under RAG).
-**No 4/6 or 5/6 candidate emerged from this trio** — those bands
-remain uncharacterized. N=6 fine-tune is not load-bearing for the
-framing (asymmetry confirmed at N=5 + cross-judge); queued for if/when
-a specific question emerges.
+baseline. All three landed at 3/6 reasoning. **Yi-1.5-9B-Chat became
+the load-bearing N=6 cell** — fine-tuned 2026-05-10, regressed −28.6pp
+substring (largest in dataset), corroborated as real capability damage
+by both judges (Sonnet −0.848 / GPT-4o −0.714). The Yi result falsified
+the N=5 single-factor "reasoning floor" predictor and surfaced the
+two-factor model as the parsimonious replacement. **No 4/6 or 5/6
+candidate emerged** from the stock-baseline trio.
 
-**Customer recommendation (cross-judge corroborated):** Across N=10
-judge passes (5 cells × 2 judges, Sonnet + GPT-4o), 9 of 10 confirm
-v4 ≤ base. Two of three substring lifts (Qwen 7B, Qwen 14B) are
-corroborated by both judges as judge-flat-or-negative; the third
-(Gemma 9B) is judge-sensitive on the borderline (Sonnet says worse,
-GPT-4o says marginally better). Substring regressions on Mistral and
-Llama are corroborated as real capability damage by both judges.
-Customers should expect the v4 recipe to teach voice and refusal
-patterns reliably across base families, but should not expect
-underlying capability lift on bases that already perform competently on
-the eval — and should run cross-judge corroboration for any cell whose
-deployment decision rests on a marginal judge result. Run a stock
-baseline on your eval before transferring this recipe to a new base;
-budget a full iteration cycle for any base in the 2/6, 4/6, or 5/6
-reasoning range (uncharacterized at N=5).
+**Queued falsification: Phi-4 (Microsoft) as third 3/6 cross-family
+base.** Reviewer-named for falsification because (a) distinct family
+(Microsoft/Phi vs Qwen/Mistral/Yi/Gemma/Llama already in the dataset),
+(b) modern small model (NXP-relevance for "what about Phi"),
+(c) 128K context (controls for the Phi-3-mini-4k context-saturation
+confound). Two-factor model predicts regression on Phi-4. Falsification
+outcome: lift on Phi-4 → two-factor model breaks → "Yi-specific quirk"
+framing returns. Same Yi pipeline (stock baseline → fine-tune → both
+judges → analysis). Running on [docs] side; not blocking customer-
+template publication per reviewer ruling.
+
+**Customer recommendation (reviewer-final, two-factor model, N=6):**
+Across 12 judge passes (6 cells × 2 judges, Sonnet + GPT-4o), 11 of 12
+confirm v4 ≤ base. Customers fine-tuning **cross-family bases without
+ceiling stock reasoning should expect regression on this recipe** —
+Yi-1.5-9B-Chat ran with this recipe in good faith and produced a model
+**28pp worse than its base** on the Skippy substring eval; both
+cross-judges corroborated as real capability damage. That is not a
+marginal or preliminary risk — it is the recipe's behavior on
+intermediate-reasoning cross-family bases as currently characterized.
+
+The two-factor model gives customers a clean decision rule:
+- **Lift expected if:** stock reasoning is at ceiling (6/6) on your
+  eval — OR your base is family-matched to the corpus source
+  distribution.
+- **Regression expected if:** stock reasoning is below ceiling AND your
+  base is cross-family to the corpus source.
+- **Always run cross-judge corroboration** (two judges by default) on
+  any cell whose deployment decision turns on the v4 recipe outcome —
+  the Gemma cell shows that single-judge findings can carry interpretation
+  risk even at meaningfully-negative Δ.
+
+Run a stock baseline on your eval before transferring this recipe to a
+new base. Bases at 2/6, 4/6, or 5/6 stock reasoning are uncharacterized.
 
 **For the full evidence package** (judge per-cell breakdown, mechanism
 analysis, reviewer Q&A, customer-template wording, methodology
