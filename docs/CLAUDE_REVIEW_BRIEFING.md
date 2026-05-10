@@ -590,32 +590,37 @@ section + Judge-on-N=5 Verdict, signed off on customer-template
 publication 2026-05-09 commit `7c48f6a`). The framing here mirrors that
 document end-to-end.
 
-**Headline:** *Across N=5 cells, the v4 recipe produced no LLM-judge-
-corroborated capability gain. Substring lifts on Qwen 7B (+3.1pp),
-Qwen 14B (+8.7pp), and Gemma 9B (+3.2pp) all went to flat or negative on
-judge evaluation; substring regressions on Mistral 7B (−3.8pp) and Llama
-8B (−3.2pp) were corroborated as real capability damage. The substring
+**Headline (cross-judge corroborated 2026-05-10):** *Across 10 judge passes
+(5 cells × 2 judges, Claude Sonnet + GPT-4o), 9 of 10 confirm v4 ≤ base.
+Substring lifts on Qwen 7B (+3.1pp), Qwen 14B (+8.7pp), and Gemma 9B
+(+3.2pp) all go to flat or negative on at least one judge; two of three
+(Qwen 7B, Qwen 14B) are corroborated by both judges. Substring
+regressions on Mistral 7B (−3.8pp) and Llama 8B (−3.2pp) are
+corroborated as real capability damage by both judges. The substring
 grader at temp=0 measures format fidelity, not capability lift, for
 fine-tunes on this recipe.* The cleanest demonstration is Qwen 14B:
 **largest substring lift (+8.7pp), most evaporative judge result
-(Δ=±0.000)** — directly showing that substring-lift magnitude does not
-predict judge-corroborated capability gain.
+(Sonnet ±0.000, GPT-4o −0.214 — both judges agree)** — directly showing
+that substring-lift magnitude does not predict judge-corroborated
+capability gain. **Robust under both judges.**
 
 **Same 6,517-example Skippy fine-tuning corpus, same recipe, same
 hyperparams, only the base model changed:**
 
-| Base | Stock reasoning | Stock refusal | Substring Δ | Judge Δ (0–8) | Reading |
-|---|---|---|---|---|---|
-| Qwen 2.5 7B | 6/6 | 9/9 | **+3.1 pp** | **−0.350** | substring lift reverses |
-| Qwen 2.5 14B | **3/6** | **9/9** | **+8.7 pp** | **±0.000** | substring lift erased (largest, cleanest demo) |
-| Gemma 2 9B | 6/6 | 9/9 | **+3.2 pp** | **−0.620** | substring lift reverses (strong) |
-| Mistral 7B v0.3 | 0/6 | 6/9 | **−3.8 pp** | **−0.218** | regress holds on judge |
-| Llama 3.1 8B | 1/6 | 6/9 | **−3.2 pp** | **−1.165** | regress widens on judge (strong) |
+| Base | Stock reasoning | Stock refusal | Substring Δ | Sonnet Δ | GPT-4o Δ | Cross-judge agree? |
+|---|---|---|---|---|---|---|
+| Qwen 2.5 7B | 6/6 | 9/9 | **+3.1 pp** | **−0.350** | **−0.690** | ✓ both ≤ 0 |
+| Qwen 2.5 14B | **3/6** | **9/9** | **+8.7 pp** | **±0.000** | **−0.214** | ✓ both ≤ 0 (robust demo) |
+| Gemma 2 9B | 6/6 | 9/9 | **+3.2 pp** | **−0.620** | **+0.119** | **✗ DISAGREE (judge-sensitive)** |
+| Mistral 7B v0.3 | 0/6 | 6/9 | **−3.8 pp** | **−0.218** | **−0.048** | ✓ both ≤ 0 |
+| Llama 3.1 8B | 1/6 | 6/9 | **−3.2 pp** | **−1.165** | **−1.524** | ✓ both ≤ 0 (strongest both judges) |
 
-Judge: Claude Sonnet 4.6 / 4.7 via Anthropic API, semantic rubric
-(faithfulness to RAG context + instruction-following + correctness),
-50-sample held-out subset of `prompts_v2.json`. Full per-cell breakdown
-in `personal-ai-framework/eval/results/asymmetry_n5_judge_vs_substring.md`.
+Judges: Claude Sonnet 4.6/4.7 via Anthropic API + GPT-4o via OpenAI API.
+Same semantic rubric (faithfulness to RAG context + instruction-following
++ correctness), same 50-sample held-out subset of `prompts_v2.json`. Full
+per-cell breakdown in
+`personal-ai-framework/eval/results/asymmetry_n5_judge_vs_substring.md`
+(Sonnet) and `cross_judge_n5_gpt4o.md` (GPT-4o cross-corroboration).
 
 **Mechanism (consistent across lift cells):** faithfulness to RAG
 context drops on v4 (Qwen 7B −0.43, Qwen 14B −0.26, Gemma −0.20 on the
@@ -660,23 +665,52 @@ correct-at-the-time but superseded by the judge-corroborated view.
 Supersession documented in the GOTCHA_7_RESOLUTION.md Addendum +
 Reviewer follow-up sections.
 
-**Methodology hardening — future work, not blocking:**
+**Methodology hardening — cross-judge ran 2026-05-10:**
 
-- **Cross-judge corroboration with a non-Anthropic model** (GPT-4 /
-  DeepSeek / Llama-405B-as-judge). Highest-value single hardening;
-  queued.
+- **Cross-judge corroboration with GPT-4o EXECUTED** (was reviewer Q1
+  future-work item). 9 of 10 judge passes confirm v4 ≤ base. Direction
+  agrees on 4 of 5 cells; Gemma 9B is the single judge-sensitive cell —
+  Sonnet judges v4 strongly worse, GPT-4o judges v4 marginally better;
+  divergence concentrated on the faithfulness dimension of RAG-cited
+  responses (the two judges weight RAG-citation faithfulness differently
+  for Gemma's response style). The Qwen 14B "biggest substring lift,
+  most evaporative judge result" demo is **robust under both judges**.
+- **Standing methodology going forward:** **two judges minimum** for any
+  cell whose deployment decision turns on a marginal Δ. Cross-judge cost
+  ($5–10 per N=5 pass via OpenAI API) is in the noise compared to
+  fine-tune compute. Worth carrying forward as standing methodology for
+  v5+ campaigns.
 - **Judge-at-temp=0.3 explicitly NOT pursued.** Reviewer's reasoning:
   temp=0.3 already shows fine-tune fragility (per § 5.9
   temperature-sensitivity); rerunning judge there conflates confounds
   rather than separating them. Production decoding regime (temp=0) is
   where judge stays orthogonal.
 
-**Customer recommendation:** expect the v4 recipe to teach voice and
-refusal patterns reliably across base families, but do not expect
+**Stock-baseline measurement on N=6 candidates (2026-05-09):** Phi-3-
+mini-4k-instruct, Yi-1.5-9B-Chat, and Gemma 2 2B-it measured for stock
+baseline. All three landed at 3/6 reasoning. Yi-1.5-9B-Chat is the
+cleanest N=6 fine-tune candidate (different family, no context
+handicap; Phi-3-mini disqualified by 4K-context saturation under RAG).
+**No 4/6 or 5/6 candidate emerged from this trio** — those bands
+remain uncharacterized. N=6 fine-tune is not load-bearing for the
+framing (asymmetry confirmed at N=5 + cross-judge); queued for if/when
+a specific question emerges.
+
+**Customer recommendation (cross-judge corroborated):** Across N=10
+judge passes (5 cells × 2 judges, Sonnet + GPT-4o), 9 of 10 confirm
+v4 ≤ base. Two of three substring lifts (Qwen 7B, Qwen 14B) are
+corroborated by both judges as judge-flat-or-negative; the third
+(Gemma 9B) is judge-sensitive on the borderline (Sonnet says worse,
+GPT-4o says marginally better). Substring regressions on Mistral and
+Llama are corroborated as real capability damage by both judges.
+Customers should expect the v4 recipe to teach voice and refusal
+patterns reliably across base families, but should not expect
 underlying capability lift on bases that already perform competently on
-the eval. Run a stock baseline on your eval before transferring this
-recipe to a new base; budget a full iteration cycle for any base in the
-2–5/6 intermediate-reasoning range (uncharacterized at N=5).
+the eval — and should run cross-judge corroboration for any cell whose
+deployment decision rests on a marginal judge result. Run a stock
+baseline on your eval before transferring this recipe to a new base;
+budget a full iteration cycle for any base in the 2/6, 4/6, or 5/6
+reasoning range (uncharacterized at N=5).
 
 **For the full evidence package** (judge per-cell breakdown, mechanism
 analysis, reviewer Q&A, customer-template wording, methodology
