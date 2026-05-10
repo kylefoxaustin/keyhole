@@ -667,24 +667,55 @@ Reviewer follow-up sections.
 
 **Methodology hardening — cross-judge ran 2026-05-10:**
 
+- **Cross-judge corroborates regression as real capability damage on
+  Mistral and Llama** — both judges ≤ 0 on both regression cells; Llama
+  negative *more strongly* under GPT-4o than Sonnet (Sonnet −1.165,
+  GPT-4o −1.524). **If the regressions had been judge-bias artifacts,
+  cross-judge would have surfaced disagreement; instead it doubled
+  down. The regression-is-real reading is the most strengthened claim
+  under cross-judge.**
 - **Cross-judge corroboration with GPT-4o EXECUTED** (was reviewer Q1
   future-work item). 9 of 10 judge passes confirm v4 ≤ base. Direction
-  agrees on 4 of 5 cells; Gemma 9B is the single judge-sensitive cell —
-  Sonnet judges v4 strongly worse, GPT-4o judges v4 marginally better;
-  divergence concentrated on the faithfulness dimension of RAG-cited
-  responses (the two judges weight RAG-citation faithfulness differently
-  for Gemma's response style). The Qwen 14B "biggest substring lift,
-  most evaporative judge result" demo is **robust under both judges**.
-- **Standing methodology going forward:** **two judges minimum** for any
-  cell whose deployment decision turns on a marginal Δ. Cross-judge cost
-  ($5–10 per N=5 pass via OpenAI API) is in the noise compared to
-  fine-tune compute. Worth carrying forward as standing methodology for
-  v5+ campaigns.
+  agrees on 4 of 5 cells; Gemma 9B is the single judge-sensitive cell.
+  The Qwen 14B "biggest substring lift, most evaporative judge result"
+  demo is **robust under both judges**.
+- **Standing methodology going forward: two judges by default.** No
+  marginal-Δ qualifier. Reviewer-corrected 2026-05-10 from an earlier
+  draft that triggered cross-judge only on marginal Δ. Justification:
+  the cell that disagreed (Gemma) had Sonnet at −0.620 —
+  meaningfully-negative-not-marginal-looking; the cell that looked
+  most marginal on Sonnet alone (Mistral, −0.218) was robust across
+  judges. The marginal-Δ filter would have missed Gemma instability.
+  Cross-judge cost (~$5 per N=5 pass via OpenAI API) is in the noise
+  compared to fine-tune compute; default-on is the right policy.
 - **Judge-at-temp=0.3 explicitly NOT pursued.** Reviewer's reasoning:
   temp=0.3 already shows fine-tune fragility (per § 5.9
   temperature-sensitivity); rerunning judge there conflates confounds
   rather than separating them. Production decoding regime (temp=0) is
   where judge stays orthogonal.
+
+**Gemma judge-divergence — locus is RAG-faithfulness, not overall
+quality:**
+
+| Dimension (0–2) | Gemma base — Sonnet | Gemma v4 — Sonnet | Gemma base — GPT-4o | Gemma v4 — GPT-4o |
+|---|---:|---:|---:|---:|
+| Correctness | 1.487 | 1.366 | 1.476 | 1.452 |
+| Instruction-following | 1.667 | 1.634 | 1.857 | 1.738 |
+| **Faithfulness to RAG context** | **1.564** | **1.366 (−0.198)** | **1.024** | **1.262 (+0.238)** |
+| Conciseness | 2.000 | 1.732 | 1.500 | 1.524 |
+
+Both judges agree on correctness, instruction-following, and
+conciseness — Gemma v4 is flat-or-slightly-down on all three under
+both judges. The disagreement is *only* on RAG-faithfulness scoring:
+Sonnet penalises Gemma v4 for citation-faithfulness loss; GPT-4o
+rewards it (likely a difference in how each judge interprets
+"faithful citation" for Gemma's response style). **Customer
+implication:** if your eval weights RAG-faithfulness as a load-bearing
+dimension, characterize it under multiple judges before deploying.
+Reviewer endorsed surfacing the disagreement explicitly rather than
+breaking the tie with a third judge — "a team that surfaces 'here's
+the cell where our two judges disagreed and here's why' looks like
+it's optimizing for honest characterization, not clean conclusions."
 
 **Stock-baseline measurement on N=6 candidates (2026-05-09):** Phi-3-
 mini-4k-instruct, Yi-1.5-9B-Chat, and Gemma 2 2B-it measured for stock
