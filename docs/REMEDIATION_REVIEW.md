@@ -521,15 +521,77 @@ Closure of each item:
     self-correction-discipline paragraph cites the reviewer's
     framing rather than the team's.
 
+### KH-P1-002 CONFIRMED SHIPPED (2026-05-11 12:24, [sizer] confirmation)
+
+After this appendix was first written, [sizer] confirmed the streamlit
+sizer confidence-badge UI is user-visible per cell, with code-level
+evidence:
+
+- `_render_source_banner` in `keyhole-sizer/app.py:1160`, called for both
+  vision and LLM tiles at lines 1204, 1215
+- All four states render via st.success / st.info / st.warning / st.error:
+  - 🟢 `measured` (direct per-cell measurement, e.g. RTX 5090 bake-off
+    cells, i.MX 95 production yolov8n-seg) → `st.success`
+  - 🟢 `measured_anchor` (tier-level vendor anchor, e.g. Mid + Skippy
+    MoE Q4 37.85 tok/s) → `st.success`
+  - 🟡 `same_class_anchor` (within-family BW-scaled projection,
+    e.g. Mid + LPDDR6-14) → `st.info`
+  - 🟠 `cross_class` (cross-family extrapolation, where the 1.95×
+    over-projection callout matters) → `st.warning`
+- 🔴 `dtype_mismatch` rendered separately via `st.error` at line 893
+
+**Reviewer's specific concern (Llama-8B at NPU Mid) verified:** with
+`compute_dtype="fp16"` on `LLAMA_3_1_8B_INSTRUCT_STOCK` + Mid being
+INT8-only, the cell renders the 🔴 `dtype_mismatch` banner explicitly
+(not silent projection). For Llama-8B on NPU High (which supports FP),
+the cell renders the 🟠 `cross_class` warning with text "projection
+scales from a different silicon class via the two-floor model. Read as
+directional — slope assumption breaks at class boundaries."
+
+**KH-P1-002 status: data-layer flags + UI provenance both confirmed
+shipped.** Removed from the open-items list.
+
+### Keyhole-sizer fully closed today (2026-05-11)
+
+[sizer] also shipped two methodology-mirror commits closing the
+substring-arc on the sizer UI side:
+
+- **`d7f082c`** — catalog substring → semantic migration (14/14
+  entries on semantic pass_rate; mirrors PAI sizer e416ee0)
+- **`d5e9f22`** — Finding 4 methodology surface in LLM accuracy
+  expander (mirrors PAI sizer dd4ef31): 5-checkpoint headline erosion
+  arc, per-family regrade Δ table, two-factor model "partially
+  falsified" refinement, customer-guidance verbatim,
+  three-gate-framework "production decision unaffected" callout
+- **`7c58b59`** — `METHODOLOGY_VERSION = "2026-05-11-semantic-regrade-shipped"`
+  constant + UI footnote (cross-app methodology_version lockstep with
+  PAI sizer + personal-ai-framework)
+
+### Cross-app methodology_version lockstep — all four LLM-eval surfaces aligned
+
+| Surface | Label | Pattern |
+|---|---|---|
+| `personal-ai-framework/eval/build_sizer_bundle.py` (source of truth) | `2026-05-11-semantic-regrade-shipped` | stamps |
+| PAI sizer `sizer_bundle.json` `__meta__` | `2026-05-11-semantic-regrade-shipped` | consumes from bundle |
+| PAI sizer UI footnote (commit `770f6f0`, 2026-05-11 12:55) | `2026-05-11-semantic-regrade-shipped` | reads from bundle |
+| keyhole-sizer UI footnote (commit `7c58b59`) | `2026-05-11-semantic-regrade-shipped` | reads from constant |
+| keyhole bundle `__meta__` (separate NPU-perf concern) | `2026-05-11-substring-arc-closed` | stamps |
+
+The keyhole bundle tracks NPU-perf/DRAM methodology (the lane this
+remediation arc covers); the four LLM-eval surfaces track the
+substring-arc closure on the Skippy side. Different methodology axes,
+consistent labeling within each axis.
+
 ### What remains open
 
-- KH-P1-002 streamlit confidence badge UI surfacing — pinged [sizer]
-  for status confirmation
-- KH-P2-001 real Mid-class NPU silicon anchor — hardware-access
-  dependent, acknowledged in briefing TL;DR + § 5.8 + § 8
+- **KH-P2-001 real Mid-class NPU silicon anchor** — hardware-access
+  dependent, acknowledged in briefing TL;DR + § 5.8 + § 8. This is the
+  one genuine remaining methodology gap; honest scoping not a
+  remediation failure.
 
 The reviewer's net assessment was "closure acknowledged from my side";
 this appendix documents that the polish list was worked rather than
-deferred. If the reviewer surfaces anything else after seeing the .pptx
-directly (most polish-list items they couldn't verify without it),
-that's the next iteration.
+deferred. **KH-P1-002 confirmed shipped post-appendix, leaving KH-P2-001
+as the sole remaining-open item.** If the reviewer surfaces anything
+else after seeing the .pptx directly (most polish-list items they
+couldn't verify without it), that's the next iteration.
