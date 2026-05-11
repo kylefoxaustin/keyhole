@@ -860,8 +860,8 @@ def slide_exec_summary(prs: Presentation):
     card_h = 0.95
     card_w = (CONTENT_W - 0.5) / 3
     cards = [
-        ("549×",       "DRAM reduction (ncu-measured)",       "Per primary forward: 217 MB shipping vs 119 GB SAM 3 — architectural replacement", C.ACCENT_INDIGO),
-        ("36 FPS",     "Recommended (720p) — NPU High",     "Full TRT stack: YOLO-seg FP8 + CLIP FP8 (FP-capable silicon)",       C.ACCENT_GREEN),
+        ("515×",       "DRAM reduction per shipping frame (ncu)",       "Full pipeline: 231 MB (YOLO + 1Hz CLIP) vs 119 GB SAM 3 — architectural replacement, customer-relevant", C.ACCENT_INDIGO),
+        ("36 FPS",     "Recommended (720p) — NPU High",     "Full TRT stack: YOLO-seg FP8 + CLIP FP8 (FP-capable silicon). 0.70 BW efficiency assumption ±15% FPS sensitivity",       C.ACCENT_GREEN),
         ("0.4 FPS",    "SAM 3 BF16 baseline",       "BW-bound at 134.4 GB/s — not feasible at any quant",        C.ACCENT_RED),
     ]
     for i, (big, label, note, col) in enumerate(cards):
@@ -903,7 +903,7 @@ def slide_exec_summary(prs: Presentation):
     after_label_y = 3.4
     add_text_box(slide, Inches(CONTENT_LEFT), Inches(after_label_y),
                  Inches(CONTENT_W), Inches(0.22),
-                 "AFTER — recommended recipe (36 FPS, 549× lower DRAM/forward, real-time)",
+                 "AFTER — recommended recipe (36 FPS ±15% via 0.70 BW eff, 515× lower DRAM/frame, real-time)",
                  font_size=10, color=C.ACCENT_GREEN, bold=True)
     add_pipeline_strip(slide, [
         ("FFmpeg ingest", False),
@@ -2481,10 +2481,10 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          "(base ref)",
          "Apples-to-apples 32B base ref"],
         ["Qwen2.5 7B Instruct (stock)",
-         "Dense 7B, no FT",
-         "0.674",  "−3.1pp",
+         "Dense 7B, no FT, 6/6 reasoning",
+         "0.674 substring / 0.654 semantic",  "(base ref)",
          "(base ref)",
-         "Confirms +3.1pp v4 fine-tune lift"],
+         "Apples-to-apples Qwen 7B base — substring 'lift' to v4 was Qwen-family format-fidelity artifact; see § 8.2 Finding 4 in briefing"],
         ["Qwen3-30B-A3B Instruct-2507",
          "MoE, no FT",
          "0.712",  "+0.7pp",
@@ -2523,18 +2523,19 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
     ], font_size=9)
 
 
-def slide_remediation_arc_credibility(prs: Presentation):
-    """Slide: self-correction discipline — six framing supersessions in 60 hours.
+def slide_methodology_arc(prs: Presentation):
+    """Slide 1 of 2: how the methodology evolved — supersession table only.
 
-    Per external Claude reviewer's NXP-internal framing recommendation
-    (2026-05-10 18:41 closure note): "For NXP-internal: this entire arc
-    is itself a credibility story. ... The kind of process narrative
-    that builds trust. Reviewers care about whether the team will catch
-    its own over-claims; this arc demonstrates yes."
+    Split from earlier single slide per second-pass reviewer
+    (2026-05-11): "Split it. Two slides: 'How our methodology evolved'
+    (supersession table only) and 'What the data showed' (headline-
+    erosion table with the three-gate green callout). One slide with
+    everything was too dense; nobody reads dense slides in NXP-internal
+    meetings, they just nod and skip."
 
-    Surfaces the supersession trail as its own slide rather than burying
-    it in a bullet in slide_skippy_recipe_taxonomy. Each framing was
-    correct-at-the-time and superseded as new data fired.
+    This slide carries the 7-framing supersession arc + reviewer pull
+    quote. Companion slide `slide_data_arc` carries the headline-erosion
+    table + the three-gate-framework callout.
     """
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(
@@ -2603,38 +2604,98 @@ def slide_remediation_arc_credibility(prs: Presentation):
         font_size=10, color=C.TEXT_BRIGHT,
     )
 
-    # Headline-erosion arc: the production model's 5-checkpoint progression
-    # (reviewer-recommended NXP visualization)
-    erosion_y = 6.20
-    add_text_box(
-        slide, Inches(CONTENT_LEFT), Inches(erosion_y),
-        Inches(CONTENT_W), Inches(0.25),
-        "Production Skippy 7B v4 headline-erosion arc — same model, 5 cross-checks, sign reverses",
-        font_size=10, color=C.ACCENT_PURPLE, bold=True,
+    # "Why this is on the deck" — kept on this slide (the supersession-table
+    # slide) as it explains the arc-as-process-narrative framing
+    add_bullet_box(slide, CONTENT_LEFT, 6.20, CONTENT_W, 1.05, [
+        ("Why this is on the deck (NXP-internal framing)", C.ACCENT_BLUE, True),
+        ("• Reviewers care about whether the team catches its own over-claims. Each framing in the table above was correct-at-the-time and superseded by new data the team gathered to test it — not by external pushback.",
+         C.TEXT_BRIGHT),
+        ("• The campaign's most valuable methodology output (per reviewer): the Qwen-family format bias finding (§ 8.2 Finding 4) — a finding that emerged from the rigor, not from gotcha #7 itself. Companion slide shows the data side of the arc (5-checkpoint headline erosion on production cell).",
+         C.ACCENT_GREEN),
+    ], font_size=9)
+
+
+def slide_data_arc(prs: Presentation):
+    """Slide 2 of 2: what the data showed — Skippy 7B v4 headline-erosion table
+    + three-gate framework callout.
+
+    Split from earlier single slide per second-pass reviewer (2026-05-11):
+    one slide with the supersession + erosion + pull-quote + callout was
+    too dense. This slide carries the data side; companion
+    `slide_methodology_arc` carries the methodology-trajectory side.
+    """
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Production Skippy 7B v4: how the headline number eroded across 5 cross-checks",
+        "Same cell, same input data, different methodologies — the original +3.1pp substring claim reverses to −4.8pp under semantic regrade. Production decision unaffected by design.",
     )
-    erosion_headers = ["Substring (original)", "→ LLM-judge (Sonnet)",
-                        "→ Temp=0.3", "→ Cross-judge (GPT-4o)",
-                        "→ Semantic regrade (final)"]
-    erosion_rows = [
-        ["**+3.1 pp** apparent lift",
-         "**−0.350** judge erases lift",
-         "**−29.3 pp** temperature-brittle",
-         "**−0.690** corroborated by 2nd judge",
-         "**−4.8 pp** SIGN REVERSES"],
-    ]
-    add_styled_table(
-        slide, Inches(CONTENT_LEFT), Inches(erosion_y + 0.30),
-        Inches(CONTENT_W), Inches(0.55), erosion_headers, erosion_rows,
-        font_size=8, header_font_size=8,
+    add_pipeline_strip(
+        slide,
+        ["substring (original)", "+ LLM-judge", "+ temp=0.3",
+         "+ cross-judge", ("+ semantic regrade", True)],
+        accent_color=C.ACCENT_AMBER,
     )
 
-    # Three-gate framework callout — the "production decision unaffected" line
-    add_text_box(
-        slide, Inches(CONTENT_LEFT), Inches(erosion_y + 0.95),
-        Inches(CONTENT_W), Inches(0.35),
-        "✅ Production decision unaffected — three-gate framework (capability + voice + safety) caught the substring failure silently. Recipe ships for voice + safety; capability claim retired.",
-        font_size=9, color=C.ACCENT_GREEN, bold=True,
+    # Big headline-erosion table — gets its own real estate now
+    erosion_headers = ["Cross-check", "Δ vs Qwen 7B base", "Reading"]
+    erosion_rows = [
+        ["1. Substring (original headline, temp=0)",
+         "**+3.1 pp**",
+         "apparent capability lift — what would have shipped to NXP without further checks"],
+        ["2. LLM-judge Sonnet (single-judge)",
+         "**−0.350**",
+         "lift erases on judge dimensions (faithfulness to RAG context drops)"],
+        ["3. Temp=0.3 stochastic sampling",
+         "**−29.3 pp**",
+         "fine-tune temperature-brittle — base models are temp-flat, FTs are not"],
+        ["4. Cross-judge (GPT-4o, 2nd judge)",
+         "**−0.690**",
+         "not Sonnet-specific; both judges agree v4 ≤ base"],
+        ["5. Semantic regrade (final cross-check)",
+         "**−4.8 pp**",
+         "**sign reversal** — substring lift was Qwen-family format-fidelity artifact"],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.85),
+        Inches(CONTENT_W), Inches(2.55), erosion_headers, erosion_rows,
+        highlight_rows=[5],   # final reversal row
+        font_size=10, header_font_size=11,
     )
+
+    # Three-gate framework callout — the "production decision unaffected" line.
+    # Now gets its own visually prominent block since the slide isn't crowded.
+    cb_y = 4.55
+    cb_h = 1.10
+    shp = slide.shapes.add_shape(
+        MSO_SHAPE.ROUNDED_RECTANGLE,
+        Inches(CONTENT_LEFT), Inches(cb_y),
+        Inches(CONTENT_W), Inches(cb_h),
+    )
+    shp.fill.solid(); shp.fill.fore_color.rgb = C.BG_SLIDE
+    shp.line.color.rgb = C.ACCENT_GREEN; shp.line.width = Pt(3)
+    add_text_box(
+        slide, Inches(CONTENT_LEFT + 0.2), Inches(cb_y + 0.12),
+        Inches(CONTENT_W - 0.4), Inches(0.30),
+        "✅ Production decision unaffected — three-gate framework was designed exactly for this",
+        font_size=14, color=C.ACCENT_GREEN, bold=True,
+    )
+    add_text_box(
+        slide, Inches(CONTENT_LEFT + 0.2), Inches(cb_y + 0.45),
+        Inches(CONTENT_W - 0.4), Inches(0.60),
+        "Skippy ships gated on (1) capability, (2) voice, (3) safety. Substring failed silently on the capability gate — but voice + safety gates carried the real signal and caught the silent failure before any production-decision impact. The recipe ships for voice + safety transfer; the capability claim is retired.",
+        font_size=10, color=C.TEXT_BRIGHT,
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 5.80, CONTENT_W, 1.45, [
+        ("Mechanism — why the substring grader failed silently", C.ACCENT_BLUE, True),
+        ("• Training corpus phrasings come from Qwen (the source family). Gold tokens are Qwen-shaped. Substring grader checks if model output contains gold tokens — Qwen-family fine-tunes learn to emit Qwen-shaped phrasings, matching gold even when underlying capability hasn't lifted.",
+         C.TEXT_BRIGHT),
+        ("• Semantic regrade with GPT-4o on the production cell catches what substring missed: faithfulness to RAG context drops on v4 (Sonnet sees −0.43 on the 0-2 faithfulness dimension). Substring doesn't penalise faithfulness loss because trained phrasings still match gold tokens; judges do.",
+         C.ACCENT_AMBER),
+        ("• Customer guidance: **semantic-grade by default** for any FT-on-family-matched-corpus deployment (~$0.66/N=132 regrade with prompt caching). Substring alone is unreliable for FT-vs-base comparisons when the corpus phrasings come from one model family. Reviewer-final 2026-05-11 closure: 'single most valuable methodology output of this entire campaign.'",
+         C.ACCENT_GREEN),
+    ], font_size=9)
 
 
 def slide_skippy_sister_confound(prs: Presentation):
@@ -3928,6 +3989,8 @@ def slide_e2e_latency_budget(prs: Presentation):
          C.TEXT_DIM),
         (f"• If slack is positive ({slack_ms:+.1f} ms): the 36 FPS headline holds end-to-end. If negative: the YOLO+CLIP-only headline numbers are crowded out by non-NPU stages — the binding constraint to optimize next is whichever CPU stage tops the budget.",
          C.ACCENT_INDIGO),
+        ("• ⚠ Production-SoC projection (~17.6 ms / 56 FPS with ISP + 2D-GPU offloads) is PROJECTION ONLY, not validated against measured silicon. i.MX 95 anchor remains the only edge measurement in the campaign — KH-P2-001 tracks the gap.",
+         C.ACCENT_AMBER),
     ], font_size=9)
 
 
@@ -4223,10 +4286,10 @@ def slide_platform_specs(prs: Presentation):
 
 
 def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
-    """Final summary slide — architectural replacement story (549× DRAM reduction)."""
+    """Final summary slide — architectural replacement story (515× DRAM reduction per pipeline frame)."""
     slide = new_slide(prs, bg_color=C.BG_DARK)
-    add_title_subtitle(slide, "Summary & Key Findings — 549× DRAM reduction via architectural replacement (SAM 3 → Hybrid V2)",
-                       "0.4 → 36 FPS at 720p NPU Mid; 90× FPS is downstream of the DRAM win")
+    add_title_subtitle(slide, "Summary & Key Findings — 515× DRAM reduction per shipping pipeline frame (SAM 3 → Hybrid V2)",
+                       "0.4 → 36 FPS at 720p NPU Mid (±15% on 0.70 BW efficiency assumption); 90× FPS is downstream of the DRAM win")
 
     # Hero stat bar (indigo)
     hero = slide.shapes.add_shape(
@@ -4447,8 +4510,10 @@ def build_deck(output, runs_dir, data_dir):
     # Skippy training campaign — recipe taxonomy + sister-model confound + dense-vs-MoE BW
     console.print("  Building: Skippy recipe taxonomy")
     slide_skippy_recipe_taxonomy(prs)
-    console.print("  Building: Self-correction discipline arc")
-    slide_remediation_arc_credibility(prs)
+    console.print("  Building: Methodology arc (supersession trail)")
+    slide_methodology_arc(prs)
+    console.print("  Building: Data arc (headline-erosion + three-gate callout)")
+    slide_data_arc(prs)
     console.print("  Building: Skippy sister-model confound")
     slide_skippy_sister_confound(prs)
     if Path("data/output/bakeoff/llm_anchors").exists():

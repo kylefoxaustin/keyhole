@@ -176,7 +176,7 @@ def main() -> int:
             "repo":                 "keyhole",
             "git_head":             _git_head(),
             "schema_version":       1,
-            "methodology_version":  "2026-05-08-post-remediation",
+            "methodology_version":  "2026-05-11-substring-arc-closed",
             "description": (
                 "Canonical 5090 LLM measurement cells. Cells keyed by "
                 "measurement_alias (the same key sizer / pai-sizer use in "

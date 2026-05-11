@@ -712,7 +712,7 @@ def main() -> int:
                 "table."
             ),
             "tier_dtype_support": TIER_DTYPE_SUPPORT,
-            "methodology_version": "2026-05-08-post-remediation",
+            "methodology_version": "2026-05-11-substring-arc-closed",
         },
         "ncu": ncu,
         "llm_anchors": llm_anchors,

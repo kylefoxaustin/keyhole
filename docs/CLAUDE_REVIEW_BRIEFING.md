@@ -28,10 +28,13 @@ to push than either alone.
 **The headline framing:** SAM 3 (Meta's 840M-param open-vocab segmenter)
 is bandwidth-bound on every plausible edge memory subsystem and cannot be
 saved by quantization alone. We replaced it with a Hybrid V2 pipeline
-(YOLO-seg + CLIP @ 1 Hz) at **549× lower DRAM per primary forward** (217
-MB shipping detector vs 119,000 MB SAM 3 — measured via Nsight Compute,
-not projected). The replacement achieves **36 FPS at 720p on NPU Mid
-stock LPDDR5X**, vs SAM 3's 0.4 FPS edge ceiling.
+(YOLO-seg + CLIP @ 1 Hz) at **515× lower DRAM per full pipeline frame**
+(231 MB shipping pipeline including 1 Hz CLIP amortization vs 119,000 MB
+SAM 3 — measured via Nsight Compute, not projected). The replacement
+achieves **36 FPS at 720p on NPU Mid stock LPDDR5X**, vs SAM 3's 0.4 FPS
+edge ceiling. (Per-primary-forward comparison: 549× — see § 5.7. The
+full-pipeline 515× is the customer-relevant number — that's what
+actually ships.)
 
 **This is an architectural-replacement story, not an optimization
 journey.** No amount of quantization gets SAM 3 from 0.4 FPS to 30 FPS —
@@ -41,10 +44,23 @@ recognizing the workload was on the wrong side of the BW physics and
 finding a structurally lighter pipeline that meets the open-vocab
 capability requirement (scoped to embedded-world inspection — see § 4).
 
-**Headline numbers:** 549× DRAM reduction (per primary forward, ncu-
-measured); 515× per full-pipeline frame including 1 Hz CLIP amortization
-(231 MB total); 90× edge FPS (0.4 → 36 FPS). The 549× DRAM reduction is
-the primary engineering outcome; 90× FPS is downstream.
+**Headline numbers:** 515× DRAM reduction (per full pipeline frame
+including 1 Hz CLIP amortization, 231 MB total vs 119 GB SAM 3 —
+**customer-relevant number, what actually ships**); 549× per primary
+detector forward (217 MB shipping detector vs 119 GB SAM 3, a
+methodology data point for component-level comparisons); 90× edge FPS
+(0.4 → 36 FPS) is downstream of the DRAM win.
+
+**The 36 FPS headline has a ±15% sensitivity band on the 0.70 BW
+efficiency assumption.** Sweeping 0.60 → 0.85 effective BW efficiency
+gives roughly 30 → 42 FPS on the same shipping pipeline. Full derivation
++ per-tier defensibility in `docs/methodology/bw_efficiency_derivation.md`.
+
+**The headline rests on one measured edge silicon (i.MX 95 yolov8n-seg
+INT8 @ 1080p).** Mid-class NPU has not been directly measured; all Mid
+projections scale from 5090 wall-time via the 16.19× BW ratio. KH-P2-001
+in REMEDIATION_PLAN.md tracks the gap — acknowledged honestly here in §
+8 and § 5.8.
 
 The shipping pipeline compiles cleanly to TensorRT FP8 with negligible
 quantization drift vs the FP16 reference engine
@@ -64,12 +80,20 @@ Two surprising secondary findings:
    matches the FP16 engine essentially perfectly. Both numbers are
    engine-self-consistency, not ground-truth recall.
 
-2. **Recipe transfer is base-family-coupled.** Same fine-tuning recipe +
-   same 6,517-example corpus on different LLM bases produces wildly
-   different capability outcomes: Qwen 7B +3.1pp, Qwen 14B +5.3pp, Qwen 32B
-   −4.6pp, Qwen3-30B-A3B (MoE attn-only) −9.8pp, Mistral 7B v0.3 −3.8pp.
-   Voice + safety lifts (refusal, rag_email, numerical_precision) transfer
-   cleanly across families; capability cost varies by base.
+2. **The Skippy v4 recipe's headline "+3.1pp capability lift" was a
+   substring-grader artifact.** The original recipe-base-coupling
+   framing (cross-family v4 fine-tunes producing wildly different
+   substring outcomes: Qwen 7B +3.1pp, Mistral 7B −3.8pp, etc.) was
+   what motivated the gotcha #7 investigation. After 7 framing
+   supersessions over 84 hours, **reviewer-final closure 2026-05-11**:
+   the substring grader had Qwen-family format-fidelity bias because
+   the training corpus phrasings came from Qwen. Skippy 7B v4
+   production substring +3.1pp **reverses to semantic −4.8pp**.
+   **Recipe value is voice + safety transfer, NOT capability lift.**
+   Production decision unaffected — the three-gate framework
+   (capability + voice + safety) was designed exactly for this:
+   substring failed silently; voice + safety carried the real signal.
+   Full arc in § 5.5 + 5-checkpoint headline-erosion in § 8.2.
 
 The ncu (NVIDIA Nsight Compute) measurements close the loop:
 - **Shipping primary forward** (yolo_seg_fp8_trt) = 217 MB DRAM
@@ -990,16 +1014,22 @@ DB) total ~32 ms, which alone exceeds the budget. This is a real
 integration-architecture finding the YOLO+CLIP-only headline doesn't
 expose.
 
-**Production-realistic projection.** SoCs with fixed-function ISP and
-2D GPU (Qualcomm Hexagon, MediaTek Genio, NXP i.MX, Ambarella, Hailo)
-move decode + preprocess off-CPU entirely:
+**Production-realistic projection (NOT measured — projection only).**
+SoCs with fixed-function ISP and 2D GPU (Qualcomm Hexagon, MediaTek
+Genio, NXP i.MX, Ambarella, Hailo) typically move decode + preprocess
+off-CPU:
 
 - ingest_decode → ~0.3 ms via NVDEC / hardware video decoder block
 - preprocess → ~0.5 ms via 2D-GPU letterbox + ISP normalize
 
-With those offloads and batched commits, NPU Mid p50 total ≈ **17.6 ms
-= 56 FPS sustained**, well under the 36 FPS budget with ~10 ms
-headroom for multi-stream batching or higher source resolution.
+With those offloads and batched commits, NPU Mid p50 total **projects
+to ~17.6 ms / ~56 FPS**. This projection assumes successful ISP +
+2D-GPU offload of decode + preprocess; **the offload is plausible but
+not validated against measured silicon.** The i.MX 95 anchor remains
+the only edge measurement in the campaign (KH-P2-001 in
+REMEDIATION_PLAN.md tracks the gap). An NXP reviewer reading "56 FPS
+sustained" should read it as "projected if offloads land, not measured
+result."
 
 **Pure-NPU boards** (Coral, some development kits) without fixed-function
 ISP / 2D GPU pay the full CPU cost. For those targets, the practical

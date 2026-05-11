@@ -358,40 +358,41 @@ that's the highest-priority finding to surface.
 
 ---
 
-## 6. What this remediation arc produced (campaign-level reading)
+## 6. Campaign-level reading
 
-The reviewer's 2026-05-11 09:31 closure note reads, on the Skippy side:
-*"The recipe's value is voice transfer and safety calibration, not
-capability lift; the substring-headline-capability gain on this corpus
-was a format-fidelity artifact specific to Qwen-shaped phrasings in the
-training data. The substring-reliability arc closes here."*
+The remediation plan flagged 22 items across P0/P1/P2/P3. The backend
+lane closed 9 of those (all backend-side P0 + most P1 + most P3) plus
+18 commits of additional work driven by the gotcha #7 framing
+supersessions on the shared lane.
 
-The keyhole side's parallel reading: the original remediation plan
-flagged 22 items across P0/P1/P2/P3. The backend lane closed 9 of
-those (all P0 + most P1 + most P3) plus added 9 commits worth of
-unanticipated work driven by the gotcha #7 framing supersessions on
-the shared lane. **The most valuable backend contributions were the
-methodology-level findings that emerged from the rigor**, not the
-specific remediation items themselves:
+Several methodology-level outputs emerged from the rigor that the
+reviewer subsequently characterized as more durable than the specific
+remediation items:
 
-- The engine-self-comparison clarification (§ 4.1) is now standing
-  methodology for any future Hybrid V2 / TRT FP8 quality reporting
-- The BW floor vs effective edge ms reconciliation (§ 4.2) clarifies
-  what the deck's 36 FPS headline actually measures
-- The 5-regime substring-reliability matrix (§ 4.3) is portable to
-  any team running fine-tuning campaigns against corpus-targeted
-  evals — reviewer flagged as "single most valuable"
-- The CPU-stage crowding finding (§ 4.4) tells customers the deck's
-  36 FPS claim is conditional on integration-architecture, not just
-  NPU spec
+- Engine-self-comparison clarification (§ 4.1) — applicable to any
+  future Hybrid V2 / TRT FP8 quality reporting
+- BW floor vs effective edge ms reconciliation (§ 4.2) — distinguishes
+  what the deck's 36 FPS headline measures vs ncu's pure floor
+- 5-regime substring-reliability matrix (§ 4.3) — portable to any team
+  running fine-tuning evaluations against corpus-targeted evals.
+  Reviewer's 2026-05-11 09:31 closure characterized this as "the
+  single most valuable methodology output of this entire campaign."
+- CPU-stage crowding finding (§ 4.4) — scopes the deck's 36 FPS claim
+  to integration-architecture context, not just NPU spec
+- Cross-family LLM perf invariance (§ 4.5) — 7B-class dense Q4_K_M
+  decode is base-family-invariant within ~7% on 5090
 
-The arc itself (per reviewer's NXP-internal recommendation): *"Team
-identified a preliminary finding, applied increasingly rigorous
-methodology, falsified one branch, refined the model, corroborated the
-refinement with a pre-registered falsifier — and ultimately retired
-the original headline claim under semantic regrade. The kind of process
-narrative that builds trust."* This is what `slide_remediation_arc_credibility`
-captures, visible on the deck for NXP-internal review.
+The arc itself is documented across two deck slides
+(`slide_methodology_arc` for the 7-framing supersession trail,
+`slide_data_arc` for the production-cell headline-erosion table). Per
+the reviewer's NXP-internal framing recommendation: *"Team identified
+a preliminary finding, applied increasingly rigorous methodology,
+falsified one branch, refined the model, corroborated the refinement
+with a pre-registered falsifier — and ultimately retired the original
+headline claim under semantic regrade."* That narrative is intended to
+demonstrate self-correction discipline rather than make any claim
+about the work's quality independent of the reviewer's external
+verdict.
 
 ---
 
@@ -436,3 +437,99 @@ find anything material — the deliverable is closed.
 the conclusion of the 18-commit remediation arc. Cross-reference:
 `REMEDIATION_PLAN.md` (the original review's plan) and
 `CLAUDE_REVIEW_BRIEFING.md` (the post-remediation briefing).*
+
+---
+
+## Appendix: second-pass reviewer polish-list closure (2026-05-11 PM)
+
+After this document was published, the external reviewer returned a
+polish list of verify-and-fix items rather than a `REMEDIATION_PLAN_v2.md`.
+Closure of each item:
+
+### Verifications
+
+1. **Deck grep for stale "+3.1pp v4 lifts capability":** Found one stale
+   row in `slide_skippy_recipe_taxonomy` (Qwen2.5 7B Instruct stock row,
+   verdict text "Confirms +3.1pp v4 fine-tune lift"). Fixed in commit
+   following this addendum — reframed as the apples-to-apples Qwen 7B
+   base row with substring-vs-semantic dual pass-rate and a pointer to
+   the format-fidelity finding.
+2. **`methodology_version` label:** was "2026-05-08-post-remediation".
+   Bumped to "2026-05-11-substring-arc-closed" in both
+   `export_data_bundle.py` and `export_llm_anchors_5090.py`.
+3. **Yi −28.6pp prominence:** 1 instance in the deck (the verdict row);
+   reviewer wanted ≥3 if prominent. Briefing has 9 mentions across §
+   5.5 + § 8.2; the deck's prominence comes from the row position +
+   bold formatting rather than count. Left as-is on the deck side
+   because the row IS in a verdict table with the number in the Δ
+   column; adding more occurrences risks looking repetitive.
+4. **KH-P1-002 [sizer] confidence-badge status:** `measurement_alias`
+   + dtype_mismatch flags exist in the keyhole-sizer data layer
+   (per `sizer/llm_models.py`). Whether the streamlit UI surfaces the
+   provenance badges (🟢 measured / 🟠 cross_class / 🔴 fallback)
+   as user-visible elements is a [sizer]-side verification that the
+   closure document cannot confirm from the backend lane. Surfaced
+   back to [sizer] on the bus to confirm before the deliverable locks.
+5. **Data-provenance audit after Qwen 14B correction:** per the
+   campaign's GOTCHA_7_RESOLUTION.md Addendum, provenance audit was
+   done after the Qwen 14B re-eval and confirmed all 5 other base
+   JSONs are apples-to-apples (temp=0, RAG=on, prompts_v2, 132-sample
+   basis). Surfaced in briefing § 5.5 as a paragraph after the Qwen
+   14B data correction note.
+
+### Framing pushbacks
+
+6. **DRAM headline 549× → 515× as primary** (reviewer: "the
+   customer-relevant number is the full pipeline — that's what
+   actually ships"). Updated briefing TL;DR + § 1 + deck
+   exec_summary hero card + summary slide. 549× preserved as
+   methodology data point in § 5.7.
+7. **"56 FPS sustained" scoping tightened** (reviewer: "the offload
+   is plausible but not measured on any silicon you have"). Briefing
+   § 5.8 now explicitly says "PROJECTION ONLY, not validated against
+   measured silicon"; deck `slide_e2e_latency_budget` gains an amber
+   caveat bullet citing KH-P2-001 as the gap.
+
+### Things to surface
+
+8. **0.70 BW efficiency sensitivity band near 36 FPS headline:**
+   briefing TL;DR + deck exec_summary hero card now both carry the
+   "±15% on 0.70 BW efficiency assumption" callout. Full sensitivity
+   sweep stays in `docs/methodology/bw_efficiency_derivation.md`.
+9. **KH-P2-001 deferral louder:** explicit "the headline rests on one
+   measured edge silicon (i.MX 95)" paragraph added to briefing TL;DR.
+
+### Deck split
+
+10. **Split `slide_remediation_arc_credibility` into two slides** per
+    reviewer ("nobody reads dense slides in NXP-internal meetings"):
+    - `slide_methodology_arc` — supersession table only + reviewer
+      pull quote + "Why this is on the deck" bullet box
+    - `slide_data_arc` — headline-erosion 5-checkpoint table (gets
+      its own real estate now) + larger three-gate framework callout
+      + mechanism explanation bullet box
+    Deck 64 → 65 slides.
+
+### Attribution
+
+11. **"Single most valuable methodology output" attribution:** all 6
+    occurrences across briefing + deck + this document are
+    explicitly quote-marked + attributed to "external reviewer" or
+    "reviewer:". No reframing as our own assessment.
+12. **§ 6 tone softened:** "what this remediation arc produced" →
+    "campaign-level reading" with neutral framing. The
+    self-correction-discipline paragraph cites the reviewer's
+    framing rather than the team's.
+
+### What remains open
+
+- KH-P1-002 streamlit confidence badge UI surfacing — pinged [sizer]
+  for status confirmation
+- KH-P2-001 real Mid-class NPU silicon anchor — hardware-access
+  dependent, acknowledged in briefing TL;DR + § 5.8 + § 8
+
+The reviewer's net assessment was "closure acknowledged from my side";
+this appendix documents that the polish list was worked rather than
+deferred. If the reviewer surfaces anything else after seeing the .pptx
+directly (most polish-list items they couldn't verify without it),
+that's the next iteration.
