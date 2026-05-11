@@ -2422,9 +2422,9 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
     rows = [
         ["Skippy 7B v4 (production)",
          "Dense 7B, Qwen2.5 base, 6/6 reasoning",
-         "0.705",  "—",
-         "voice ✓ / capability NOT corroborated by judge",
-         "✅ SHIP — currently deployed; substring +3.1pp lift erases on BOTH judges (Sonnet −0.350 / GPT-4o −0.690), cross-judge corroborated"],
+         "0.705 substring / 0.606 semantic",  "—",
+         "voice ✓ / safety ✓ / capability NOT a recipe outcome (was format-fidelity)",
+         "✅ SHIP — three-gate framework (capability + voice + safety) catches substring failing silently; substring +3.1pp → semantic −4.8pp (sign reverses, Qwen-family format bias). Recipe ships for voice + safety, not capability lift."],
         ["Skippy 14B v4",
          "Dense 14B, Qwen2.5 base, 3/6 reasoning, 9/9 refusal",
          "0.727",  "+2.2pp",
@@ -2518,7 +2518,7 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          C.ACCENT_AMBER),
         ("• 14B v4 fabricates peripheral parts (made_up_peripheral 3/9). New finding: this is partly Qwen2.5 14B base behavior — v4 recipe inherits and amplifies rather than creating it. Cross-family scoreboard: Qwen 32B / Llama-3.1 8B / Mistral 7B v0.3 all stock at ~6/9 on the same probes BEFORE FT — confident fabrication is a base-model property, not a recipe artifact, and customers can't escape it by switching vendors. Layered mitigation: RAG-grounded refusal data (training-side) + cite-every-claim grounding enforcement (system-side); ship-smaller is the pragmatic dodge.",
          C.TEXT_DIM),
-        ("• Two-factor model (N=7, reviewer-closed 2026-05-10): substring lift requires CEILING stock reasoning (6/6) OR FAMILY-MATCH to the corpus source distribution. Pre-registered falsifier (Phi-4) CORROBORATED: third cross-family 3/6 base regressed as predicted (−1.6pp substring, both judges Sonnet −0.627 / GPT-4o −0.834). 13 of 14 judge passes confirm v4 ≤ base. Cleanest cross-judge demo: Qwen 14B (substring +8.7pp, ROBUST under both judges at ±0.000 / −0.214); Yi catastrophic regress (substring −28.6pp, both judges −0.848 / −0.714); Phi-4 noise-floor regress (substring −1.6pp, SAME judge magnitude as Yi at 18× the substring signal). LOAD-BEARING METHODOLOGY FINDING (reviewer: 'most valuable contribution this campaign produced, bigger than gotcha #7 itself'): substring grader is unreliable on cross-family intermediate-reasoning base-vs-FT comparisons — direction only, magnitude misleading. Standing methodology: TWO JUDGES BY DEFAULT. Customer rule: lift expected if ceiling reasoning OR family-matched; regression expected otherwise; substring alone is NOT sufficient for cross-family deployment decisions.",
+        ("• v4 'lifts capability' claim RETIRED (2026-05-11 reviewer-closed): bulk semantic regrade across 33 catalog entries reveals substring grader had Qwen-family format-fidelity bias. Skippy 7B v4 production: substring +3.1pp → semantic −4.8pp (SIGN REVERSES). Headline-erosion arc: +3.1pp substring → −0.35 LLM-judge → −29.3pp temp=0.3 → −0.69 cross-judge → −4.8pp semantic. **Recipe value is voice transfer + safety calibration, NOT capability lift.** Production decision unaffected (three-gate framework was designed for this: substring failed silently, voice + safety carried real signal). N=7 two-factor model survives directionally for 5 of 6 cells; family-match branch is now reframed as substring artifact + 'substantially overstated but doesn't go to zero' (Qwen 14B +5pp semantic still holds). Customer rule: SEMANTIC-GRADE BY DEFAULT for Qwen-family FTs (~$0.66/N=132 regrade); substring is reliable only for base-vs-base. Reviewer: 'single most valuable methodology output of this entire campaign — more valuable than gotcha #7, more valuable than the two-factor model.' See § 8.2 Finding 4.",
          C.ACCENT_INDIGO),
     ], font_size=9)
 
@@ -2568,20 +2568,26 @@ def slide_remediation_arc_credibility(prs: Presentation):
         ["2026-05-10 14:20",
          "two-factor model (reviewer-blessed at N=6)",
          "Phi-4 pre-registered as falsification candidate — outcome would either corroborate model or revert to Yi-specific-quirk"],
-        ["**2026-05-10 18:41**",
-         "**N=7 reviewer-closed; pre-registered falsifier (Phi-4) corroborated**",
-         "**Falsifier landed: Phi-4 v4 regressed as predicted. 7/7 cells fit; reviewer declared closure.**"],
+        ["2026-05-10 18:41",
+         "N=7 reviewer-closed; pre-registered falsifier (Phi-4) corroborated",
+         "Bulk semantic regrade on 33 catalog entries — substring grader's Qwen-family format bias surfaces; production v4 +3.1pp REVERSES to −4.8pp under semantic"],
+        ["**2026-05-11 09:31**",
+         "**'v4 lifts capability' RETIRED — substring had Qwen-family format bias**",
+         "**Reviewer-final closure of substring-reliability arc. Recipe value is voice + safety, not capability. Three-gate framework was designed for exactly this — substring failed silently, voice + safety carried real signal. Production decision unaffected.**"],
     ]
     add_styled_table(
-        slide, Inches(CONTENT_LEFT), Inches(1.55),
-        Inches(CONTENT_W), Inches(3.4), headers, rows,
-        highlight_rows=[5],   # final reviewer-closed framing
-        font_size=8, header_font_size=10,
+        slide, Inches(CONTENT_LEFT), Inches(1.50),
+        Inches(CONTENT_W), Inches(3.5), headers, rows,
+        highlight_rows=[6],   # final reviewer-closed framing
+        font_size=7, header_font_size=9,
     )
 
     # Reviewer pull quote (load-bearing for NXP-internal credibility framing)
-    quote_y = 5.10
-    quote_h = 1.05
+    # Updated 2026-05-11 to reflect the substring-reliability arc closure +
+    # Qwen-family format bias finding (which reviewer named the "single most
+    # valuable methodology output" of the campaign).
+    quote_y = 5.15
+    quote_h = 0.95
     quote_w = CONTENT_W
     shp = slide.shapes.add_shape(
         MSO_SHAPE.ROUNDED_RECTANGLE,
@@ -2591,19 +2597,44 @@ def slide_remediation_arc_credibility(prs: Presentation):
     shp.fill.solid(); shp.fill.fore_color.rgb = C.BG_SLIDE
     shp.line.color.rgb = C.ACCENT_INDIGO; shp.line.width = Pt(2)
     add_text_box(
-        slide, Inches(CONTENT_LEFT + 0.2), Inches(quote_y + 0.1),
-        Inches(quote_w - 0.4), Inches(0.85),
-        "“The original gotcha #7 was a flawed N=1 over-claim that would have shipped to NXP. The current N=7 framing is a falsifiable two-factor model with cross-judge corroboration, surfaced methodology findings on substring fragility, an asymmetry hypothesis tested across families, and a customer-actionable rule for pre-deployment evaluation. That's a significantly more credible deliverable than what started this thread — and most of the value-add isn't in gotcha #7 itself; it's in the secondary methodology findings that came out of the rigor.”\n— external reviewer, 2026-05-10 18:41 closure",
-        font_size=9, color=C.TEXT_BRIGHT,
+        slide, Inches(CONTENT_LEFT + 0.2), Inches(quote_y + 0.08),
+        Inches(quote_w - 0.4), Inches(0.80),
+        "“The Qwen-family format bias finding is, in my read, the single most valuable methodology output of this entire campaign — more valuable than gotcha #7, more valuable than the two-factor model. The substring-reliability arc closes here.”\n— external reviewer, 2026-05-11 09:31 closure",
+        font_size=10, color=C.TEXT_BRIGHT,
     )
 
-    add_bullet_box(slide, CONTENT_LEFT, 6.30, CONTENT_W, 0.95, [
-        ("Why this is on the deck (NXP-internal framing)", C.ACCENT_BLUE, True),
-        ("• Reviewers care about whether the team catches its own over-claims. Each framing in the table above was correct-at-the-time and superseded by new data the team gathered to test it — not by external pushback.",
-         C.TEXT_BRIGHT),
-        ("• The campaign's most valuable methodology output (per reviewer): substring-reliability matrix in § 8.2 — a finding that emerged from the rigor, not from gotcha #7 itself. Treat the arc as evidence that the deliverable was hardened through self-correction.",
-         C.ACCENT_GREEN),
-    ], font_size=9)
+    # Headline-erosion arc: the production model's 5-checkpoint progression
+    # (reviewer-recommended NXP visualization)
+    erosion_y = 6.20
+    add_text_box(
+        slide, Inches(CONTENT_LEFT), Inches(erosion_y),
+        Inches(CONTENT_W), Inches(0.25),
+        "Production Skippy 7B v4 headline-erosion arc — same model, 5 cross-checks, sign reverses",
+        font_size=10, color=C.ACCENT_PURPLE, bold=True,
+    )
+    erosion_headers = ["Substring (original)", "→ LLM-judge (Sonnet)",
+                        "→ Temp=0.3", "→ Cross-judge (GPT-4o)",
+                        "→ Semantic regrade (final)"]
+    erosion_rows = [
+        ["**+3.1 pp** apparent lift",
+         "**−0.350** judge erases lift",
+         "**−29.3 pp** temperature-brittle",
+         "**−0.690** corroborated by 2nd judge",
+         "**−4.8 pp** SIGN REVERSES"],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(erosion_y + 0.30),
+        Inches(CONTENT_W), Inches(0.55), erosion_headers, erosion_rows,
+        font_size=8, header_font_size=8,
+    )
+
+    # Three-gate framework callout — the "production decision unaffected" line
+    add_text_box(
+        slide, Inches(CONTENT_LEFT), Inches(erosion_y + 0.95),
+        Inches(CONTENT_W), Inches(0.35),
+        "✅ Production decision unaffected — three-gate framework (capability + voice + safety) caught the substring failure silently. Recipe ships for voice + safety; capability claim retired.",
+        font_size=9, color=C.ACCENT_GREEN, bold=True,
+    )
 
 
 def slide_skippy_sister_confound(prs: Presentation):

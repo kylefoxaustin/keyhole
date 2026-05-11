@@ -582,41 +582,63 @@ thought training in Qwen ships visibly in pass rate.
 **Practical rule:** at 7B class the hardware budget is family-invariant;
 the quality outcome depends on corpus alignment with base capabilities.
 
-### 5.5 Recipe transfer: two-factor model — lift requires ceiling reasoning OR family-match
+### 5.5 Recipe transfer: substring had Qwen-family format bias; semantic regrade RETIRES "v4 lifts capability"
 
-**Status:** load-bearing finding as of 2026-05-10 N=6 publication.
-Sanctioned framing per `personal-ai-framework/docs/GOTCHA_7_RESOLUTION.md`
-(Reviewer-blessed two-factor refinement subsection, commit `6398944`).
-Customer-template publication shipped reviewer-final.
+**Status:** load-bearing finding as of **2026-05-11 09:31 reviewer-final
+closure** of the substring-reliability arc. Sanctioned framing per
+`personal-ai-framework/docs/skippy-white-paper.md § Grader-methodology
+Finding 4` + `REVIEWER_FOLLOWUP_QWEN_BIAS.md` (commit `5db0a0c`).
+Bulk semantic regrade on 33 catalog entries (commit `706b0a4`,
+~$20 OpenAI, ~10 min) surfaced what reviewer called
+*"the single most valuable methodology output of this entire
+campaign — more valuable than gotcha #7, more valuable than the
+two-factor model"*.
 
-**Headline (N=7 cross-judge, reviewer-closed 2026-05-10):** *Across 14
-judge passes (7 cells × 2 judges, Claude Sonnet + GPT-4o), 13 of 14
-confirm v4 ≤ base. The N=7 data fits a parsimonious **two-factor
-model**: substring lift requires either **ceiling stock reasoning
-(6/6)** OR **family-match to the corpus source distribution
-(Qwen-family in our case)**. Cross-family bases without ceiling
-reasoning regress, regardless of intermediate reasoning headroom.*
+**Headline (reviewer-final):** *The Skippy v4 recipe's value is voice
+transfer and safety calibration — NOT capability lift. The substring-
+headline-capability gain on this corpus was a format-fidelity artifact
+specific to Qwen-shaped phrasings in the training data.* Production
+**Skippy 7B v4 substring +3.1pp lift FLIPS to semantic −4.8pp regression**
+under semantic regrade. Direction reverses on the production cell.
 
-**Pre-registered falsifier corroborated.** Phi-4 (Microsoft, distinct
-family, 14B, 128K context, 3/6 stock reasoning) was named by the
-reviewer as the falsification candidate at N=6. Outcome: **Phi-4 v4 =
-−1.6pp substring, Sonnet −0.627, GPT-4o −0.834** — regressed as the
-two-factor model predicted. The N=7 picture is 7-of-7 cells fitting the
-prediction; **reviewer declared the gotcha #7 thread closed** at this
-point on 2026-05-10 18:41.
+**Production decision unaffected.** The three-gate framework (capability
++ voice + safety) was designed exactly for this — substring failed
+silently; voice + safety carried the real signal. Skippy 7B v4 still
+ships per the three gates; the semantic regrade clarifies what the
+recipe is FOR (voice + safety), not whether it ships.
+
+**The N=7 cross-judge + semantic-regrade picture (reviewer-final):**
+
+Substring lift requires either **ceiling stock reasoning (6/6)** OR
+**family-match to the corpus source distribution** — but the
+family-match branch is **substantially overstated under substring
+grading** (it's the Qwen-family format-fidelity bias). Under semantic
+regrade, the family-match gate dissolves on Qwen 7B (direction
+reverses) but Qwen 14B still lifts; **within-family signal is mixed
+and undercharacterized at N=2.** Only the ceiling-reasoning gate
+produces consistent lifts under semantic.
+
+**Pre-registered falsifier corroborated at N=6 (Phi-4, 2026-05-10
+18:41 closure).** Phi-4 v4 regressed substring −1.6pp and both judges
+−0.6 to −0.9 — the two-factor substring prediction held there. But
+the subsequent **bulk semantic regrade (2026-05-11 08:43)** reframed
+what the two-factor model actually predicts: substring direction, not
+absolute capability direction. The headline-erosion arc (5 cross-checks
+on the production Skippy 7B v4 lift) is the campaign's most
+generalizable methodology output.
 
 **Same 6,517-example Skippy fine-tuning corpus, same recipe, same
 hyperparams, only the base model changed:**
 
-| Base | Stock reasoning | Family-match | Substring Δ | Sonnet Δ | GPT-4o Δ | Reading |
-|---|---|---|---|---|---|---|
-| Qwen 2.5 7B | **6/6** | Qwen | **+3.1 pp** | −0.350 | −0.690 | ceiling — lift erases on both judges |
-| Qwen 2.5 14B | 3/6 | **Qwen** | **+8.7 pp** | ±0.000 | −0.214 | family-match — lift erases (cleanest demo, both robust) |
-| Gemma 2 9B | **6/6** | cross | **+3.2 pp** | −0.620 | +0.119 | ceiling — judge-sensitive on faithfulness only |
-| **Yi-1.5-9B-Chat** | **3/6** | **cross** | **−28.6 pp** | **−0.848** | **−0.714** | **two-factor predicts regression — confirmed (catastrophic)** |
-| Mistral 7B v0.3 | 0/6 | cross | **−3.8 pp** | −0.218 | −0.048 | floor — regress confirmed both judges |
-| Llama 3.1 8B | 1/6 | cross | **−3.2 pp** | −1.165 | −1.524 | floor — regress strongest both judges |
-| **Phi-4 (Microsoft, 14B)** | **3/6** | **cross** | **−1.6 pp** | **−0.627** | **−0.834** | **pre-registered falsifier — regress as two-factor predicts** |
+| Base | Stock reasoning | Family-match | Substring Δ | Sonnet Δ | GPT-4o Δ | **Semantic Δ** | Reading |
+|---|---|---|---|---|---|---|---|
+| Qwen 2.5 7B (production) | **6/6** | Qwen | **+3.1 pp** | −0.350 | −0.690 | **−4.8 pp** | **DIRECTION REVERSES** — substring was format-fidelity |
+| Qwen 2.5 14B | 3/6 | **Qwen** | **+8.7 pp** | ±0.000 | −0.214 | **+4.8 to +5.5 pp** | family-match: lift smaller but holds |
+| Gemma 2 9B | **6/6** | cross | **+3.2 pp** | −0.620 | +0.119 | **+2.4 pp** | ceiling-reasoning gate holds under semantic |
+| **Yi-1.5-9B-Chat** | **3/6** | **cross** | **−28.6 pp** | **−0.848** | **−0.714** | **−30.2 pp** | regression widens under semantic |
+| Mistral 7B v0.3 | 0/6 | cross | **−3.8 pp** | −0.218 | −0.048 | **−6.4 pp** | regression widens |
+| Llama 3.1 8B | 1/6 | cross | **−3.2 pp** (or −5.7pp post-regrade) | −1.165 | −1.524 | **−6.3 pp** | regression widens |
+| **Phi-4 (Microsoft, 14B)** | **3/6** | **cross** | **−1.6 pp** | **−0.627** | **−0.834** | **±0.0 pp** | flat-to-down under semantic; both judges already showed real damage |
 
 Judges: Claude Sonnet 4.6/4.7 via Anthropic API + GPT-4o via OpenAI API.
 Same semantic rubric (faithfulness to RAG context + instruction-following
@@ -734,23 +756,26 @@ two-factor model — repositioning 14B from "ceiling-reasoning lift" to
 "intermediate-reasoning Qwen-family lift" is what made the family-match
 factor visible when Yi at the same 3/6 band regressed catastrophically.
 
-**Earlier framings superseded but preserved for audit (6 supersessions
-across 60 hours):**
+**Earlier framings superseded but preserved for audit (7 supersessions
+across 84 hours):**
 1. 2026-05-08 evening: "preliminary base-family-coupled" (N=2 directional)
 2. 2026-05-09 00:13: "reasoning-floor discriminator" (N=5 substring-only)
 3. 2026-05-09 15:49: "no judge-corroborated lift in N=5 cells" (Sonnet)
 4. 2026-05-10 00:21: "9/10 cross-judge corroborated; Gemma judge-sensitive"
 5. 2026-05-10 14:20: "two-factor model — ceiling reasoning OR family-match" (reviewer-blessed at N=6)
-6. **2026-05-10 18:41: "N=7 reviewer-closed; pre-registered falsifier (Phi-4) corroborated"** (current, reviewer-final)
+6. 2026-05-10 18:41: "N=7 reviewer-closed; pre-registered falsifier (Phi-4) corroborated"
+7. **2026-05-11 09:31: "v4 lifts capability RETIRED — substring had Qwen-family bias; recipe value is voice + safety, not capability"** (current, reviewer-final closure of substring-reliability arc)
 
-Each was correct-at-the-time and superseded as new data fired. **The
-arc itself demonstrates the team's self-correction discipline** —
-per the reviewer's NXP-internal framing recommendation: *"team
-identified a preliminary finding, applied increasingly rigorous
-methodology, falsified one branch, refined the model, corroborated the
-refinement with a pre-registered falsifier — the kind of process
-narrative that builds trust."* Full supersession trail in the
-GOTCHA_7_RESOLUTION.md Addendum + Reviewer follow-up sections.
+The Skippy 7B v4 production-headline-erosion arc (5 cross-checks):
+**Substring +3.1pp → LLM-judge −0.35 → Temp=0.3 −29.3pp → Cross-judge
+GPT-4o −0.69 → Semantic regrade −4.8pp (sign reversal).** Each check
+eroded the headline claim further; the final state retires the
+capability-lift claim entirely. Per the reviewer's NXP-internal framing
+recommendation: *"team identified a preliminary finding, applied
+increasingly rigorous methodology, falsified one branch, refined the
+model, corroborated the refinement with a pre-registered falsifier —
+the kind of process narrative that builds trust."* Full supersession
+trail in `GOTCHA_7_RESOLUTION.md` + `REVIEWER_FOLLOWUP_QWEN_BIAS.md`.
 
 **Methodology hardening — cross-judge ran 2026-05-10:**
 
@@ -833,19 +858,30 @@ highest-scoring base in the dataset on both judges (Sonnet 7.077, GPT-4o
 7.310 — better than Qwen 7B by 0.291/0.524); a candidate for v5 design
 under a different recipe, but not actionable in the current campaign.
 
-**Customer recommendation (reviewer-final, two-factor model, N=7
-closed):** Across 14 judge passes (7 cells × 2 judges, Sonnet + GPT-4o),
-13 of 14 confirm v4 ≤ base. Customers fine-tuning **cross-family bases
-without ceiling stock reasoning should expect regression on this
-recipe** — Yi-1.5-9B-Chat ran with this recipe in good faith and
-produced a model **28pp worse than its base** on the Skippy substring
-eval; both cross-judges corroborated as real capability damage. Phi-4
-under the same recipe produced **−1.6pp substring (within noise floor)
-but the same judge damage magnitude** (Sonnet −0.627, GPT-4o −0.834) —
-a team running substring-only would have missed real capability
-regression. That is not a marginal or preliminary risk — it is the
-recipe's behavior on intermediate-reasoning cross-family bases as
-characterized at N=3 (Yi, Phi-4, both regressed).
+**Customer recommendation (reviewer-final, semantic-regrade closure,
+2026-05-11, verbatim from `recipe-taxonomy.md`):**
+
+> *"Substring grading on this corpus is biased toward Qwen-family
+> fine-tunes due to gold-token format-match. Under semantic regrade,
+> only the ceiling-reasoning gate produces consistent lifts (Gemma 9B
+> at 6/6 still lifts; Qwen 14B at 3/6 still lifts but smaller; Qwen 7B
+> at 6/6 reverses to regression). Customers running this recipe on
+> their own corpus should expect substring lifts on family-matched FTs
+> to be partially or fully format-fidelity artifact, and should
+> semantic-grade by default."*
+
+**Generalizable methodology rule** (transfers to other corpora):
+
+> *"Substring grading is reliable for base-vs-base comparisons but
+> unreliable for FT-vs-base comparisons when the corpus phrasings
+> come from one model family. Customers running cross-family
+> campaigns should validate substring with semantic grading before
+> drawing FT-lift conclusions."*
+
+**Cost framing:** semantic regrade via GPT-4o with prompt caching is
+~$0.66/N=132 regrade. Negligible vs fine-tune compute. Recommended
+default-on for any FT evaluation; mandatory for cross-family
+deployment decisions.
 
 The two-factor model gives customers a clean decision rule:
 - **Lift expected if:** stock reasoning is at ceiling (6/6) on your
@@ -1167,41 +1203,77 @@ overhead model right for edge silicon?" — not "your numbers don't
 match." The numbers don't match by design; they answer different
 questions.
 
-### 8.2 Substring grader reliability — 4-regime matrix (load-bearing per reviewer)
+### 8.2 Substring grader reliability — 4-regime matrix + Qwen-family format bias (load-bearing per reviewer)
 
 The Skippy v4 fine-tuning campaign produced a methodology finding the
-external reviewer called *"the most valuable methodology contribution
-this whole campaign produced — bigger than gotcha #7 itself"*
-(2026-05-10 18:41 closure note). It applies to any team using substring
-graders to evaluate fine-tunes — including downstream evaluations of
-NPU-deployed models against domain-specific corpora. Promoted here to
-a top-level methodology finding rather than buried in the gotcha #7
-narrative.
+external reviewer called — first at 2026-05-10 18:41 — *"the most
+valuable methodology contribution this whole campaign produced —
+bigger than gotcha #7 itself"*, and then at 2026-05-11 09:31 (after
+the bulk semantic regrade) — ***"the single most valuable methodology
+output of this entire campaign — more valuable than gotcha #7, more
+valuable than the two-factor model, more valuable than the asymmetry
+hypothesis."*** It applies to any team using substring graders to
+evaluate fine-tunes — including downstream evaluations of NPU-deployed
+models against domain-specific corpora. Promoted here to a top-level
+methodology finding rather than buried in the gotcha #7 narrative.
+
+**Finding 4 (Qwen-family format bias, 2026-05-11 reviewer-closure):**
+substring grading on a corpus whose phrasings come from one model
+family systematically rewards fine-tunes of that family and penalizes
+fine-tunes of other families. The Skippy v4 production headline
+**+3.1pp substring lift on Qwen 7B reverses to −4.8pp on semantic
+regrade** — a sign reversal on the production cell. Across the
+33-entry catalog regrade (2026-05-11 commit `706b0a4` on
+personal-ai-framework): Qwen-family FTs regrade DOWN sharply (Skippy
+7B v4 −10.3pp; 7B v1/v2/v3 −3.2pp; MoE-thinking −12.7pp), non-Qwen
+stock bases regrade UP (Gemma 9B +6.0pp, Mistral 7B +2.4pp, Llama 8B
++1.6pp). **The campaign's headline-erosion arc on Skippy 7B v4 (the
+production model) shows the +3.1pp substring claim eroding across
+five successive cross-checks:**
+
+| Cross-check | Skippy 7B v4 Δ vs Qwen 7B base | Cumulative reading |
+|---|---|---|
+| 1. Substring (original headline, temp=0) | **+3.1 pp** | apparent capability lift |
+| 2. LLM-judge (Sonnet, single-judge, 2026-05-09) | **−0.350** | lift erases on judge dimensions |
+| 3. Temp=0.3 stochastic sampling | **−29.3 pp** | fine-tune temperature-brittle |
+| 4. Cross-judge (GPT-4o, 2026-05-10) | **−0.690** | judge result corroborates; not Sonnet-specific |
+| 5. **Semantic regrade (2026-05-11)** | **−4.8 pp** | **sign reversal — substring lift was Qwen-family format-fidelity artifact** |
+
+**4-regime matrix** (now extended with the Qwen-family-bias regime):
 
 | Eval regime | Substring grader reliable? |
 |---|---|
 | **Base-vs-base at temp=0** (different bases, greedy decoding) | ✓ **YES** — direction + magnitude both reliable |
-| **Base-vs-FT at temp=0** (single base vs its fine-tune) | ⚠ **direction only** — fine-tune learned trained phrasings that match gold tokens; magnitude may be format-fidelity |
+| **Base-vs-FT at temp=0, FT-base IS family-matched to corpus source** | ✗ **NO — Qwen-family format-fidelity bias** (NEW 2026-05-11). Substring rewards trained phrasings that match gold tokens; semantic regrade required to recover capability signal. Skippy 7B v4 +3.1pp → −4.8pp under semantic. |
+| **Base-vs-FT at temp=0, FT-base is NOT family-matched** | ⚠ **direction only** — magnitude understates damage (substring penalizes non-Qwen-shaped outputs even when capability is intact) |
 | **Base-vs-FT at temp>0** (stochastic sampling on fine-tune) | ✗ **NO** — fine-tune lift can swing ±26 pp depending on temperature (Skippy 7B v4: 70.5% → 44.5% from temp=0 → temp=0.3); see § 5.9 |
 | **Cross-family intermediate-reasoning FT comparison** (different bases under same FT recipe, where bases aren't at reasoning ceiling and aren't family-matched to corpus source) | ⚠ **direction only, magnitude unreliable** — Yi v4 substring −28.6pp and Phi-4 v4 substring −1.6pp produced **identical judge damage** (both −0.6 to −0.9); the 18× substring spread is noise on the actual capability axis |
 
 **Practical implications:**
 
-- **Two judges by default** on any base-vs-FT comparison. Cross-judge
-  cost (~$5 per N=5 pass with prompt caching) is in the noise vs
-  fine-tune compute. Standing methodology rule adopted reviewer-final
-  2026-05-10 (no marginal-Δ qualifier — see § 5.5).
+- **Semantic-grade by default** on any base-vs-FT comparison where the
+  corpus phrasings come from one model family. GPT-4o with prompt
+  caching = ~$0.66/N=132 regrade; negligible vs fine-tune compute.
+  Standing methodology rule adopted reviewer-final 2026-05-11 closure.
+- **Two judges by default** on any base-vs-FT comparison (Sonnet +
+  GPT-4o). Cross-judge cost ~$5/N=5 pass. Reviewer-final 2026-05-10
+  (no marginal-Δ qualifier — see § 5.5).
 - **Don't ship a model based on substring lift alone** for any
-  fine-tuned cross-family deployment. Yi's −28.6pp would have been
-  obvious to substring; Phi-4's −1.6pp would not. Both produced real
-  capability damage at the same judge magnitude.
+  fine-tuned deployment, especially Qwen-family. Skippy 7B v4's
+  +3.1pp substring lift would have shipped as "capability gain"; the
+  three-gate framework (capability + voice + safety) caught that
+  substring failed silently and voice + safety carried the real signal.
 - **Temperature regime matters.** If the production deployment is
   temp=0 greedy, evaluate at temp=0. If it's temp=0.3+ stochastic,
   evaluate there too — fine-tunes are temperature-brittle in a way
   base models aren't.
 
 This finding is referenced from § 5.5 + § 5.9 and is the load-bearing
-methodology output of the gotcha #7 campaign per reviewer's closure.
+methodology output of the entire campaign per reviewer's closure note:
+*"The Qwen-family format bias finding is, in my read, the single most
+valuable methodology output of this entire campaign. Customer-deployable,
+tool-grounded, mechanism-clear, and a generalizable lesson for any team
+running corpus-targeted fine-tuning evals."*
 
 ### 8.3 BW efficiency derivation (KH-P1-001 reference)
 
