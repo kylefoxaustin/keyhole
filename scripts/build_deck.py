@@ -2470,6 +2470,11 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          "0.397",  "−28.6pp substring vs Yi stock — LARGEST in dataset",
          "voice ✓ / safety ✓ / capability CATASTROPHIC FAIL",
          "⚠️ Sonnet −0.848 / GPT-4o −0.714 (both judges corroborate); per-category: rag_datasheet 55→29 (−26), multihop 6→0, coding 4→0; falsifies N=5 single-factor predictor; load-bearing for the two-factor model — see GOTCHA_7_RESOLUTION.md"],
+        ["Skippy v4 recipe on Phi-4 (Microsoft, 14B) — PRE-REGISTERED falsifier",
+         "Dense 14B, Phi-4 base, 3/6 reasoning, cross-family",
+         "—",  "−1.6pp substring (within noise floor σ≈1.4-2.3pp)",
+         "voice ✓ / safety ✓ / capability fails (cross-judge corroborated)",
+         "✓ Two-factor model CONFIRMED: Sonnet −0.627 / GPT-4o −0.834 — SAME judge magnitude as Yi at 18× the substring signal. Substring-only would have missed real capability damage. Reviewer-closed gotcha #7 at this cell."],
         ["Qwen2.5 32B Instruct (stock)",
          "Dense 32B, no FT",
          "0.682",  "−2.3pp",
@@ -2513,7 +2518,7 @@ def slide_skippy_recipe_taxonomy(prs: Presentation):
          C.ACCENT_AMBER),
         ("• 14B v4 fabricates peripheral parts (made_up_peripheral 3/9). New finding: this is partly Qwen2.5 14B base behavior — v4 recipe inherits and amplifies rather than creating it. Cross-family scoreboard: Qwen 32B / Llama-3.1 8B / Mistral 7B v0.3 all stock at ~6/9 on the same probes BEFORE FT — confident fabrication is a base-model property, not a recipe artifact, and customers can't escape it by switching vendors. Layered mitigation: RAG-grounded refusal data (training-side) + cite-every-claim grounding enforcement (system-side); ship-smaller is the pragmatic dodge.",
          C.TEXT_DIM),
-        ("• Two-factor model (N=6, reviewer-final 2026-05-10): substring lift requires CEILING stock reasoning (6/6) OR FAMILY-MATCH to the corpus source distribution. Cross-family bases without ceiling reasoning REGRESS — Yi-1.5-9B-Chat at 3/6 cross-family produced −28.6pp substring regression (largest in dataset), both judges corroborate (Sonnet −0.848 / GPT-4o −0.714). Customer rule: lift expected if 6/6 reasoning OR family-matched; regression expected if cross-family AND below-ceiling. 11 of 12 judge passes confirm v4 ≤ base across N=6. Cleanest cross-judge demo: Qwen 14B largest substring lift (+8.7pp), most evaporative judge result, ROBUST under both judges (±0.000 / −0.214). Gemma 9B is the single judge-sensitive cell (Sonnet −0.620 / GPT-4o +0.119, disagreement isolated to RAG-faithfulness). Two damage profiles: lift cells lose RAG-faithfulness; regression cells (esp Yi) lose correctness + instruction-following. Standing methodology: TWO JUDGES BY DEFAULT (no marginal-Δ qualifier — Gemma at −0.620 was meaningfully-negative yet still judge-unstable). Phi-4 queued as falsification: two-factor predicts regression on third 3/6 cross-family.",
+        ("• Two-factor model (N=7, reviewer-closed 2026-05-10): substring lift requires CEILING stock reasoning (6/6) OR FAMILY-MATCH to the corpus source distribution. Pre-registered falsifier (Phi-4) CORROBORATED: third cross-family 3/6 base regressed as predicted (−1.6pp substring, both judges Sonnet −0.627 / GPT-4o −0.834). 13 of 14 judge passes confirm v4 ≤ base. Cleanest cross-judge demo: Qwen 14B (substring +8.7pp, ROBUST under both judges at ±0.000 / −0.214); Yi catastrophic regress (substring −28.6pp, both judges −0.848 / −0.714); Phi-4 noise-floor regress (substring −1.6pp, SAME judge magnitude as Yi at 18× the substring signal). LOAD-BEARING METHODOLOGY FINDING (reviewer: 'most valuable contribution this campaign produced, bigger than gotcha #7 itself'): substring grader is unreliable on cross-family intermediate-reasoning base-vs-FT comparisons — direction only, magnitude misleading. Standing methodology: TWO JUDGES BY DEFAULT. Customer rule: lift expected if ceiling reasoning OR family-matched; regression expected otherwise; substring alone is NOT sufficient for cross-family deployment decisions.",
          C.ACCENT_INDIGO),
     ], font_size=9)
 
