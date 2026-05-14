@@ -30,3 +30,9 @@ profile_report.json
 
 # TensorRT engine files — large binary, rebuilt by scripts/bakeoff_trt_yolo.py
 data/trt_engines/
+
+# Private NPU + CNN measured-silicon anchor secrets — values never enter git.
+# Schema reference lives in .streamlit/secrets.toml.example (committed).
+.streamlit/secrets.toml
+# Private deck variant built with --include-private flag — contains secret values.
+data/output/keyhole_results_PRIVATE.pptx

@@ -3994,6 +3994,101 @@ def slide_e2e_latency_budget(prs: Presentation):
     ], font_size=9)
 
 
+def slide_measured_silicon_anchors(prs: Presentation):
+    """PRIVATE slide — measured NPU silicon anchor data (LLM + CNN).
+
+    Only built when `build_deck --include-private` is passed AND the
+    secrets file has at least one non-zero anchor cell. The deck output
+    in this mode is `keyhole_results_PRIVATE.pptx`, which contains
+    secret values and MUST NOT be pushed to my-stuff or gdrive.
+
+    Discipline: this function (written by Claude) only references KEYS
+    and uses the typed loader. The values themselves come from
+    `.streamlit/secrets.toml` at build time and never enter the source
+    tree, logs, or chat. Stdout from build_deck.py prints slide names
+    only — no value leakage.
+    """
+    from src.anchors import (
+        load_llm_anchor, load_cnn_anchor,
+        LLM_TIERS, LLM_MODELS, CNN_TIERS, CNN_KEYS,
+        LLM_MODEL_LABELS, CNN_LABELS, TIER_LABELS,
+    )
+
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Measured silicon anchors — NPU Mid + High (PRIVATE)",
+        "Real-silicon measurements from Kyle's NPU bench, loaded at build-time from "
+        "`.streamlit/secrets.toml`. This slide only appears in --include-private "
+        "builds; the values were NOT visible to Claude during deck construction.",
+    )
+    add_pipeline_strip(
+        slide,
+        ["secrets.toml (gitignored)", ("private_anchors loader", True),
+         "build_deck --include-private", ("keyhole_results_PRIVATE.pptx", True),
+         "NXP-internal viewing only"],
+        accent_color=C.ACCENT_AMBER,
+    )
+
+    # ───── LLM anchor table — 3 tier-precision × 3 models ────────────
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(1.55),
+                 Inches(CONTENT_W), Inches(0.30),
+                 "LLM decode (tokens/sec) — 3 tier-precisions × 3 models",
+                 font_size=11, color=C.ACCENT_INDIGO, bold=True)
+    llm_headers = ["Model"] + [TIER_LABELS[t] for t in LLM_TIERS]
+    llm_rows = []
+    for model_key in LLM_MODELS:
+        row = [LLM_MODEL_LABELS[model_key]]
+        for tier in LLM_TIERS:
+            a = load_llm_anchor(tier, model_key)
+            if a is None:
+                row.append("not measured")
+            else:
+                # Value comes from secrets at build-time — Claude never sees this.
+                # python-pptx writes it into the .pptx directly.
+                row.append(f"{a.badge} {a.tokps:.1f} tok/s")
+        llm_rows.append(row)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(1.85),
+                     Inches(CONTENT_W), Inches(1.85),
+                     llm_headers, llm_rows,
+                     font_size=10, header_font_size=10)
+
+    # ───── CNN anchor table — 2 tier-precision × 3 CNNs ───────────────
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.80),
+                 Inches(CONTENT_W), Inches(0.30),
+                 "CNN inference (ms/forward) — 2 tier-precisions × 3 CNN variants. "
+                 "CNN measured INT-only on NPU High (no high_fp cells).",
+                 font_size=11, color=C.ACCENT_INDIGO, bold=True)
+    cnn_headers = ["CNN variant"] + [TIER_LABELS[t] for t in CNN_TIERS]
+    cnn_rows = []
+    for cnn_key in CNN_KEYS:
+        row = [CNN_LABELS[cnn_key]]
+        for tier in CNN_TIERS:
+            a = load_cnn_anchor(tier, cnn_key)
+            if a is None:
+                row.append("not measured")
+            else:
+                row.append(f"{a.badge} {a.ms_per_inference:.2f} ms ({a.fps:.1f} FPS)")
+        cnn_rows.append(row)
+    add_styled_table(slide, Inches(CONTENT_LEFT), Inches(4.15),
+                     Inches(CONTENT_W), Inches(1.55),
+                     cnn_headers, cnn_rows,
+                     font_size=10, header_font_size=10)
+
+    # ───── Discipline + interpretation framework ─────────────────────
+    add_bullet_box(slide, CONTENT_LEFT, 5.80, CONTENT_W, 1.45, [
+        ("How to read this slide", C.ACCENT_BLUE, True),
+        ("• 🟢 measured = direct measurement on real silicon. 🟡 vendor_spec = vendor-published. 🟠 projected = placeholder (no measurement yet). 'not measured' = cell absent / zero in secrets.toml.",
+         C.TEXT_BRIGHT),
+        ("• Values shown were loaded from `.streamlit/secrets.toml` at build-time and written directly into this slide by python-pptx. They are visible to anyone who opens this .pptx file, but were not visible to Claude during deck construction.",
+         C.TEXT_BRIGHT),
+        ("• BW-derivation inputs (peak_bw_gbps × bw_share_frac × bw_efficiency_frac) for each cell are in the underlying secrets file; not surfaced here. Default share = 0.75 (25% reserved for non-NPU masters); default efficiency = 0.70 (matches keyhole methodology, see docs/methodology/bw_efficiency_derivation.md).",
+         C.TEXT_DIM),
+        ("• Comparison to projections: this deck's other slides show BW-projection edge ms from 5090 wall-time × 16.19. Where the measured cell here matches the projection within the ±15% BW-efficiency band, the methodology validates. Where it diverges, the methodology should be revisited — flag to [backend] without quoting the value.",
+         C.ACCENT_AMBER),
+    ], font_size=9)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = new_slide(prs)
@@ -4353,7 +4448,14 @@ def slide_summary(prs: Presentation, runs: list[dict], targets: dict):
               help="Directory containing run JSON files")
 @click.option("--data-dir", default="data/output",
               help="Directory containing reference architecture exports")
-def build_deck(output, runs_dir, data_dir):
+@click.option("--include-private", is_flag=True, default=False,
+              help="Include private measured-silicon-anchor slide(s) from "
+                   ".streamlit/secrets.toml. Output goes to "
+                   "keyhole_results_PRIVATE.pptx instead of the default path. "
+                   "Resulting file contains secret values; MUST NOT be pushed "
+                   "to my-stuff or gdrive. See docs/PRIVATE_DECK.md for "
+                   "discipline.")
+def build_deck(output, runs_dir, data_dir, include_private):
     """Generate the Keyhole results PowerPoint deck."""
     from rich.console import Console
     console = Console()
@@ -4578,6 +4680,25 @@ def build_deck(output, runs_dir, data_dir):
     # Summary slide
     console.print("  Building: Summary & findings")
     slide_summary(prs, runs, targets)
+
+    # Private measured-silicon-anchor slide(s) — only when --include-private
+    # AND secrets.toml has at least one non-zero measurement. The slide
+    # function consults `src.anchors.load_*_anchor` at build-time; values
+    # flow from secrets into python-pptx without ever passing through
+    # stdout, logs, or exception messages.
+    if include_private:
+        from src.anchors import have_any_measured_anchors
+        if have_any_measured_anchors():
+            console.print("  Building: [private] Measured silicon anchors (LLM + CNN)")
+            slide_measured_silicon_anchors(prs)
+        else:
+            console.print("  [yellow]Skipping private slide: no non-zero anchors "
+                          "in .streamlit/secrets.toml[/]")
+        # Redirect output filename to the private variant so the public
+        # default file isn't overwritten. Filename suffix `_PRIVATE` also
+        # makes accidental pushes to my-stuff harder.
+        output = Path(output).with_name(
+            Path(output).stem + "_PRIVATE" + Path(output).suffix)
 
     # Add consistent footer (project + page number) to every slide.
     # Skip in merge-target mode — the corporate template's master already
