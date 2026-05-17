@@ -83,8 +83,8 @@ to slow down + invite questions.
 
 ### Slide 5 — Architecture diagram
 
-> "Standard four-stage pipeline: FFmpeg ingest, detect + segment, label
-> with open-vocab text concepts, write to a queryable database with
+> "Five-stage pipeline as the deck labels it: FFmpeg ingest, YOLO-seg
+> detection + masks, open-vocab labeling via CLIP, event store,
 > optional LLM-driven natural-language query. Camera-to-event-store on
 > embedded silicon. The whole deck is about getting this to run in
 > real-time at the detect/segment/label stage."
@@ -109,28 +109,37 @@ to slow down + invite questions.
 
 ---
 
-## Section 2 — Per-clip baseline results (slides 8–10)
+## Section 2 — Per-clip baseline results (slides 8–28)
 
-### Slide 8+ — Run results per video clip
+### Slides 8–27 — Per-clip test runs (20 slides, skim at ~20 sec each)
 
-> "We benchmarked against three clips of representative embedded-world
-> footage: 720p, 1080p, 4K. Per-clip results are in the deck for
-> reference. The pattern is consistent across all three: bandwidth-
-> bound on edge, compute-headroom on the 5090. I'll skip the details
-> and call out the comparison chart on the next slide."
+*These 20 slides alternate between a Test Run page (raw 5090
+measurements) and an Edge NPU Projection page for each input clip.
+Don't dwell — say the framing once, then page through.*
 
-### Slide 9 — Run comparison chart
+> "We benchmarked against six representative embedded-world clips —
+> 720p, 1080p, and 4K from the EW capture set, plus a bus exterior
+> and a synthetic test pattern. For each clip the deck has one Test
+> Run slide (raw 5090 measurements) followed by one Edge NPU
+> Projection slide (the same workload scaled to NPU Mid via the
+> 16.19× bandwidth ratio). I'm not going to read these one by one —
+> the pattern is consistent: bandwidth-bound on edge, compute-
+> headroom on the 5090. They're in the deck so you can audit any
+> single clip if you want to. Otherwise, head to the comparison
+> chart on slide 28."
+
+### Slide 28 — Run comparison chart
 
 > "Bottom line on the per-clip comparisons: the 5090 measurements are
 > internally consistent within ±5% across resolutions. We trust our
 > 5090 numbers; the open question is how cleanly they project to the
-> edge."
+> edge — and that's what the rest of the deck answers."
 
 ---
 
-## Section 3 — Bandwidth physics (slides 10–12)
+## Section 3 — Bandwidth physics (slides 29–31)
 
-### Slide 10 — Bandwidth wall analysis
+### Slide 29 — Bandwidth wall analysis
 
 > "This is the load-bearing physics slide. The vertical axis is DRAM
 > bytes per forward; the horizontal is bandwidth-bound latency at NPU
@@ -141,7 +150,7 @@ to slow down + invite questions.
 > Neither reaches 27×. **The model has to change**, not just the
 > precision."
 
-### Slide 11 — Bandwidth requirements
+### Slide 30 — Bandwidth requirements
 
 > "Same physics expressed as 'what model size fits the budget?' At
 > NPU Mid, a 30 FPS workload can spend at most ~3 GB of DRAM per
@@ -149,7 +158,7 @@ to slow down + invite questions.
 > are sub-billion-parameter models. We need to find one that preserves
 > the open-vocab capability."
 
-### Slide 12 — Quantization tested (weight-only INT8)
+### Slide 31 — Quantization tested (weight-only INT8)
 
 > "First thing we tried, before the architectural pivot: weight-only
 > INT8 on SAM 3. The expectation was that 4× weight compression would
@@ -161,9 +170,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 4 — Quantization journey (slides 13–15)
+## Section 4 — Quantization journey (slides 32–35)
 
-### Slide 13 — Activation quantization challenges
+### Slide 32 — Activation quantization challenges
 
 > "Activation quantization is where the real wins are — and where the
 > hard problems live. SAM 3's attention path has BF16-locked operations
@@ -173,20 +182,31 @@ to slow down + invite questions.
 > even with aggressive activation quant. The tool-chain has a real
 > gap on SAM-3-style architectures."
 
-### Slide 14 — Prompt count scaling
+### Slide 33 — Prompt count scaling
 
 > "Briefly: SAM 3 scales linearly with the number of prompt tokens.
 > Each additional text concept costs another full-model forward. We
 > tried trimming the prompt set — it doesn't move the headline because
 > we're bandwidth-bound on the model itself, not on the prompts."
 
-### Slide 15 — Resolution lock analysis
+### Slide 34 — Resolution lock analysis
 
 > "Final SAM-3 desperation move: cut the input resolution. SAM 3's
 > rotary attention is locked to its training resolution — you can't
 > just downscale the input and run. The architecture doesn't permit
 > a clean resolution cut. This closes the door on optimizing SAM 3 in
 > place."
+
+### Slide 35 — Speed vs Accuracy — The Model Tradeoff
+
+*Backgrounder bridge slide; skim quickly.*
+
+> "Before the pivot, one framing slide: speed vs accuracy across the
+> SAM-3-class tradeoff space. Every model we'll bench in the next
+> sections sits somewhere on this plane — quality on one axis,
+> inference latency on the other. The architectural pivot we're
+> about to describe is what lets us move from 'high quality, far too
+> slow' into 'high enough quality, fast enough at the edge'."
 
 *Beat. Slow down.*
 
@@ -196,9 +216,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 5 — Architectural pivot (slides 16–18)
+## Section 5 — Architectural pivot (slides 36–38)
 
-### Slide 16 — Hybrid V2 breakthrough
+### Slide 36 — Hybrid V2 breakthrough
 
 > "Here's the architectural pivot. **Replace the monolithic open-vocab
 > segmenter with a two-stage pipeline**: a small dense detector +
@@ -216,7 +236,7 @@ to slow down + invite questions.
 > At BF16 baseline, edge ms drops from 2500 ms to about 62 ms.
 > **16 FPS at 720p.** Real-time is in sight. Open vocab still works."
 
-### Slide 17 — Mask bake-off summary
+### Slide 37 — Mask bake-off summary
 
 > "We benched four mask-model alternatives — MobileSAM, EfficientSAM
 > tiny/small, YOLO-seg — against the SAM 3 mask quality reference. The
@@ -224,7 +244,7 @@ to slow down + invite questions.
 > YOLO-seg. We picked YOLO-seg because the detection + segmentation
 > head is fused, which saves a 2D-GPU step at deployment time."
 
-### Slide 18 — Mask bake-off visuals
+### Slide 38 — Mask bake-off visuals
 
 > "Side-by-side mask quality on the embedded-world test clips. YOLO-seg
 > at IoU 0.86 vs SAM 3 reference. Difference: SAM 3 produces fractional-
@@ -234,9 +254,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 6 — FP8 + TensorRT — the unblock (slides 19–26)
+## Section 6 — FP8 + TensorRT — the unblock (slides 39–46)
 
-### Slide 19 — FP8 activation quantization
+### Slide 39 — FP8 activation quantization
 
 > "Now the precision optimization on the new pipeline. FP8 activation
 > quant via torchao gets us 94 of 95 Linear layers on the smaller mask
@@ -244,7 +264,7 @@ to slow down + invite questions.
 > area. Edge FPS still moves slowly. We need a different approach for
 > the Conv layers."
 
-### Slide 20 — SmoothQuant + INT8
+### Slide 40 — SmoothQuant + INT8
 
 > "SmoothQuant explored. The technique smooths activation outliers
 > to make INT8 quant safer. Implementation hit a torchao 0.17
@@ -252,14 +272,14 @@ to slow down + invite questions.
 > weight quant landed at activation-quant-equivalent edge gain (i.e.,
 > zero — same lesson as the SAM-3 weight-only case). Moving on."
 
-### Slide 21 — Hybrid V2 CLIP quantization bake-off
+### Slide 41 — Hybrid V2 CLIP quantization bake-off
 
 > "Quantization on the CLIP visual tower in the Hybrid V2 stack. CLIP
 > at BF16 is the bottleneck — 22 ms per crop on the 5090, hits 8 ms on
 > reduced precision. Setting us up for the TRT compile path on the
 > next slide."
 
-### Slide 22 — CLIP keyframe debouncing
+### Slide 42 — CLIP keyframe debouncing
 
 > "Practical win: CLIP doesn't have to run every frame. Object identity
 > doesn't flicker frame-to-frame in real video. We run CLIP once per
@@ -269,7 +289,7 @@ to slow down + invite questions.
 > trick, not a model change. The 1 Hz debounce is a fundamental piece
 > of the shipping recipe."
 
-### Slide 23 — YOLO-seg conv quantization
+### Slide 43 — YOLO-seg conv quantization
 
 > "torchao's Conv quantization handles 44% of YOLO-seg's conv weights
 > — the 1×1 swap path. The remainder is blocked by a torchao 1×128
@@ -277,7 +297,7 @@ to slow down + invite questions.
 > the bottleneck, not the model. This is where TensorRT enters the
 > picture."
 
-### Slide 24 — TensorRT YOLO FP8 / INT8
+### Slide 44 — TensorRT YOLO FP8 / INT8
 
 *Big breakthrough slide.*
 
@@ -285,9 +305,11 @@ to slow down + invite questions.
 > zero QDQ-node hand-holding — the runtime auto-selects FP8 layers.
 > Conv backbone, detection head, segmentation head, everything.
 >
-> Results: 5090 wall-time at FP16 → 3.3 ms; INT8 → 1.68 ms; FP8 →
-> 1.68 ms. Same wall-time at 8-bit, regardless of dtype. Edge
-> projection: **36.8 FPS at 720p**.
+> 5090 wall-time at 720p: FP16 → 0.67 ms; INT8 → 0.91 ms; FP8 → 0.68
+> ms. Edge projection on NPU Mid stock LPDDR5X: FP16 → 53.6 ms
+> (18.6 FPS); INT8 → 27.2 ms (**36.8 FPS**); FP8 → 27.2 ms (**36.8
+> FPS**). Real-time on Mid is reached for the first time in this
+> campaign.
 >
 > Two important findings here:
 >
@@ -295,19 +317,22 @@ to slow down + invite questions.
 > months of torchao work hit a tool-chain wall; TRT compiled it
 > cleanly. The model wasn't broken; the tool-chain matured.
 >
-> Second — **INT8 and FP8 share the bandwidth-bound edge FPS.** At
-> 8-bit precision the matmul throughput is BW-bound; the dtype choice
-> is a *quality-vs-silicon-class* trade-off, not a speed trade-off.
-> INT8 deploys on NPU Mid; FP8 deploys on NPU High with better recall
-> on the detection head. Same edge FPS either way.
+> Second — **INT8 and FP8 deliver the same *edge* FPS but not the
+> same 5090 wall-time.** On Blackwell, INT8 is actually slower than
+> FP8 (0.91 vs 0.68 ms) because the INT8 path pays a dequant
+> overhead the native FP8 datapath doesn't. At the edge, both run on
+> identical 8-bit weights and the workload is bandwidth-bound — so
+> projected FPS collapses to the same 36.8 regardless of dtype. The
+> picking decision is therefore *silicon-class and quality*, not
+> wall-time: INT8 deploys on NPU Mid (INT8-only silicon); FP8
+> deploys on NPU High (FP-capable) with the bonus of matched-IoU
+> 0.998 vs FP16 — quantization drift essentially zero.
 >
-> The 'box recall' column here: this is the engine-self-consistency
-> measurement — FP8 boxes vs FP16 engine boxes. Not ground truth.
-> We'll come back to that caveat. The relevant signal: FP8 reproduces
-> FP16 detections at IoU 0.998 — quantization drift is essentially
-> zero."
+> The 'box recall' column here is engine-self-consistency: FP8 boxes
+> vs FP16 engine boxes, not ground truth. We'll come back to that
+> caveat in the methodology section."
 
-### Slide 25 — yolo11s-seg vs yolov8n-seg comparison
+### Slide 45 — yolo11s-seg vs yolov8n-seg comparison
 
 > "Quick cross-variant check. yolo11s-seg is the shipping detector;
 > yolov8n-seg is the smaller variant. 8n is half the DRAM at 720p (106
@@ -315,7 +340,7 @@ to slow down + invite questions.
 > 850 FPS BW ceiling, vs 11s's 434. For applications where the COCO
 > class set is overkill, 8n is the lighter-weight option."
 
-### Slide 26 — TensorRT CLIP visual
+### Slide 46 — TensorRT CLIP visual
 
 > "CLIP visual tower TRT-compiled cleanly at FP16 + FP8. The 88M-param
 > tower drops from 47 ms BF16 to 29 ms FP16 to 16 ms FP8 — about a 3×
@@ -333,9 +358,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 7 — LLM bake-off + duty cycle (slides 27–28)
+## Section 7 — LLM bake-off + duty cycle (slides 47–48)
 
-### Slide 27 — LLM bake-off (Qwen3-30B-A3B)
+### Slide 47 — LLM bake-off (Qwen3-30B-A3B)
 
 > "Separate dimension: the application has a downstream natural-
 > language-query feature backed by a local LLM. We target Qwen3-30B-
@@ -351,7 +376,7 @@ to slow down + invite questions.
 > 5090 was 2.3× pessimistic relative to vendor numbers, so we anchor
 > projections off the vendor data when available."
 
-### Slide 28 — NPU duty-cycle trade-off
+### Slide 48 — NPU duty-cycle trade-off
 
 > "Practical deployment question: can we run the LLM concurrently with
 > the vision pipeline on a shared NPU?
@@ -368,11 +393,11 @@ to slow down + invite questions.
 
 ---
 
-## Section 8 — Skippy training campaign + gotcha arc (slides 29–32)
+## Section 8 — Skippy training campaign + gotcha arc (slides 49–52)
 
 *Lengthy section — this is the methodology-rich part of the deck.*
 
-### Slide 29 — Skippy recipe taxonomy
+### Slide 49 — Skippy recipe taxonomy
 
 *Large table; about 17 rows of recipe variants with verdicts.*
 
@@ -413,7 +438,7 @@ to slow down + invite questions.
 > model 28 points worse than the base they started with. We caught
 > that. The next slides explain how."
 
-### Slide 30 — Methodology arc (supersession trail)
+### Slide 50 — Methodology arc (supersession trail)
 
 *Table of 7 framing supersessions with timestamps + triggers.*
 
@@ -447,7 +472,7 @@ to slow down + invite questions.
 > external pushback. That self-correction discipline is what makes
 > the final framing credible."
 
-### Slide 31 — Data arc (headline-erosion + three-gate callout)
+### Slide 51 — Data arc (headline-erosion + three-gate callout)
 
 *5-checkpoint headline-erosion table on the production cell.*
 
@@ -487,7 +512,7 @@ to slow down + invite questions.
 > cents per eval pass via GPT-4o with prompt caching — negligible
 > versus fine-tune compute."
 
-### Slide 32 — Skippy sister-model confound
+### Slide 52 — Skippy sister-model confound
 
 > "Adjacent methodology lesson, separate finding. An earlier framing
 > claimed the MoE fine-tune produced a +5.3pp domain lift. That number
@@ -505,9 +530,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 9 — Cross-cutting LLM findings (slides 33–34)
+## Section 9 — Cross-cutting LLM findings (slides 53–54)
 
-### Slide 33 — Dense vs MoE bandwidth
+### Slide 53 — Dense vs MoE bandwidth
 
 > "Cross-family LLM performance question. On the 5090, we measured
 > three 7B-class dense Q4_K_M models: Qwen 2.5 7B, Mistral 7B v0.3,
@@ -524,7 +549,7 @@ to slow down + invite questions.
 > If you need 30B-equivalent capacity at bandwidth-bound performance,
 > use MoE."
 
-### Slide 34 — Multi-stream concurrency
+### Slide 54 — Multi-stream concurrency
 
 > "Practical question: can one NPU serve multiple camera streams?
 > Measured TensorRT YOLO at batch sizes 1, 2, 4, 8, 16. The headline:
@@ -535,9 +560,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 10 — Community SAM 3 + ViT alternatives (slides 35–39)
+## Section 10 — Community SAM 3 + ViT alternatives (slides 55–59)
 
-### Slide 35 — EfficientSAM3 community bake-off
+### Slide 55 — EfficientSAM3 community bake-off
 
 > "Open-source community released two SAM-3-Lite variants in April. We
 > benched them. EfficientSAM3 ES-EV-S: 424M params, BF16, lands at
@@ -545,14 +570,14 @@ to slow down + invite questions.
 > our shipping pipeline. Community variants beat the monolith but
 > can't touch a purpose-built two-stage pipeline."
 
-### Slide 36 — EfficientSAM3.1 text-prompt variant
+### Slide 56 — EfficientSAM3.1 text-prompt variant
 
 > "Smaller variant: EfficientSAM3.1 at 106M params with text-prompt
 > capability. Even faster than ES-EV-S but still single-digit FPS at
 > 1080p+. Same conclusion: useful as a community SAM 3 Lite but
 > doesn't change our pipeline decision."
 
-### Slide 37 — YOLOE-26 one-model open-vocab
+### Slide 57 — YOLOE-26 one-model open-vocab
 
 > "Ultralytics released YOLOE-26 in January — a one-model open-vocab
 > alternative to our two-stage Hybrid V2. 4585-class built-in vocab,
@@ -565,7 +590,7 @@ to slow down + invite questions.
 > compression doesn't help when the bottleneck isn't matmul. Next
 > slide confirms."
 
-### Slide 38 — TRT YOLOE-26
+### Slide 58 — TRT YOLOE-26
 
 > "TRT FP8 on YOLOE-26 gives ~17% speedup over PyTorch FP16, not the
 > 3× we get on YOLO-seg. At 16M params, the open-vocab head's
@@ -576,7 +601,7 @@ to slow down + invite questions.
 > Useful methodology data point: not every workload benefits from
 > precision lowering. Match the optimization to the bottleneck."
 
-### Slide 39 — ViT alternatives — what-if
+### Slide 59 — ViT alternatives — what-if
 
 > "Investigated four ViT alternatives in case a single-model approach
 > might still win: RT-DETR-L, DETR-ResNet50, OWLv2, Grounding DINO.
@@ -595,9 +620,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 11 — TRT takeaways (slide 40)
+## Section 11 — TRT takeaways (slide 60)
 
-### Slide 40 — TRT takeaways
+### Slide 60 — TRT takeaways
 
 > "Synthesizing the three TRT bake-offs: YOLO-seg, CLIP visual,
 > YOLOE-26. **Where TRT FP8 pays off**: dense convolutional backbones
@@ -613,9 +638,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 12 — ncu measurement validation (slides 41–43)
+## Section 12 — ncu measurement validation (slides 61–63)
 
-### Slide 41 — ncu measured DRAM — headline 515× gap
+### Slide 61 — ncu measured DRAM — headline 515× gap
 
 *Big visualization of measured DRAM per forward across workloads.*
 
@@ -631,13 +656,13 @@ to slow down + invite questions.
 > measurement — it's the engineering claim the rest of the deck rests
 > on."
 
-### Slide 42 — ncu measured DRAM — workload table
+### Slide 62 — ncu measured DRAM — workload table
 
 > "Full table of measured workloads. Use this as the reference when
 > someone asks 'what about [model X] on edge?' If it's in the table,
 > the answer is bandwidth-bound at the listed memory budget."
 
-### Slide 43 — End-to-end pipeline latency budget
+### Slide 63 — End-to-end pipeline latency budget
 
 *The CPU-crowding finding slide.*
 
@@ -672,9 +697,9 @@ to slow down + invite questions.
 
 ---
 
-## Section 13 — Roadmap + summary (slides 44–45)
+## Section 13 — Roadmap + summary (slides 64–65)
 
-### Slide 44 — Optimization roadmap
+### Slide 64 — Optimization roadmap
 
 > "Where we go from here. Three open methodology gaps:
 >
@@ -688,7 +713,7 @@ to slow down + invite questions.
 >    silicon (not just High). Post-training quantization with
 >    calibration; ~1–2 weeks of focused work."
 
-### Slide 45 — Summary & findings
+### Slide 65 — Summary & findings
 
 *The final wrap-up slide — has hero stat bar + bulleted findings.*
 
@@ -798,9 +823,9 @@ Things this script does:
 - **Skips dense bake-off methodology** that doesn't bear on the bottom
   line. Per-clip results, prompt-count scaling, weight-only INT8
   rejection — these get one-paragraph mentions.
-- **Lingers on load-bearing findings**: architectural pivot (Slide 16),
-  TRT FP8 unblock (Slide 24), the gotcha-7 arc (Slides 30–31), the
-  e2e CPU crowding finding (Slide 43).
+- **Lingers on load-bearing findings**: architectural pivot (Slide 36),
+  TRT FP8 unblock (Slide 44), the gotcha-7 arc (Slides 50–51), the
+  e2e CPU crowding finding (Slide 63).
 - **Pause points marked** where the presenter should slow down +
   invite questions.
 
@@ -818,7 +843,7 @@ Open questions for the reviewer:
 
 1. Is the 45–60 minute runtime appropriate for a technical management
    audience, or should the script trim further?
-2. The methodology arc section (Slides 30–31) is the densest. Should
+2. The methodology arc section (Slides 50–51) is the densest. Should
    the speaker text lead with the closure verdict more directly, or
    is the storytelling buildup ("we caught ourselves") more useful?
 3. The "the deck has 65 slides" volume — is that itself a problem for
