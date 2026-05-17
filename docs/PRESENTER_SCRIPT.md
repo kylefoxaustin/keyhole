@@ -4,10 +4,10 @@
 domain — NPU silicon, edge ML — but want bottom-line + implications, not
 deep methodology dives).
 
-**Target runtime:** ~45–60 minutes for the plain deck (65 slides; presenter
-skips slides 49–52 which carry training-methodology content that belongs
-to the Skippy product deck — see Section 8 note below). Backgrounder
-slides skim; load-bearing slides get the linger.
+**Target runtime:** ~45–60 minutes for the plain deck (61 slides).
+Backgrounder slides skim; load-bearing slides get the linger. Skippy
+training-methodology content has been removed from the Keyhole deck
+per the conceptual frame — the Skippy product deck owns that material.
 
 **Conceptual frame:** Keyhole is the **edge AI video analytics platform**.
 The product deliverable is a vision pipeline that runs on NPU-class
@@ -444,33 +444,9 @@ Don't dwell — say the framing once, then page through.*
 
 ---
 
-## Section 8 — SKIP slides 49–52 (Skippy training content — belongs in Skippy deck)
+## Section 8 — Cross-cutting LLM findings (slides 49–50)
 
-*Slides 49–52 in the plain deck carry Skippy training-methodology
-content: recipe taxonomy, gotcha-#7 supersession arc, headline-erosion
-data, sister-model confound. **Per the Keyhole conceptual frame, this
-content belongs in the Skippy product deck, not here.** When these
-slides appear on screen, skip them quickly with a single pointer:*
-
-> "These four slides describe how the Skippy LLM artifact was
-> trained — recipe taxonomy, methodology arc, headline erosion,
-> sister-model confound. That's product-internal training content for
-> the Skippy deck, not for Keyhole. We *use* the trained artifact
-> unmodified; the training story is one slide-deck away. Skipping
-> these to keep the Keyhole narrative focused on edge-deployment
-> physics + vision pipeline."
-
-*Page forward without dwelling. If the audience asks for the training
-detail, defer to the Skippy deck (`personal-ai-use-cases.pptx`) and
-its presenter script. In a corporate-template branded variant rebuild,
-slides 49–52 will be removed entirely — see `ALIGNMENT_PLAN.md` in
-the repo for the deferred refactor scope.*
-
----
-
-## Section 9 — Cross-cutting LLM findings (slides 53–54)
-
-### Slide 53 — Dense vs MoE bandwidth (LLM deployment context)
+### Slide 49 — MoE-on-edge thesis (LLM deployment for vision + LLM coexistence)
 
 *Slide may show a cross-family comparison table; for Keyhole, focus
 narration on the MoE-on-edge deployment thesis. The cross-family
@@ -493,7 +469,7 @@ should be skimmed in Keyhole.*
 > deck. For Keyhole's purposes the answer is fixed: Qwen3-30B-A3B
 > Q4_K_M, same artifact as Skippy product."
 
-### Slide 54 — Multi-stream concurrency
+### Slide 50 — Multi-stream concurrency
 
 > "Practical question: can one NPU serve multiple camera streams?
 > Measured TensorRT YOLO at batch sizes 1, 2, 4, 8, 16. The headline:
@@ -504,9 +480,9 @@ should be skimmed in Keyhole.*
 
 ---
 
-## Section 10 — Community SAM 3 + ViT alternatives (slides 55–59)
+## Section 9 — Community SAM 3 + ViT alternatives (slides 51–55)
 
-### Slide 55 — EfficientSAM3 community bake-off
+### Slide 51 — EfficientSAM3 community bake-off
 
 > "Open-source community released two SAM-3-Lite variants in April. We
 > benched them. EfficientSAM3 ES-EV-S: 424M params, BF16, lands at
@@ -514,14 +490,14 @@ should be skimmed in Keyhole.*
 > our shipping pipeline. Community variants beat the monolith but
 > can't touch a purpose-built two-stage pipeline."
 
-### Slide 56 — EfficientSAM3.1 text-prompt variant
+### Slide 52 — EfficientSAM3.1 text-prompt variant
 
 > "Smaller variant: EfficientSAM3.1 at 106M params with text-prompt
 > capability. Even faster than ES-EV-S but still single-digit FPS at
 > 1080p+. Same conclusion: useful as a community SAM 3 Lite but
 > doesn't change our pipeline decision."
 
-### Slide 57 — YOLOE-26 one-model open-vocab
+### Slide 53 — YOLOE-26 one-model open-vocab
 
 > "Ultralytics released YOLOE-26 in January — a one-model open-vocab
 > alternative to our two-stage Hybrid V2. 4585-class built-in vocab,
@@ -534,7 +510,7 @@ should be skimmed in Keyhole.*
 > compression doesn't help when the bottleneck isn't matmul. Next
 > slide confirms."
 
-### Slide 58 — TRT YOLOE-26
+### Slide 54 — TRT YOLOE-26
 
 > "TRT FP8 on YOLOE-26 gives ~17% speedup over PyTorch FP16, not the
 > 3× we get on YOLO-seg. At 16M params, the open-vocab head's
@@ -545,7 +521,7 @@ should be skimmed in Keyhole.*
 > Useful methodology data point: not every workload benefits from
 > precision lowering. Match the optimization to the bottleneck."
 
-### Slide 59 — ViT alternatives — what-if
+### Slide 55 — ViT alternatives — what-if
 
 > "Investigated four ViT alternatives in case a single-model approach
 > might still win: RT-DETR-L, DETR-ResNet50, OWLv2, Grounding DINO.
@@ -564,9 +540,9 @@ should be skimmed in Keyhole.*
 
 ---
 
-## Section 11 — TRT takeaways (slide 60)
+## Section 10 — TRT takeaways (slide 56)
 
-### Slide 60 — TRT takeaways
+### Slide 56 — TRT takeaways
 
 > "Synthesizing the three TRT bake-offs: YOLO-seg, CLIP visual,
 > YOLOE-26. **Where TRT FP8 pays off**: dense convolutional backbones
@@ -582,9 +558,9 @@ should be skimmed in Keyhole.*
 
 ---
 
-## Section 12 — ncu measurement validation (slides 61–63)
+## Section 11 — ncu measurement validation (slides 57–59)
 
-### Slide 61 — ncu measured DRAM — headline 515× gap
+### Slide 57 — ncu measured DRAM — headline 515× gap
 
 *Big visualization of measured DRAM per forward across workloads.*
 
@@ -600,13 +576,13 @@ should be skimmed in Keyhole.*
 > measurement — it's the engineering claim the rest of the deck rests
 > on."
 
-### Slide 62 — ncu measured DRAM — workload table
+### Slide 58 — ncu measured DRAM — workload table
 
 > "Full table of measured workloads. Use this as the reference when
 > someone asks 'what about [model X] on edge?' If it's in the table,
 > the answer is bandwidth-bound at the listed memory budget."
 
-### Slide 63 — End-to-end pipeline latency budget
+### Slide 59 — End-to-end pipeline latency budget
 
 *The CPU-crowding finding slide.*
 
@@ -641,9 +617,9 @@ should be skimmed in Keyhole.*
 
 ---
 
-## Section 13 — Roadmap + summary (slides 64–65)
+## Section 12 — Roadmap + summary (slides 60–61)
 
-### Slide 64 — Optimization roadmap
+### Slide 60 — Optimization roadmap
 
 > "Where we go from here. Three open methodology gaps:
 >
@@ -657,7 +633,7 @@ should be skimmed in Keyhole.*
 >    silicon (not just High). Post-training quantization with
 >    calibration; ~1–2 weeks of focused work."
 
-### Slide 65 — Summary & findings
+### Slide 61 — Summary & findings
 
 *The final wrap-up slide — has hero stat bar + bulleted findings.*
 
@@ -696,7 +672,7 @@ should be skimmed in Keyhole.*
 
 ## Conditional Section — Private Anchors Slide (only in `--include-private` build)
 
-### Slide 66 (private) — Measured silicon anchors
+### Slide 62 (private) — Measured silicon anchors
 
 > "If you're in the NXP-internal audience: this slide is in your
 > deck variant. It shows measured silicon anchor performance for
@@ -767,13 +743,14 @@ This script is aligned to the **Keyhole conceptual frame** (2026-05-17,
 see `~/.claude/projects/.../memory/project_conceptual_frame.md`). Key
 divergences from the prior version:
 
-- **Section 8 removed.** Skippy training-methodology content (recipe
+- **Skippy training slides removed from the Keyhole deck.** Recipe
   taxonomy, gotcha-#7 arc, headline-erosion data, sister-model
-  confound) is product-internal training material that belongs in the
-  Skippy deck, not in Keyhole. The plain deck's slides 49–52 still
-  contain that content — the script instructs the presenter to skim
-  them with a one-line pointer. A planned plain-deck refactor will
-  remove those slides; see `docs/ALIGNMENT_PLAN.md`.
+  confound — product-internal training material that belongs in the
+  Skippy deck, not Keyhole. Plain deck went from 65 → 61 slides
+  (former slides 49–52 dropped from `build_dirty()`; the slide
+  functions remain in `build_deck.py` for use by the Skippy-deck
+  builder). Downstream slides renumbered: former 53 → 49, former
+  65 → 61.
 - **NPU tier framing held to PAI golden.** Slides 4, 24/44, 26/46
   narration keeps the existing framing: **NPU Mid is INT8-only**
   (200 TOPS, no FP path) on 128-bit LPDDR5X @ 8.4 GT/s; **NPU High
@@ -789,10 +766,11 @@ divergences from the prior version:
 - **LLM identity** stated on Slide 47: Qwen3-30B-A3B Q4_K_M, same
   artifact as Skippy product, training story cross-referenced to Skippy
   deck rather than reproduced.
-- **Slide 53 reframed** to drop cross-family base-selection content
-  (Mistral / Llama / Yi) — that's Skippy-deck-relevant. Keeps the
-  MoE-on-edge thesis (Qwen3-30B-A3B vs Qwen 2.5 32B dense) since it
-  bears on Keyhole's vision + LLM coexistence story.
+- **Slide 49 reframed** (was Slide 53 before the Skippy-slide removal)
+  to drop cross-family base-selection content (Mistral / Llama / Yi) —
+  that's Skippy-deck-relevant. Keeps the MoE-on-edge thesis
+  (Qwen3-30B-A3B vs Qwen 2.5 32B dense) since it bears on Keyhole's
+  vision + LLM coexistence story.
 
 Things this script does:
 
@@ -803,7 +781,7 @@ Things this script does:
   line. Per-clip results, prompt-count scaling, weight-only INT8
   rejection — these get one-paragraph mentions.
 - **Lingers on load-bearing findings**: architectural pivot (Slide 36),
-  TRT FP8 unblock (Slide 44), the e2e CPU crowding finding (Slide 63).
+  TRT FP8 unblock (Slide 44), the e2e CPU crowding finding (Slide 59).
 - **Pause points marked** where the presenter should slow down +
   invite questions.
 
@@ -823,12 +801,11 @@ Open questions for the reviewer:
    labels; full Hybrid V2 pins to High because Mid has no FP path) —
    is the customer-deployment narrative landing, or do reviewers
    want the "INT8 CLIP port = ~1-2 weeks of focused work" roadmap
-   item from Slide 64 surfaced earlier so the deploy split reads as
+   item from Slide 60 surfaced earlier so the deploy split reads as
    "current limitation, not architectural"?
-3. The "the deck has 65 slides but presenter skips 4" volume — is
-   that itself a problem for the target audience? Should the speaker
-   explicitly call out "I'll skip slides 49–52 as Skippy-deck content"
-   near the front to set expectations?
+3. The deck is now 61 slides (down from 65 after Skippy removal). Is
+   that the right length for a 45–60 min technical-management slot,
+   or should we trim further?
 4. The conditional private slide — if the audience is NXP-internal and
    has clearance to see measured values, does the bounds-language
    framework I describe actually work in a live presentation, or does

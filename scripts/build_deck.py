@@ -2781,12 +2781,15 @@ def slide_skippy_sister_confound(prs: Presentation):
 
 
 def slide_dense_vs_moe_bandwidth(prs: Presentation):
-    """Slide: Dense vs MoE on 5090 — why MoE wins on bandwidth.
+    """Slide: Dense vs MoE on 5090 — Keyhole MoE-on-edge thesis.
 
-    Uses Qwen 7B/32B dense anchors (5090) collected 2026-05-01, plus
-    Skippy MoE 30B-A3B Q4_K_M reference. Story: total weight footprint
-    sets the VRAM/disk ceiling; active params per forward sets the BW
-    cost per token. MoE 30B/3B-active beats dense 32B by 4.7× decode.
+    Why this lives in the Keyhole deck (per conceptual frame 2026-05-17):
+    the MoE-on-edge thesis directly informs Keyhole's vision + LLM
+    coexistence story — Qwen3-30B-A3B Q4_K_M (the Skippy product
+    artifact) costs ~3B-active per-token BW, which is the difference
+    between an LLM that fits inside the vision FPS budget and one that
+    obliterates it. Cross-family rows (Mistral / Llama) have been
+    removed — that's Skippy-deck base-selection content.
     """
     summary = Path("data/output/bakeoff/llm_summary.json")
     anchors_dir = Path("data/output/bakeoff/llm_anchors")
@@ -2812,27 +2815,23 @@ def slide_dense_vs_moe_bandwidth(prs: Presentation):
     q7 = _load_anchor("qwen2.5-7b-dense", "Q4_K_M")
     q32 = _load_anchor("qwen2.5-32b-dense", "Q4_K_M")
     q32_q5 = _load_anchor("qwen2.5-32b-dense", "Q5_K_M")
-    llama8 = _load_anchor("llama3.1-8b-dense", "Q4_K_M")
-    mistral7 = _load_anchor("mistral-7b-v0.3-dense", "Q4_K_M")
     if not (q7 and q32 and q32_q5):
         return
     qwen7_q4 = _model_tok_s(q7)
     qwen32_q4 = _model_tok_s(q32)
     qwen32_q5 = _model_tok_s(q32_q5)
-    llama8_q4 = _model_tok_s(llama8) if llama8 else None
-    mistral7_q4 = _model_tok_s(mistral7) if mistral7 else None
 
     slide = new_slide(prs, bg_color=C.BG_DARK)
     add_title_subtitle(
         slide,
-        "Dense vs MoE on 5090 — why MoE wins on bandwidth (cross-family validated)",
-        "Total params set VRAM ceiling; active params per forward set BW cost per token. Cross-family: Qwen / Llama / Mistral 7B-class all land in the same ~170-185 tok/s band — base architecture-class is BW-equivalent.",
+        "MoE-on-edge — why Keyhole's optional LLM coexists with vision",
+        "Total params set VRAM ceiling; active params per forward set BW cost per token. Qwen3-30B-A3B (3B-active) is the deployment sweet spot for vision + LLM coexistence on a shared NPU.",
     )
 
     headers = ["Model", "Total params", "Active / token", "Q4_K_M GGUF",
                 "Decode @256 (5090)", "RAG decode (5090)", "BW interpretation"]
     rows = [
-        ["Skippy MoE (Qwen3-30B-A3B Q4_K_M)",
+        ["Skippy MoE (Qwen3-30B-A3B Q4_K_M) — shipping",
          "30B", "3B (10× lighter per fwd)",
          f"{moe_q4[0]:.1f} GB",
          f"{moe_q4[1]:.0f} tok/s",
@@ -2843,7 +2842,7 @@ def slide_dense_vs_moe_bandwidth(prs: Presentation):
          f"{qwen32_q4[0]:.1f} GB",
          f"{qwen32_q4[1]:.0f} tok/s",
          f"{qwen32_q4[2]:.0f} tok/s",
-         "Per-token BW pays for ALL 32.5B params"],
+         "Per-token BW pays for ALL 32.5B params — would obliterate vision FPS budget"],
         ["Qwen 2.5 32B Instruct dense Q5_K_M",
          "32.5B", "32.5B",
          f"{qwen32_q5[0]:.1f} GB",
@@ -2855,82 +2854,57 @@ def slide_dense_vs_moe_bandwidth(prs: Presentation):
          f"{qwen7_q4[0]:.1f} GB",
          f"{qwen7_q4[1]:.0f} tok/s",
          f"{qwen7_q4[2]:.0f} tok/s",
-         "Smallest Qwen-family BW cost"],
+         "Smaller fallback if 30B-A3B VRAM ceiling is tight"],
     ]
-    if mistral7_q4 is not None:
-        rows.append(["Mistral 7B Instruct v0.3 Q4_K_M (cross-family)",
-                     "7.25B", "7.25B",
-                     f"{mistral7_q4[0]:.1f} GB",
-                     f"{mistral7_q4[1]:.0f} tok/s",
-                     f"{mistral7_q4[2]:.0f} tok/s",
-                     "Cross-family: matches Qwen 7B within 1% on RAG"])
-    if llama8_q4 is not None:
-        rows.append(["Meta Llama-3.1 8B Instruct Q4_K_M (cross-family)",
-                     "8.03B", "8.03B",
-                     f"{llama8_q4[0]:.1f} GB",
-                     f"{llama8_q4[1]:.0f} tok/s",
-                     f"{llama8_q4[2]:.0f} tok/s",
-                     "Cross-family: 7% slower than Qwen — pure BW (4.9 vs 4.7 GB)"])
     add_styled_table(
         slide, Inches(CONTENT_LEFT), Inches(1.5),
-        Inches(CONTENT_W), Inches(2.4), headers, rows,
+        Inches(CONTENT_W), Inches(2.0), headers, rows,
         highlight_rows=[1],   # MoE row — the headline
         font_size=9, header_font_size=10,
     )
 
     # Edge-projection comparison: same models, projected to NPU Mid via BW ratio
     bw_ratio = bw_ratio_5090_to_npu("NPU Mid", "LPDDR5X-8.4")   # 16.19×
-    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.95),
+    add_text_box(slide, Inches(CONTENT_LEFT), Inches(3.65),
                  Inches(CONTENT_W), Inches(0.3),
                  f"Edge projection — NPU Mid stock LPDDR5X (BW ratio 5090÷Mid = {bw_ratio:.2f}×). MoE vendor actual beats projection by ~2.5×.",
                  font_size=11, color=C.ACCENT_PURPLE, bold=True)
-    headers2 = ["Model", "5090 RAG decode", "Mid BW projection", "Mid vendor actual / cross_class",
-                 "Verdict for short-answer UI (≤5 s)"]
+    headers2 = ["Model", "5090 RAG decode", "Mid BW projection", "Mid vendor actual",
+                 "Verdict for vision+LLM coexistence (200-tok answer ≤5 s)"]
     moe_proj = moe_q4[2] / bw_ratio
     qwen32_proj = qwen32_q4[2] / bw_ratio
     qwen7_proj = qwen7_q4[2] / bw_ratio
     rows2 = [
-        ["MoE 30B-A3B Q4_K_M",
+        ["MoE 30B-A3B Q4_K_M (shipping)",
          f"{moe_q4[2]:.0f} tok/s",
          f"{moe_proj:.1f} tok/s",
          "37.85 tok/s 🟢 measured",
-         "✅ 200-tok in 5.3 s — fits"],
+         "✅ 200-tok in 5.3 s — vision FPS budget preserved"],
         ["Dense 32B Q4_K_M",
          f"{qwen32_q4[2]:.0f} tok/s",
          f"{qwen32_proj:.1f} tok/s",
          "(no anchor)",
-         "❌ ~3 tok/s edge → 67 s for 200 tok — too slow"],
-        ["Dense 7B Q4_K_M (Qwen)",
+         "❌ ~3 tok/s edge → 67 s for 200 tok — obliterates vision"],
+        ["Dense 7B Q4_K_M",
          f"{qwen7_q4[2]:.0f} tok/s",
          f"{qwen7_proj:.1f} tok/s",
          "(no anchor)",
-         "✅ ~11 tok/s edge → 18 s for 200 tok — borderline"],
+         "✅ ~11 tok/s edge → 18 s for 200 tok — borderline at quality"],
     ]
-    if llama8_q4 is not None:
-        llama_proj = llama8_q4[2] / bw_ratio
-        # Sizer cross_class fallback projected 332.79 tok/s on 5090 (raw TOPS × util_factor)
-        # vs measured 171.0 — a 1.95× over-projection. Useful methodology callout.
-        cross_class_5090 = 332.79
-        over_factor = cross_class_5090 / llama8_q4[2]
-        rows2.append(["Dense 8B Q4_K_M (Llama-3.1)",
-                      f"{llama8_q4[2]:.0f} tok/s",
-                      f"{llama_proj:.1f} tok/s",
-                      f"🟠 cross_class fallback projects {cross_class_5090:.0f} tok/s on 5090 — {over_factor:.2f}× over-projection",
-                      "✅ ~11 tok/s edge — calibration check passed"])
     add_styled_table(
-        slide, Inches(CONTENT_LEFT), Inches(4.25),
-        Inches(CONTENT_W), Inches(1.6), headers2, rows2,
+        slide, Inches(CONTENT_LEFT), Inches(3.95),
+        Inches(CONTENT_W), Inches(1.7), headers2, rows2,
         highlight_rows=[1],
         font_size=10,
     )
 
-    add_bullet_box(slide, CONTENT_LEFT, 5.95, CONTENT_W, 1.25, [
-        ("Cross-family architecture-class invariance + MoE bandwidth win", C.ACCENT_BLUE, True),
-        (f"• Skippy MoE 30B/3B-active = {moe_q4[2]:.0f} tok/s RAG decode on 5090, vs dense 32B = {qwen32_q4[2]:.0f} tok/s. {moe_q4[2]/qwen32_q4[2]:.1f}× speedup despite ~same total param count and ~same VRAM footprint — purely an active-params-per-token win.",
+    add_bullet_box(slide, CONTENT_LEFT, 5.75, CONTENT_W, 1.4, [
+        ("MoE-on-edge thesis: the key to vision + LLM coexistence on shared NPU", C.ACCENT_BLUE, True),
+        (f"• Skippy MoE 30B/3B-active = {moe_q4[2]:.0f} tok/s RAG decode on 5090, vs dense 32B = {qwen32_q4[2]:.0f} tok/s. {moe_q4[2]/qwen32_q4[2]:.1f}× speedup despite ~same total param count and ~same VRAM footprint — purely an active-params-per-token win. This is what lets a vision + LLM Keyhole deployment fit on one NPU instead of two.",
          C.ACCENT_GREEN, True),
-        (f"• 7B-class dense decode is base-family-invariant: Qwen-7B {qwen7_q4[2]:.0f} / Mistral-7B {mistral7_q4[2] if mistral7_q4 else 0:.0f} / Llama-3.1-8B {llama8_q4[2] if llama8_q4 else 0:.0f} tok/s — within 7% across vendors. Differences track GGUF size (BW cost), not architecture. Cross-family accuracy stories ([docs] 22:28: Llama-3.1 -10.6pp on v2-RAG vs Qwen-7B) are PURELY model-quality calls, not perf calls.",
+        ("• Cross-family base-model selection (Mistral / Llama / Yi / Phi-4) is documented in the Skippy product deck — that's training-side content. For Keyhole's purposes the LLM artifact is fixed: Qwen3-30B-A3B Q4_K_M, the same artifact Skippy ships.",
          C.ACCENT_INDIGO),
-        ("• Edge-side calibration data point: sizer's cross_class fallback (raw TOPS × util_factor, no per-(model, tier) realization) over-projects ~1.95× on 5090 for Llama-3.1. The 🟠 cross_class badge correctly flags lower confidence; measured cells (🟢) replace these as bake-offs land. Dense ≥14B busts edge latency budget regardless of family; 7B/8B are borderline; MoE 30B/3B-active is the practical sweet spot.",
+        ("• Dense ≥14B busts the per-token BW budget regardless of family; 7B/8B is borderline at the quality tier we need; MoE 30B/3B-active is the practical sweet spot. Memory-class upgrades (LPDDR5T-11.2, LPDDR6) lift decode on both NPU Mid + High in lockstep since they share the 8.4 GT/s stock bus.",
          C.TEXT_DIM),
     ], font_size=9)
 
@@ -4609,17 +4583,15 @@ def build_deck(output, runs_dir, data_dir, include_private):
         console.print("  Building: NPU duty-cycle trade-off")
         slide_llm_duty_cycle(prs)
 
-    # Skippy training campaign — recipe taxonomy + sister-model confound + dense-vs-MoE BW
-    console.print("  Building: Skippy recipe taxonomy")
-    slide_skippy_recipe_taxonomy(prs)
-    console.print("  Building: Methodology arc (supersession trail)")
-    slide_methodology_arc(prs)
-    console.print("  Building: Data arc (headline-erosion + three-gate callout)")
-    slide_data_arc(prs)
-    console.print("  Building: Skippy sister-model confound")
-    slide_skippy_sister_confound(prs)
+    # Skippy training-methodology slides removed from Keyhole deck per
+    # conceptual frame (2026-05-17): recipe taxonomy, methodology arc,
+    # headline-erosion data, sister-model confound are Skippy-product
+    # training content — they belong in the Skippy deck only. The slide
+    # functions remain defined below for use by the Skippy deck builder;
+    # they're just not called from Keyhole's main build path.
+    # See docs/ALIGNMENT_PLAN.md.
     if Path("data/output/bakeoff/llm_anchors").exists():
-        console.print("  Building: Dense vs MoE bandwidth")
+        console.print("  Building: Dense vs MoE bandwidth (Keyhole-relevant MoE-on-edge framing)")
         slide_dense_vs_moe_bandwidth(prs)
 
     # Multi-stream concurrency (YOLO batching)

@@ -1,9 +1,14 @@
 # Keyhole plain-deck → conceptual-frame alignment plan
 
-**Status:** scope reduced 2026-05-17 after Kyle's NPU-tier correction.
-Multi-day cross-session effort no longer required. Created when the
-[conceptual frame brief](#references) landed; revised same-day when
-the brief's NPU-tier claims were corrected to PAI golden.
+**Status:** Phases A + B landed 2026-05-17. Plain deck dropped from
+65 → 61 slides; Skippy training-methodology content removed;
+slide_dense_vs_moe_bandwidth reframed as Keyhole MoE-on-edge thesis.
+Script renumbered + reuploaded. Remaining items: optional three-modes
++ LLM-identity slides (Phase C) and branded-deck rebuild (Phase E).
+Originally created when the [conceptual frame brief](#references)
+landed; revised same-day when the brief's NPU-tier claims were
+corrected to PAI golden; revised again at end-of-day when Phase A + B
+shipped.
 
 This document scopes the work required to align the **plain Keyhole
 deck** (`data/output/keyhole_results.pptx`, 65 slides) to the conceptual
@@ -48,25 +53,26 @@ items in the conceptual frame:
 
 ## Remaining scope
 
-### Slide removals (Skippy training, ~4 slides)
+### Slide removals (Skippy training, ~4 slides) — ✅ DONE 2026-05-17
 
-Remove from `build_dirty()` in `scripts/build_deck.py`:
-- `slide_skippy_recipe_taxonomy` (current slide 49)
-- `slide_methodology_arc` (current slide 50)
-- `slide_data_arc` (current slide 51)
-- `slide_skippy_sister_confound` (current slide 52)
+Removed from `build_dirty()` in `scripts/build_deck.py`:
+- ~~`slide_skippy_recipe_taxonomy`~~ (was slide 49)
+- ~~`slide_methodology_arc`~~ (was slide 50)
+- ~~`slide_data_arc`~~ (was slide 51)
+- ~~`slide_skippy_sister_confound`~~ (was slide 52)
 
-This drops plain deck from 65 → 61 slides. Downstream slides
-renumber. The slide-function code can stay in `build_deck.py` for now
-(useful for the Skippy deck's own builder), just stop calling them
-from Keyhole's main build path.
+Plain deck dropped from 65 → 61 slides. Downstream slides renumbered.
+Slide-function code remains in `build_deck.py` for use by the Skippy
+deck's own builder.
 
-### Slide reframings
+### Slide reframings — ✅ DONE 2026-05-17
 
-- `slide_dense_vs_moe_bandwidth` (current slide 53) — strip the
-  Mistral / Llama / Yi cross-family rows; keep only Qwen 7B dense vs
-  Qwen 2.5 32B dense vs Qwen3-30B-A3B MoE. Reframe narration to focus
-  on MoE-on-edge thesis as a vision+LLM coexistence argument.
+- ~~`slide_dense_vs_moe_bandwidth`~~ — Mistral / Llama / Yi cross-family
+  rows removed; kept Qwen 7B dense + Qwen 2.5 32B dense + Qwen3-30B-A3B
+  MoE. Title reframed as "MoE-on-edge — why Keyhole's optional LLM
+  coexists with vision". Bullets now frame the MoE win as vision+LLM
+  coexistence argument rather than cross-family base-selection. Now
+  slide 49 (formerly 53).
 
 ### Slide additions (optional)
 
