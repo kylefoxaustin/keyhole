@@ -180,7 +180,7 @@ Don't dwell — say the framing once, then page through.*
 > the pattern is consistent: bandwidth-bound on edge, compute-
 > headroom on the 5090. They're in the deck so you can audit any
 > single clip if you want to. Otherwise, head to the comparison
-> chart on slide 28."
+> chart on slide 29."
 
 ### Slide 29 — Run comparison chart
 
@@ -476,21 +476,19 @@ Don't dwell — say the framing once, then page through.*
 
 ### Slide 51 — MoE-on-edge thesis (LLM deployment for vision + LLM coexistence)
 
-*Slide may show a cross-family comparison table; for Keyhole, focus
-narration on the MoE-on-edge deployment thesis. The cross-family
-content (Mistral / Llama / Yi / Phi-4) is Skippy-deck-relevant and
-should be skimmed in Keyhole.*
+*Qwen-only deployment comparison (Qwen 7B / 32B dense vs Qwen3-30B-A3B
+MoE). Cross-family content lives in the Skippy product deck.*
 
 > "The deployment-relevant LLM finding: **Mixture-of-Experts wins on
 > bandwidth-bound edge silicon at equivalent VRAM.** Qwen3-30B-A3B
 > at 159 tokens/sec RAG decode on 5090 beats Qwen 2.5 32B dense at
-> 34 tok/s — 4.7× at the same memory footprint. Per-token bandwidth
-> pays for the 3B active parameters, not the 30B total.
+> 53 tok/s — **3.0× at the same memory footprint**. Per-token
+> bandwidth pays for the 3B active parameters, not the 30B total.
 >
 > For Keyhole this matters because the LLM is co-hosted with vision
 > on a shared NPU. MoE keeps per-token bandwidth low so vision
 > coexistence stays viable; a 32B dense at the same quality tier
-> would consume 5× the per-token bandwidth and obliterate the
+> would consume ~3× the per-token bandwidth and obliterate the
 > vision FPS budget.
 >
 > Cross-family base-model selection is documented in the Skippy
