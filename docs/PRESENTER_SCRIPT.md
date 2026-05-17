@@ -4,10 +4,12 @@
 domain — NPU silicon, edge ML — but want bottom-line + implications, not
 deep methodology dives).
 
-**Target runtime:** ~45–60 minutes for the plain deck (61 slides).
+**Target runtime:** ~45–60 minutes for the plain deck (63 slides).
 Backgrounder slides skim; load-bearing slides get the linger. Skippy
 training-methodology content has been removed from the Keyhole deck
 per the conceptual frame — the Skippy product deck owns that material.
+Two dedicated framing slides (three-modes at slide 6; LLM identity at
+slide 48) make the deck's scope decisions explicit for the audience.
 
 **Conceptual frame:** Keyhole is the **edge AI video analytics platform**.
 The product deliverable is a vision pipeline that runs on NPU-class
@@ -36,7 +38,7 @@ to slow down + invite questions.
 
 ---
 
-## Section 1 — Opening (slides 1–7)
+## Section 1 — Opening (slides 1–8)
 
 ### Slide 1 — Title
 
@@ -112,21 +114,36 @@ the work in this deck: Mid + High.*
 > detection + masks, open-vocab labeling via CLIP, event store, and
 > the LLM as an *optional* natural-language query layer. The whole
 > deck is about getting the vision stages — detection through event
-> store — to run in real-time on NPU-class silicon.
->
-> *Cue the three-modes framing — say this once, then move on.*
->
-> The keyhole-sizer Streamlit app exposes three operational modes
-> over this pipeline: **vision-only** (the default video-analytics
-> case, LLM off); **vision + LLM** (both running, LLM acts on the
-> event store — NLQ, agentic scene queries — coexistence is the
-> engineering question); and **LLM-only** (vision off, LLM standalone
-> — equivalent to running the Skippy product inside keyhole-sizer).
-> The next ~40 slides are dominated by the vision-only and vision+LLM
-> modes; LLM-only perf is identical to the Skippy deck and is
-> cross-referenced rather than reproduced."
+> store — to run in real-time on NPU-class silicon. The next slide
+> formalizes the optionality of the LLM layer."
 
-### Slide 6 — SAM 3 reference breakdown
+
+### Slide 6 — Three operational modes (vision-only / vision + LLM / LLM-only)
+
+*Dedicated framing slide; spend ~45 seconds here.*
+
+> "Three operational modes Keyhole supports. The deck addresses all
+> three.
+>
+> **Vision-only**: the default video-analytics deployment. Vision
+> pipeline runs at 36 FPS at 720p target; LLM is off. Sizing is
+> the vision FPS budget alone.
+>
+> **Vision + LLM**: both running on a shared NPU. The LLM acts on
+> vision data — NLQ over the event store, agentic scene queries
+> ('find the X in this clip'). Engineering question = coexistence
+> on the NPU. The 'duty-cycle' slide later quantifies this — short
+> queries fit; full RAG does not.
+>
+> **LLM-only**: vision pipeline off, LLM standalone. Equivalent to
+> running the Skippy product inside the keyhole-sizer app. Perf
+> matches the Skippy deck exactly — that deck owns the LLM-only
+> mode's deep dive.
+>
+> *The framing matters because it tells the audience what to focus
+> on as the deck progresses. Most slides serve modes 1 + 2.*"
+
+### Slide 7 — SAM 3 reference breakdown
 
 > "If we just used SAM 3 directly — Meta's open-vocab segmenter — here
 > are the numbers. 840 million parameters, BF16-locked attention,
@@ -135,7 +152,7 @@ the work in this deck: Mid + High.*
 > is 890 ms per frame — physically incapable of real-time. This is
 > the constraint we're working under."
 
-### Slide 7 — Roofline model
+### Slide 8 — Roofline model
 
 > "Standard roofline: arithmetic intensity vs achievable performance.
 > SAM 3 sits in the bandwidth-bound regime on every plausible edge
@@ -146,9 +163,9 @@ the work in this deck: Mid + High.*
 
 ---
 
-## Section 2 — Per-clip baseline results (slides 8–28)
+## Section 2 — Per-clip baseline results (slides 9–29)
 
-### Slides 8–27 — Per-clip test runs (20 slides, skim at ~20 sec each)
+### Slides 9–28 — Per-clip test runs (20 slides, skim at ~20 sec each)
 
 *These 20 slides alternate between a Test Run page (raw 5090
 measurements) and an Edge NPU Projection page for each input clip.
@@ -165,7 +182,7 @@ Don't dwell — say the framing once, then page through.*
 > single clip if you want to. Otherwise, head to the comparison
 > chart on slide 28."
 
-### Slide 28 — Run comparison chart
+### Slide 29 — Run comparison chart
 
 > "Bottom line on the per-clip comparisons: the 5090 measurements are
 > internally consistent within ±5% across resolutions. We trust our
@@ -174,9 +191,9 @@ Don't dwell — say the framing once, then page through.*
 
 ---
 
-## Section 3 — Bandwidth physics (slides 29–31)
+## Section 3 — Bandwidth physics (slides 30–32)
 
-### Slide 29 — Bandwidth wall analysis
+### Slide 30 — Bandwidth wall analysis
 
 > "This is the load-bearing physics slide. The vertical axis is DRAM
 > bytes per forward; the horizontal is bandwidth-bound latency at NPU
@@ -187,7 +204,7 @@ Don't dwell — say the framing once, then page through.*
 > Neither reaches 27×. **The model has to change**, not just the
 > precision."
 
-### Slide 30 — Bandwidth requirements
+### Slide 31 — Bandwidth requirements
 
 > "Same physics expressed as 'what model size fits the budget?' At
 > NPU Mid, a 30 FPS workload can spend at most ~3 GB of DRAM per
@@ -195,7 +212,7 @@ Don't dwell — say the framing once, then page through.*
 > are sub-billion-parameter models. We need to find one that preserves
 > the open-vocab capability."
 
-### Slide 31 — Quantization tested (weight-only INT8)
+### Slide 32 — Quantization tested (weight-only INT8)
 
 > "First thing we tried, before the architectural pivot: weight-only
 > INT8 on SAM 3. The expectation was that 4× weight compression would
@@ -207,9 +224,9 @@ Don't dwell — say the framing once, then page through.*
 
 ---
 
-## Section 4 — Quantization journey (slides 32–35)
+## Section 4 — Quantization journey (slides 33–36)
 
-### Slide 32 — Activation quantization challenges
+### Slide 33 — Activation quantization challenges
 
 > "Activation quantization is where the real wins are — and where the
 > hard problems live. SAM 3's attention path has BF16-locked operations
@@ -219,14 +236,14 @@ Don't dwell — say the framing once, then page through.*
 > even with aggressive activation quant. The tool-chain has a real
 > gap on SAM-3-style architectures."
 
-### Slide 33 — Prompt count scaling
+### Slide 34 — Prompt count scaling
 
 > "Briefly: SAM 3 scales linearly with the number of prompt tokens.
 > Each additional text concept costs another full-model forward. We
 > tried trimming the prompt set — it doesn't move the headline because
 > we're bandwidth-bound on the model itself, not on the prompts."
 
-### Slide 34 — Resolution lock analysis
+### Slide 35 — Resolution lock analysis
 
 > "Final SAM-3 desperation move: cut the input resolution. SAM 3's
 > rotary attention is locked to its training resolution — you can't
@@ -234,7 +251,7 @@ Don't dwell — say the framing once, then page through.*
 > a clean resolution cut. This closes the door on optimizing SAM 3 in
 > place."
 
-### Slide 35 — Speed vs Accuracy — The Model Tradeoff
+### Slide 36 — Speed vs Accuracy — The Model Tradeoff
 
 *Backgrounder bridge slide; skim quickly.*
 
@@ -253,9 +270,9 @@ Don't dwell — say the framing once, then page through.*
 
 ---
 
-## Section 5 — Architectural pivot (slides 36–38)
+## Section 5 — Architectural pivot (slides 37–39)
 
-### Slide 36 — Hybrid V2 breakthrough
+### Slide 37 — Hybrid V2 breakthrough
 
 > "Here's the architectural pivot. **Replace the monolithic open-vocab
 > segmenter with a two-stage pipeline**: a small dense detector +
@@ -273,7 +290,7 @@ Don't dwell — say the framing once, then page through.*
 > At BF16 baseline, edge ms drops from 2500 ms to about 62 ms.
 > **16 FPS at 720p.** Real-time is in sight. Open vocab still works."
 
-### Slide 37 — Mask bake-off summary
+### Slide 38 — Mask bake-off summary
 
 > "We benched four mask-model alternatives — MobileSAM, EfficientSAM
 > tiny/small, YOLO-seg — against the SAM 3 mask quality reference. The
@@ -281,7 +298,7 @@ Don't dwell — say the framing once, then page through.*
 > YOLO-seg. We picked YOLO-seg because the detection + segmentation
 > head is fused, which saves a 2D-GPU step at deployment time."
 
-### Slide 38 — Mask bake-off visuals
+### Slide 39 — Mask bake-off visuals
 
 > "Side-by-side mask quality on the embedded-world test clips. YOLO-seg
 > at IoU 0.86 vs SAM 3 reference. Difference: SAM 3 produces fractional-
@@ -291,9 +308,9 @@ Don't dwell — say the framing once, then page through.*
 
 ---
 
-## Section 6 — FP8 + TensorRT — the unblock (slides 39–46)
+## Section 6 — FP8 + TensorRT — the unblock (slides 40–47)
 
-### Slide 39 — FP8 activation quantization
+### Slide 40 — FP8 activation quantization
 
 > "Now the precision optimization on the new pipeline. FP8 activation
 > quant via torchao gets us 94 of 95 Linear layers on the smaller mask
@@ -301,7 +318,7 @@ Don't dwell — say the framing once, then page through.*
 > area. Edge FPS still moves slowly. We need a different approach for
 > the Conv layers."
 
-### Slide 40 — SmoothQuant + INT8
+### Slide 41 — SmoothQuant + INT8
 
 > "SmoothQuant explored. The technique smooths activation outliers
 > to make INT8 quant safer. Implementation hit a torchao 0.17
@@ -309,14 +326,14 @@ Don't dwell — say the framing once, then page through.*
 > weight quant landed at activation-quant-equivalent edge gain (i.e.,
 > zero — same lesson as the SAM-3 weight-only case). Moving on."
 
-### Slide 41 — Hybrid V2 CLIP quantization bake-off
+### Slide 42 — Hybrid V2 CLIP quantization bake-off
 
 > "Quantization on the CLIP visual tower in the Hybrid V2 stack. CLIP
 > at BF16 is the bottleneck — 22 ms per crop on the 5090, hits 8 ms on
 > reduced precision. Setting us up for the TRT compile path on the
 > next slide."
 
-### Slide 42 — CLIP keyframe debouncing
+### Slide 43 — CLIP keyframe debouncing
 
 > "Practical win: CLIP doesn't have to run every frame. Object identity
 > doesn't flicker frame-to-frame in real video. We run CLIP once per
@@ -326,7 +343,7 @@ Don't dwell — say the framing once, then page through.*
 > trick, not a model change. The 1 Hz debounce is a fundamental piece
 > of the shipping recipe."
 
-### Slide 43 — YOLO-seg conv quantization
+### Slide 44 — YOLO-seg conv quantization
 
 > "torchao's Conv quantization handles 44% of YOLO-seg's conv weights
 > — the 1×1 swap path. The remainder is blocked by a torchao 1×128
@@ -334,7 +351,7 @@ Don't dwell — say the framing once, then page through.*
 > the bottleneck, not the model. This is where TensorRT enters the
 > picture."
 
-### Slide 44 — TensorRT YOLO FP8 / INT8
+### Slide 45 — TensorRT YOLO FP8 / INT8
 
 *Big breakthrough slide.*
 
@@ -370,7 +387,7 @@ Don't dwell — say the framing once, then page through.*
 > reproduces FP16 detections at IoU 0.998 — quantization drift
 > essentially zero."
 
-### Slide 45 — yolo11s-seg vs yolov8n-seg comparison
+### Slide 46 — yolo11s-seg vs yolov8n-seg comparison
 
 > "Quick cross-variant check. yolo11s-seg is the shipping detector;
 > yolov8n-seg is the smaller variant. 8n is half the DRAM at 720p (106
@@ -378,7 +395,7 @@ Don't dwell — say the framing once, then page through.*
 > 850 FPS BW ceiling, vs 11s's 434. For applications where the COCO
 > class set is overkill, 8n is the lighter-weight option."
 
-### Slide 46 — TensorRT CLIP visual
+### Slide 47 — TensorRT CLIP visual
 
 > "CLIP visual tower TRT-compiled cleanly at FP16 + FP8. The 88M-param
 > tower drops from 47 ms BF16 to 29 ms FP16 to 16 ms FP8 — about a 3×
@@ -396,38 +413,49 @@ Don't dwell — say the framing once, then page through.*
 
 ---
 
-## Section 7 — LLM bake-off + duty cycle (slides 47–48)
+## Section 7 — LLM identity + bake-off + duty cycle (slides 48–50)
 
-### Slide 47 — LLM bake-off (Qwen3-30B-A3B)
+### Slide 48 — Optional LLM layer — the Skippy product artifact, unmodified
 
-> "The LLM dimension. Keyhole's optional natural-language-query
-> feature — and any agentic / NLQ scene-query — is backed by a local
-> LLM. **The LLM here is the same artifact that ships as the Skippy
-> product: Qwen3-30B-A3B base, Q4_K_M quantization, identical
-> shipping recipe.** Keyhole *uses* the artifact; the training story
-> (recipe taxonomy, fine-tuning campaigns, methodology arc) lives in
-> the Skippy deck.
->
-> Why this model: Mixture-of-Experts with 30B total parameters but
-> only 3B active per token. Right fit for bandwidth-bound silicon —
-> VRAM scales with total params; per-token bandwidth scales with
-> active params.
->
-> 5090 measurements at Q4_K_M: 250 tokens/sec decode @ 256-token
-> outputs; 159 tokens/sec on full RAG (8K context + 2K output).
-> Vendor-published edge anchor: **NPU Mid at 37.85 tok/s decode** on
-> the same model. Mid and High share the 8.4 GT/s bus, so decode
-> rate is identical on either tier — High wins on TTFT (2× faster,
-> 176 ms vs 351 ms @ 1K prompt) due to compute headroom, not on
-> sustained throughput. Memory upgrades (LPDDR5T-11.2, LPDDR6) lift
-> decode on both tiers in lockstep. Q4_K_M is the recommended quant.
->
-> *If asked: 'why don't you fine-tune this for Keyhole specifically?' —*
-> *say 'we use the Skippy artifact unmodified. The training methodology*
-> *that produced it is documented in the Skippy deck; reproducing it*
-> *here would be redundant.'*"
+*Cross-reference slide; ~30 seconds.*
 
-### Slide 48 — NPU duty-cycle trade-off
+> "Before the LLM measurements: identity. The LLM layer in Keyhole is
+> the **Skippy product artifact, unmodified** — Qwen3-30B-A3B base,
+> Q4_K_M quantization, identical shipping recipe to what Skippy
+> deploys. Keyhole *uses* the artifact; the training story lives in
+> the Skippy product deck.
+>
+> What that means for this deck: we'll measure what the artifact
+> does on edge silicon (next slide) and quantify how it coexists
+> with the vision pipeline on a shared NPU (the duty-cycle slide
+> after that). We will **not** cover how it was trained — that's
+> recipe taxonomy, fine-tuning campaign coverage, headline-erosion
+> arc, cross-family base-selection — all of which lives in the
+> Skippy deck.
+>
+> If the audience asks 'how do we re-train Skippy for our domain?'
+> or 'does the recipe transfer to Llama / Mistral?' — answer: see
+> Skippy deck. This deck is the wrong layer to answer those."
+
+### Slide 49 — LLM bake-off (Qwen3-30B-A3B)
+
+> "Now the measurements on the Skippy artifact we just identified.
+>
+> 5090 at Q4_K_M: 250 tokens/sec decode @ 256-token outputs; 159
+> tokens/sec on full RAG (8K context + 2K output). Vendor-published
+> edge anchor: **NPU Mid at 37.85 tok/s decode** on the same model.
+> Mid and High share the 8.4 GT/s bus, so decode rate is identical
+> on either tier — High wins on TTFT (2× faster, 176 ms vs 351 ms @
+> 1K prompt) due to compute headroom, not on sustained throughput.
+> Memory upgrades (LPDDR5T-11.2, LPDDR6) lift decode on both tiers
+> in lockstep. Q4_K_M is the recommended quant.
+>
+> The MoE choice (30B total / 3B active per token) is the right fit
+> for bandwidth-bound silicon — VRAM scales with total params;
+> per-token bandwidth scales with active params. We'll come back to
+> that thesis on slide 51."
+
+### Slide 50 — NPU duty-cycle trade-off
 
 > "Practical deployment question: can we run the LLM concurrently with
 > the vision pipeline on a shared NPU?
@@ -444,9 +472,9 @@ Don't dwell — say the framing once, then page through.*
 
 ---
 
-## Section 8 — Cross-cutting LLM findings (slides 49–50)
+## Section 8 — Cross-cutting LLM findings (slides 51–52)
 
-### Slide 49 — MoE-on-edge thesis (LLM deployment for vision + LLM coexistence)
+### Slide 51 — MoE-on-edge thesis (LLM deployment for vision + LLM coexistence)
 
 *Slide may show a cross-family comparison table; for Keyhole, focus
 narration on the MoE-on-edge deployment thesis. The cross-family
@@ -469,7 +497,7 @@ should be skimmed in Keyhole.*
 > deck. For Keyhole's purposes the answer is fixed: Qwen3-30B-A3B
 > Q4_K_M, same artifact as Skippy product."
 
-### Slide 50 — Multi-stream concurrency
+### Slide 52 — Multi-stream concurrency
 
 > "Practical question: can one NPU serve multiple camera streams?
 > Measured TensorRT YOLO at batch sizes 1, 2, 4, 8, 16. The headline:
@@ -480,9 +508,9 @@ should be skimmed in Keyhole.*
 
 ---
 
-## Section 9 — Community SAM 3 + ViT alternatives (slides 51–55)
+## Section 9 — Community SAM 3 + ViT alternatives (slides 53–57)
 
-### Slide 51 — EfficientSAM3 community bake-off
+### Slide 53 — EfficientSAM3 community bake-off
 
 > "Open-source community released two SAM-3-Lite variants in April. We
 > benched them. EfficientSAM3 ES-EV-S: 424M params, BF16, lands at
@@ -490,14 +518,14 @@ should be skimmed in Keyhole.*
 > our shipping pipeline. Community variants beat the monolith but
 > can't touch a purpose-built two-stage pipeline."
 
-### Slide 52 — EfficientSAM3.1 text-prompt variant
+### Slide 54 — EfficientSAM3.1 text-prompt variant
 
 > "Smaller variant: EfficientSAM3.1 at 106M params with text-prompt
 > capability. Even faster than ES-EV-S but still single-digit FPS at
 > 1080p+. Same conclusion: useful as a community SAM 3 Lite but
 > doesn't change our pipeline decision."
 
-### Slide 53 — YOLOE-26 one-model open-vocab
+### Slide 55 — YOLOE-26 one-model open-vocab
 
 > "Ultralytics released YOLOE-26 in January — a one-model open-vocab
 > alternative to our two-stage Hybrid V2. 4585-class built-in vocab,
@@ -510,7 +538,7 @@ should be skimmed in Keyhole.*
 > compression doesn't help when the bottleneck isn't matmul. Next
 > slide confirms."
 
-### Slide 54 — TRT YOLOE-26
+### Slide 56 — TRT YOLOE-26
 
 > "TRT FP8 on YOLOE-26 gives ~17% speedup over PyTorch FP16, not the
 > 3× we get on YOLO-seg. At 16M params, the open-vocab head's
@@ -521,7 +549,7 @@ should be skimmed in Keyhole.*
 > Useful methodology data point: not every workload benefits from
 > precision lowering. Match the optimization to the bottleneck."
 
-### Slide 55 — ViT alternatives — what-if
+### Slide 57 — ViT alternatives — what-if
 
 > "Investigated four ViT alternatives in case a single-model approach
 > might still win: RT-DETR-L, DETR-ResNet50, OWLv2, Grounding DINO.
@@ -540,9 +568,9 @@ should be skimmed in Keyhole.*
 
 ---
 
-## Section 10 — TRT takeaways (slide 56)
+## Section 10 — TRT takeaways (slide 58)
 
-### Slide 56 — TRT takeaways
+### Slide 58 — TRT takeaways
 
 > "Synthesizing the three TRT bake-offs: YOLO-seg, CLIP visual,
 > YOLOE-26. **Where TRT FP8 pays off**: dense convolutional backbones
@@ -558,9 +586,9 @@ should be skimmed in Keyhole.*
 
 ---
 
-## Section 11 — ncu measurement validation (slides 57–59)
+## Section 11 — ncu measurement validation (slides 59–61)
 
-### Slide 57 — ncu measured DRAM — headline 515× gap
+### Slide 59 — ncu measured DRAM — headline 515× gap
 
 *Big visualization of measured DRAM per forward across workloads.*
 
@@ -576,13 +604,13 @@ should be skimmed in Keyhole.*
 > measurement — it's the engineering claim the rest of the deck rests
 > on."
 
-### Slide 58 — ncu measured DRAM — workload table
+### Slide 60 — ncu measured DRAM — workload table
 
 > "Full table of measured workloads. Use this as the reference when
 > someone asks 'what about [model X] on edge?' If it's in the table,
 > the answer is bandwidth-bound at the listed memory budget."
 
-### Slide 59 — End-to-end pipeline latency budget
+### Slide 61 — End-to-end pipeline latency budget
 
 *The CPU-crowding finding slide.*
 
@@ -617,9 +645,9 @@ should be skimmed in Keyhole.*
 
 ---
 
-## Section 12 — Roadmap + summary (slides 60–61)
+## Section 12 — Roadmap + summary (slides 62–63)
 
-### Slide 60 — Optimization roadmap
+### Slide 62 — Optimization roadmap
 
 > "Where we go from here. Three open methodology gaps:
 >
@@ -633,7 +661,7 @@ should be skimmed in Keyhole.*
 >    silicon (not just High). Post-training quantization with
 >    calibration; ~1–2 weeks of focused work."
 
-### Slide 61 — Summary & findings
+### Slide 63 — Summary & findings
 
 *The final wrap-up slide — has hero stat bar + bulleted findings.*
 
@@ -672,7 +700,7 @@ should be skimmed in Keyhole.*
 
 ## Conditional Section — Private Anchors Slide (only in `--include-private` build)
 
-### Slide 62 (private) — Measured silicon anchors
+### Slide 64 (private) — Measured silicon anchors
 
 > "If you're in the NXP-internal audience: this slide is in your
 > deck variant. It shows measured silicon anchor performance for
@@ -746,11 +774,12 @@ divergences from the prior version:
 - **Skippy training slides removed from the Keyhole deck.** Recipe
   taxonomy, gotcha-#7 arc, headline-erosion data, sister-model
   confound — product-internal training material that belongs in the
-  Skippy deck, not Keyhole. Plain deck went from 65 → 61 slides
-  (former slides 49–52 dropped from `build_dirty()`; the slide
-  functions remain in `build_deck.py` for use by the Skippy-deck
-  builder). Downstream slides renumbered: former 53 → 49, former
-  65 → 61.
+  Skippy deck, not Keyhole. Plain deck went from 65 → 63 slides over two changes: first the
+  4 Skippy training slides were removed from `build_dirty()` (slide
+  functions retained for the Skippy-deck builder), then 2 dedicated
+  framing slides were added (three-modes at new slide 6; LLM identity
+  at new slide 48). Net: 65 − 4 + 2 = 63. Downstream slides renumbered
+  accordingly across both changes.
 - **NPU tier framing held to PAI golden.** Slides 4, 24/44, 26/46
   narration keeps the existing framing: **NPU Mid is INT8-only**
   (200 TOPS, no FP path) on 128-bit LPDDR5X @ 8.4 GT/s; **NPU High
@@ -760,13 +789,13 @@ divergences from the prior version:
   earlier draft of this script aligned to a different framing in the
   conceptual-frame brief that turned out to contradict PAI; reverted
   on 2026-05-17 when Kyle confirmed PAI as the golden definition.)
-- **Three operational modes** acknowledged on Slide 5 (vision-only,
+- **Three operational modes** acknowledged on dedicated Slide 6 (and referenced from Slide 5) (vision-only,
   vision + LLM, LLM-only). Sets up which mode each later section
   addresses.
-- **LLM identity** stated on Slide 47: Qwen3-30B-A3B Q4_K_M, same
+- **LLM identity** stated on dedicated Slide 48: Qwen3-30B-A3B Q4_K_M, same
   artifact as Skippy product, training story cross-referenced to Skippy
   deck rather than reproduced.
-- **Slide 49 reframed** (was Slide 53 before the Skippy-slide removal)
+- **Slide 51 reframed** (was Slide 53 before the Skippy-slide removal, then 49 after, now 51 after the two Phase-C insertions)
   to drop cross-family base-selection content (Mistral / Llama / Yi) —
   that's Skippy-deck-relevant. Keeps the MoE-on-edge thesis
   (Qwen3-30B-A3B vs Qwen 2.5 32B dense) since it bears on Keyhole's
@@ -780,8 +809,8 @@ Things this script does:
 - **Skips dense bake-off methodology** that doesn't bear on the bottom
   line. Per-clip results, prompt-count scaling, weight-only INT8
   rejection — these get one-paragraph mentions.
-- **Lingers on load-bearing findings**: architectural pivot (Slide 36),
-  TRT FP8 unblock (Slide 44), the e2e CPU crowding finding (Slide 59).
+- **Lingers on load-bearing findings**: architectural pivot (Slide 37),
+  TRT FP8 unblock (Slide 45), the e2e CPU crowding finding (Slide 61).
 - **Pause points marked** where the presenter should slow down +
   invite questions.
 
@@ -801,10 +830,9 @@ Open questions for the reviewer:
    labels; full Hybrid V2 pins to High because Mid has no FP path) —
    is the customer-deployment narrative landing, or do reviewers
    want the "INT8 CLIP port = ~1-2 weeks of focused work" roadmap
-   item from Slide 60 surfaced earlier so the deploy split reads as
+   item from Slide 62 surfaced earlier so the deploy split reads as
    "current limitation, not architectural"?
-3. The deck is now 61 slides (down from 65 after Skippy removal). Is
-   that the right length for a 45–60 min technical-management slot,
+3. The deck is now 63 slides (Skippy training removed; three-modes + LLM-identity framing slides added). Is that the right length for a 45–60 min technical-management slot,
    or should we trim further?
 4. The conditional private slide — if the audience is NXP-internal and
    has clearance to see measured values, does the bounds-language

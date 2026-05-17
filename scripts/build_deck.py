@@ -1008,6 +1008,105 @@ def slide_architecture(prs: Presentation):
     ], font_size=13)
 
 
+def slide_operational_modes(prs: Presentation):
+    """Slide: three operational modes Keyhole supports (vision-only,
+    vision + LLM, LLM-only). Sets up the hierarchy — vision is the
+    substrate; LLM is an optional surface on top. Inserted between
+    slide_architecture and slide_sam3_reference per the 2026-05-17
+    conceptual frame."""
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Three operational modes — vision as substrate, LLM as optional surface",
+        "Which mode is running determines what bandwidth + capacity budget the deck's later sections address",
+    )
+
+    headers = ["Mode", "Vision pipeline", "LLM (Skippy artifact)",
+               "Engineering question this mode raises"]
+    rows = [
+        ["1. Vision-only",
+         "✅ Running — YOLO-seg + CLIP @ 1Hz, 36 FPS at 720p target",
+         "⏸ Off",
+         "Default video-analytics deployment. Sizing = vision FPS budget alone."],
+        ["2. Vision + LLM",
+         "✅ Running — same as vision-only",
+         "✅ Running — NLQ over event store, agentic scene queries",
+         "Coexistence on shared NPU. Sizing = vision FPS budget × LLM duty cycle. Slides 49–51 quantify this."],
+        ["3. LLM-only",
+         "⏸ Off",
+         "✅ Running — equivalent to Skippy product running inside keyhole-sizer",
+         "Standalone-LLM deployment. Perf matches Skippy deck exactly — see Skippy deck for that mode's deep dive."],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(CONTENT_TOP + 0.2),
+        Inches(CONTENT_W), Inches(2.4), headers, rows,
+        highlight_rows=[1],   # Vision-only — the default headline
+        font_size=11, header_font_size=12,
+    )
+
+    add_bullet_box(slide, CONTENT_LEFT, 4.6, CONTENT_W, 2.6, [
+        ("What this framing buys us", C.ACCENT_BLUE, True),
+        ("• Vision is the substrate; LLM is an optional surface on top. The deck structure follows that hierarchy: vision physics, then optional LLM coexistence math, then customer-template framings.",
+         C.ACCENT_GREEN, True),
+        ("• The LLM in modes 2 + 3 is the **Skippy product artifact, unmodified** — Qwen3-30B-A3B base, Q4_K_M quantization, identical shipping recipe. Keyhole *uses* the artifact; the training story (recipe taxonomy, fine-tuning campaigns, methodology arc) is documented in the Skippy product deck and not reproduced here.",
+         C.ACCENT_INDIGO, True),
+        ("• Keyhole-sizer Streamlit app exposes the same three modes as a UI toggle, so customers can evaluate sizing under their actual deployment mix before committing to silicon.",
+         C.ACCENT_INDIGO),
+        ("• What's NOT in this deck (because it's in Skippy's): Skippy training campaign, recipe taxonomy, headline-erosion arc, substring-vs-semantic grading methodology, cross-family base-selection (Mistral / Llama / Yi / Phi-4 v4 runs). Those describe how the LLM artifact was *built*; this deck shows how Keyhole *uses* it.",
+         C.TEXT_DIM),
+    ], font_size=11)
+
+
+def slide_llm_identity(prs: Presentation):
+    """Slide: explicit LLM identity reference for the Keyhole deck.
+
+    The LLM in Keyhole is the Skippy product artifact unmodified. This
+    slide is the formal cross-reference so the audience knows where to
+    look for the training-side story, and so the deck stays honest about
+    not reproducing material that belongs in the Skippy deck.
+    """
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Optional LLM layer — the Skippy product artifact, unmodified",
+        "Keyhole uses the same fine-tuned model that ships as Skippy. Training story = Skippy deck.",
+    )
+
+    # ── Two-column layout: "What Keyhole uses" + "What's documented elsewhere" ──
+    col_top = CONTENT_TOP + 0.2
+    col_h = 2.7
+    col_w = (CONTENT_W - 0.25) / 2
+
+    add_bullet_box(slide, CONTENT_LEFT, col_top, col_w, col_h, [
+        ("What Keyhole's optional LLM layer is (in this deck)", C.ACCENT_GREEN, True),
+        ("• Base model: **Qwen3-30B-A3B** — Mixture-of-Experts, 30B total / 3B active per token.",),
+        ("• Quantization: **Q4_K_M** GGUF, ~17 GB on disk / VRAM-resident at runtime.",),
+        ("• Inference: llama.cpp via the same FastAPI server pattern Skippy ships.",),
+        ("• Use in Keyhole: NLQ over the event store, agentic scene queries ('find the X in this clip'), and the LLM-only-mode standalone path.",),
+        ("• Measured perf: 5090 250 tok/s decode @ 256; 159 tok/s on full RAG. Vendor-anchored NPU Mid = 37.85 tok/s; NPU High same 37.85 (shared 8.4 GT/s bus); upgrades to LPDDR5T-11.2 → 50.47 tok/s on either tier.",),
+    ], font_size=10)
+
+    add_bullet_box(slide, CONTENT_LEFT + col_w + 0.25, col_top, col_w, col_h, [
+        ("Where the training story lives (NOT in this deck)", C.ACCENT_AMBER, True),
+        ("• Skippy product deck: `personal-ai-use-cases.pptx`",),
+        ("• Recipe taxonomy + fine-tuning campaign coverage — Skippy deck slides on recipe lineage, sister-model baselines, training data construction.",),
+        ("• Headline-erosion arc (substring vs semantic grading, Qwen-family format bias, two-factor predictor, three-gate framework) — Skippy methodology slides.",),
+        ("• Cross-family base-model selection (Mistral 7B v0.3, Llama 3.1 8B, Yi-1.5-9B, Phi-4 v4 runs) — informed how Skippy was built; outside Keyhole's deployment story.",),
+        ("• Production-decision-unaffected verdict on Skippy 7B v4 voice + safety — Skippy deck.",),
+    ], font_size=10)
+
+    # ── Why this slide exists (one bullet block at the bottom) ────────────────
+    add_bullet_box(slide, CONTENT_LEFT, col_top + col_h + 0.2, CONTENT_W, 1.4, [
+        ("Why this cross-reference matters", C.ACCENT_BLUE, True),
+        ("• Reviewers and customers should know exactly what artifact powers the LLM layer + where to read the full training story. No content drift between decks; no 'is this the same model as Skippy?' ambiguity.",
+         C.ACCENT_INDIGO, True),
+        ("• The decks formally complement: **Keyhole** = how to deploy an edge AI vision pipeline (with optional LLM coexistence); **Skippy** = how the local-LLM artifact was built + what recipes transfer to customer-FT base models. Same engineering team; orthogonal product cuts.",
+         C.TEXT_BRIGHT),
+        ("• If the audience asks 'how do we re-train Skippy for our domain?' or 'can your recipe transfer to Llama / Mistral?' — answer: see Skippy deck. This deck doesn't answer those questions because it's the wrong layer.",
+         C.TEXT_DIM),
+    ], font_size=10)
+
+
 def slide_sam3_reference(prs: Presentation, ref_data: dict):
     """Slide 3: SAM 3 reference architecture breakdown."""
     slide = new_slide(prs)
@@ -4476,7 +4575,13 @@ def build_deck(output, runs_dir, data_dir, include_private):
     console.print("  Building: Architecture diagram")
     slide_architecture(prs)
 
-    # Slide 3: SAM 3 Reference
+    # Slide 6: Three operational modes (vision-only / vision+LLM / LLM-only)
+    # Per conceptual frame 2026-05-17 — establishes vision-as-substrate /
+    # LLM-as-optional-surface hierarchy before SAM 3 deep dive.
+    console.print("  Building: Three operational modes")
+    slide_operational_modes(prs)
+
+    # Slide 7: SAM 3 Reference
     if sam3_ref:
         console.print("  Building: SAM 3 reference breakdown")
         slide_sam3_reference(prs, sam3_ref)
@@ -4578,6 +4683,11 @@ def build_deck(output, runs_dir, data_dir, include_private):
 
     # LLM bake-off + duty-cycle trade-off (only if data present)
     if Path("data/output/bakeoff/llm_edge_projection.json").exists():
+        # Identity reference first — establish that the LLM is the Skippy
+        # product artifact unmodified, so the bake-off numbers below have
+        # a clear cross-reference to where the training story lives.
+        console.print("  Building: LLM identity reference (Skippy artifact unmodified)")
+        slide_llm_identity(prs)
         console.print("  Building: LLM bake-off (Qwen3-30B-A3B)")
         slide_llm_bakeoff(prs)
         console.print("  Building: NPU duty-cycle trade-off")

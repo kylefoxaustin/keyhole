@@ -1,14 +1,15 @@
 # Keyhole plain-deck → conceptual-frame alignment plan
 
-**Status:** Phases A + B landed 2026-05-17. Plain deck dropped from
-65 → 61 slides; Skippy training-methodology content removed;
-slide_dense_vs_moe_bandwidth reframed as Keyhole MoE-on-edge thesis.
-Script renumbered + reuploaded. Remaining items: optional three-modes
-+ LLM-identity slides (Phase C) and branded-deck rebuild (Phase E).
+**Status:** Phases A + B + C landed 2026-05-17. Plain deck dropped
+from 65 → 61 slides (Skippy removal), then rose to 63 slides with two
+new framing slides (three-modes at slide 6; LLM identity at slide 48).
+Script renumbered + uploaded. `CHANGES_2026-05-17.md` is the
+reviewer-facing summary. Remaining item: branded-deck rebuild (Phase E,
+separate manual NXP-template effort).
 Originally created when the [conceptual frame brief](#references)
 landed; revised same-day when the brief's NPU-tier claims were
-corrected to PAI golden; revised again at end-of-day when Phase A + B
-shipped.
+corrected to PAI golden; revised again when Phase A + B shipped; final
+revision at end-of-day with Phase C landed.
 
 This document scopes the work required to align the **plain Keyhole
 deck** (`data/output/keyhole_results.pptx`, 65 slides) to the conceptual
@@ -74,18 +75,21 @@ deck's own builder.
   coexistence argument rather than cross-family base-selection. Now
   slide 49 (formerly 53).
 
-### Slide additions (optional)
+### Slide additions — ✅ DONE 2026-05-17 (Phase C)
 
-- A dedicated **three-modes** slide between slide_architecture and
-  slide_sam3_reference. Could replace existing slide 5 sublabel.
-  Alternative: fold three-modes content into `slide_architecture` as
-  a left-column callout. Script already covers this verbally in
-  slide 5 narration.
-- A **LLM identity reference** slide: "Keyhole uses Skippy-product
-  artifact unmodified; see Skippy deck for training story." Sits
-  between current slide 48 (NPU duty-cycle) and current slide 53
-  (Dense vs MoE). Minimal narrative weight, lots of cross-deck
-  hygiene value. Script already covers this verbally in slide 47.
+- **`slide_operational_modes`** — dedicated three-modes slide added
+  between slide_architecture and slide_sam3_reference. New slide 6
+  (3-row table: vision-only / vision+LLM / LLM-only × pipeline state ×
+  engineering question, plus follow-on bullets explaining what the
+  framing buys and what training-side content is intentionally
+  out-of-scope).
+- **`slide_llm_identity`** — dedicated LLM identity reference inserted
+  before slide_llm_bakeoff. New slide 48 (two-column layout: "what
+  Keyhole uses" vs "what's documented elsewhere", followed by
+  "why this cross-reference matters" bullets). Plain deck now
+  formally cross-references the Skippy product deck rather than
+  embedding the cross-reference inline in the bake-off slide
+  narration.
 
 ### Branded deck divergence (out of scope for plain-deck refactor)
 
