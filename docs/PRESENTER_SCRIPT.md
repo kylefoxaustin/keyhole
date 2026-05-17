@@ -1,16 +1,34 @@
 # Keyhole — Presenter Script
 
 **Audience:** Technical management (engineering leaders who understand the
-domain — NPU silicon, edge ML, fine-tuning — but want bottom-line +
-implications, not deep methodology dives).
+domain — NPU silicon, edge ML — but want bottom-line + implications, not
+deep methodology dives).
 
-**Target runtime:** ~45–60 minutes for the 65-slide deck. Backgrounder
+**Target runtime:** ~45–60 minutes for the plain deck (65 slides; presenter
+skips slides 49–52 which carry training-methodology content that belongs
+to the Skippy product deck — see Section 8 note below). Backgrounder
 slides skim; load-bearing slides get the linger.
 
+**Conceptual frame:** Keyhole is the **edge AI video analytics platform**.
+The product deliverable is a vision pipeline that runs on NPU-class
+silicon. The LLM is an **optional feature** of the Keyhole product —
+the *same artifact* that ships as the Skippy / personal-AI product
+(Qwen3-30B-A3B base, Q4_K_M). Training-methodology content (recipe
+taxonomy, headline-erosion arc, cross-family bake-offs) belongs in the
+Skippy deck, not this one.
+
+**Three operational modes** the deck addresses:
+1. **Vision-only.** Vision pipeline runs; LLM off. Default video-analytics
+   use case.
+2. **Vision + LLM.** Both run; LLM acts on vision data (NLQ over the event
+   store, agentic scene queries). Vision = substrate; LLM = interaction
+   surface on top. Engineering question = NPU coexistence.
+3. **LLM-only.** Vision pipeline off; LLM standalone. Equivalent to the
+   Skippy product running inside keyhole-sizer. Perf matches Skippy deck.
+
 **Tone:** Confident but honest. The deliverable has been calibrated
-heavily through an external-reviewer remediation arc; the self-correction
-discipline is itself a credibility marker — surface it without
-self-aggrandizement.
+heavily through external review; the self-correction discipline is itself
+a credibility marker — surface it without self-aggrandizement.
 
 **Structure of this script:** one section per narrative arc, with per-slide
 speaker text. Stage directions in italics. "Pause" markers indicate where
@@ -61,33 +79,55 @@ to slow down + invite questions.
 *Table of host hardware + edge target.*
 
 > "Quick context on the hardware envelope. Our reference platform is an
-> RTX 5090 with an i9 host — all bake-offs measured here. The edge
-> target is NPU Mid: 134 GB/s LPDDR5X, 200 TOPS INT8, no FP path.
-> Everything you'll see scales from the 5090 measurement by a 16.19×
-> bandwidth ratio. We'll talk about how trustworthy that scale factor
-> is when we hit the methodology section."
+> RTX 5090 with an i9 host — all bake-offs measured here. The headline
+> edge target is **NPU Mid**: 134 GB/s LPDDR5X stock, 200 BF16 / 400
+> INT8 / 400 FP8 TOPS — FP-capable. Edge projections scale from 5090
+> measurement via bandwidth ratio (~16× to Mid; ~12× to High, which
+> has a faster 11.2 GT/s bus). Trustworthiness of that scale factor —
+> and the only-one-measured-edge-anchor caveat — comes up in the
+> methodology section."
 
 ### Slide 4 — NPU tier assumptions
 
-*5-tier matrix: Low-LP4, Low-LP5X, Low-LP5-32bit, Mid, High.*
+*Multi-tier matrix from Low-LP5-32bit through High. Two tiers do most of
+the work in this deck: Mid + High.*
 
-> "Five NPU tiers we model. The two that matter most for this deck are
-> **NPU Mid** — 128-bit LPDDR5X-8.4, 200 TOPS INT8, **no FP path** —
-> and **NPU High** — same memory bus as Mid, but FP-capable: 200 BF16
-> or 400 FP8 TOPS. Same bandwidth-bound regime; differentiator is dtype.
+> "Edge NPU tier model we project against. The two that matter most:
 >
-> The reason Mid + High share the same memory tier matters: a workload
-> that's bandwidth-bound projects to the same edge FPS on either tier.
-> The difference shows up when a workload needs FP — for those, it's
-> High-only."
+> **NPU Mid** — 128-bit LPDDR5X @ 8.4 GT/s, 134.4 GB/s peak (94 GB/s
+> effective at 70% efficiency), 200 BF16 / 400 INT8 / 400 FP8 TOPS,
+> 24 GB DRAM, 25 W. **FP-capable** — runs BF16 and FP8 recipes natively.
+>
+> **NPU High** — 128-bit LPDDR5X @ 11.2 GT/s, 179.2 GB/s peak (125 GB/s
+> effective), 275 BF16 / 550 INT8 / 550 FP8 TOPS, 32 GB DRAM, 40 W.
+> Different memory bus from Mid (33% more bandwidth) plus higher TOPS,
+> capacity, and TDP.
+>
+> Both tiers are FP-capable. The choice between them is a
+> memory-bandwidth + compute-headroom + capacity trade-off, not a dtype
+> trade-off. INT8 and FP8 recipes deploy on either tier; tier selection
+> is driven by the workload's bandwidth budget, concurrent workloads,
+> and DRAM footprint."
 
 ### Slide 5 — Architecture diagram
 
 > "Five-stage pipeline as the deck labels it: FFmpeg ingest, YOLO-seg
-> detection + masks, open-vocab labeling via CLIP, event store,
-> optional LLM-driven natural-language query. Camera-to-event-store on
-> embedded silicon. The whole deck is about getting this to run in
-> real-time at the detect/segment/label stage."
+> detection + masks, open-vocab labeling via CLIP, event store, and
+> the LLM as an *optional* natural-language query layer. The whole
+> deck is about getting the vision stages — detection through event
+> store — to run in real-time on NPU-class silicon.
+>
+> *Cue the three-modes framing — say this once, then move on.*
+>
+> The keyhole-sizer Streamlit app exposes three operational modes
+> over this pipeline: **vision-only** (the default video-analytics
+> case, LLM off); **vision + LLM** (both running, LLM acts on the
+> event store — NLQ, agentic scene queries — coexistence is the
+> engineering question); and **LLM-only** (vision off, LLM standalone
+> — equivalent to running the Skippy product inside keyhole-sizer).
+> The next ~40 slides are dominated by the vision-only and vision+LLM
+> modes; LLM-only perf is identical to the Skippy deck and is
+> cross-referenced rather than reproduced."
 
 ### Slide 6 — SAM 3 reference breakdown
 
@@ -308,8 +348,8 @@ Don't dwell — say the framing once, then page through.*
 > 5090 wall-time at 720p: FP16 → 0.67 ms; INT8 → 0.91 ms; FP8 → 0.68
 > ms. Edge projection on NPU Mid stock LPDDR5X: FP16 → 53.6 ms
 > (18.6 FPS); INT8 → 27.2 ms (**36.8 FPS**); FP8 → 27.2 ms (**36.8
-> FPS**). Real-time on Mid is reached for the first time in this
-> campaign.
+> FPS**). Real-time on Mid — the cheaper of our two FP-capable
+> tiers — is reached for the first time in this campaign.
 >
 > Two important findings here:
 >
@@ -322,15 +362,16 @@ Don't dwell — say the framing once, then page through.*
 > FP8 (0.91 vs 0.68 ms) because the INT8 path pays a dequant
 > overhead the native FP8 datapath doesn't. At the edge, both run on
 > identical 8-bit weights and the workload is bandwidth-bound — so
-> projected FPS collapses to the same 36.8 regardless of dtype. The
-> picking decision is therefore *silicon-class and quality*, not
-> wall-time: INT8 deploys on NPU Mid (INT8-only silicon); FP8
-> deploys on NPU High (FP-capable) with the bonus of matched-IoU
-> 0.998 vs FP16 — quantization drift essentially zero.
+> projected FPS collapses to the same 36.8 regardless of dtype. Both
+> Mid and High are FP-capable, so both recipes deploy on either tier.
+> Tier choice is driven by memory-bandwidth headroom (Mid is the
+> minimum bus that achieves 36 FPS at 720p; High has 33% more BW for
+> concurrent workloads) and by capacity / TDP — not by precision.
 >
 > The 'box recall' column here is engine-self-consistency: FP8 boxes
-> vs FP16 engine boxes, not ground truth. We'll come back to that
-> caveat in the methodology section."
+> vs FP16 engine boxes, not ground truth. The relevant signal: FP8
+> reproduces FP16 detections at IoU 0.998 — quantization drift
+> essentially zero."
 
 ### Slide 45 — yolo11s-seg vs yolov8n-seg comparison
 
@@ -344,15 +385,16 @@ Don't dwell — say the framing once, then page through.*
 
 > "CLIP visual tower TRT-compiled cleanly at FP16 + FP8. The 88M-param
 > tower drops from 47 ms BF16 to 29 ms FP16 to 16 ms FP8 — about a 3×
-> total speedup. Top-1 concept-tag agreement vs BF16 is 0.964 — noise-
-> level quality loss.
+> total speedup. Top-1 concept-tag agreement vs BF16 is 0.964 —
+> noise-level quality loss.
 >
-> Important caveat: this is a **FP-only recipe**. NPU Mid is INT8-only
-> and there's no INT8 CLIP port in our tool-chain yet. So the full
-> open-vocab pipeline pins to NPU High silicon. On NPU Mid silicon,
-> you ship YOLO INT8 + raw COCO labels — no open-vocab. That's the
-> deploy-split. We'll come back to silicon-class trade-offs in a
-> moment."
+> The recipe is FP — and both Mid and High are FP-capable, so the
+> full open-vocab pipeline (YOLO-FP8 + CLIP-FP8 at 1 Hz debounce)
+> deploys on either tier. Mid is the headline silicon target because
+> it's the cheaper of the two and still hits the 36 FPS budget at
+> 720p. High is the upgrade path when the deployment is
+> capacity-bound, BW-bound on concurrent workloads, or co-hosting an
+> active LLM."
 
 *Pause for questions on the bake-off arc.*
 
@@ -362,19 +404,31 @@ Don't dwell — say the framing once, then page through.*
 
 ### Slide 47 — LLM bake-off (Qwen3-30B-A3B)
 
-> "Separate dimension: the application has a downstream natural-
-> language-query feature backed by a local LLM. We target Qwen3-30B-
-> A3B, a Mixture-of-Experts model with 30B total parameters but only
-> 3B active per token. The mixture-of-experts design is the right fit
-> for bandwidth-bound silicon — VRAM scales with total parameters;
-> per-token bandwidth scales with active parameters.
+> "The LLM dimension. Keyhole's optional natural-language-query
+> feature — and any agentic / NLQ scene-query — is backed by a local
+> LLM. **The LLM here is the same artifact that ships as the Skippy
+> product: Qwen3-30B-A3B base, Q4_K_M quantization, identical
+> shipping recipe.** Keyhole *uses* the artifact; the training story
+> (recipe taxonomy, fine-tuning campaigns, methodology arc) lives in
+> the Skippy deck.
 >
-> 5090 measurements at Q4_K_M quantization: 250 tokens/sec decode @
-> 256-token outputs; 159 tokens/sec on full RAG (8K context + 2K
-> output). Vendor-published edge anchors put NPU Mid at 38 tok/s
-> decode on the same model — the bandwidth-bound projection from
-> 5090 was 2.3× pessimistic relative to vendor numbers, so we anchor
-> projections off the vendor data when available."
+> Why this model: Mixture-of-Experts with 30B total parameters but
+> only 3B active per token. Right fit for bandwidth-bound silicon —
+> VRAM scales with total params; per-token bandwidth scales with
+> active params.
+>
+> 5090 measurements at Q4_K_M: 250 tokens/sec decode @ 256-token
+> outputs; 159 tokens/sec on full RAG (8K context + 2K output).
+> Vendor-published edge anchors put NPU Mid at 37.85 tok/s and NPU
+> High at 50.46 tok/s decode on the same model — High has 33% more
+> memory bandwidth at stock (11.2 vs 8.4 GT/s), which is exactly the
+> decode ratio. Tier choice on LLM workloads = bandwidth budget; both
+> tiers are FP-capable and run the same artifact.
+>
+> *If asked: 'why don't you fine-tune this for Keyhole specifically?' —*
+> *say 'we use the Skippy artifact unmodified. The training methodology*
+> *that produced it is documented in the Skippy deck; reproducing it*
+> *here would be redundant.'*"
 
 ### Slide 48 — NPU duty-cycle trade-off
 
@@ -393,161 +447,54 @@ Don't dwell — say the framing once, then page through.*
 
 ---
 
-## Section 8 — Skippy training campaign + gotcha arc (slides 49–52)
+## Section 8 — SKIP slides 49–52 (Skippy training content — belongs in Skippy deck)
 
-*Lengthy section — this is the methodology-rich part of the deck.*
+*Slides 49–52 in the plain deck carry Skippy training-methodology
+content: recipe taxonomy, gotcha-#7 supersession arc, headline-erosion
+data, sister-model confound. **Per the Keyhole conceptual frame, this
+content belongs in the Skippy product deck, not here.** When these
+slides appear on screen, skip them quickly with a single pointer:*
 
-### Slide 49 — Skippy recipe taxonomy
+> "These four slides describe how the Skippy LLM artifact was
+> trained — recipe taxonomy, methodology arc, headline erosion,
+> sister-model confound. That's product-internal training content for
+> the Skippy deck, not for Keyhole. We *use* the trained artifact
+> unmodified; the training story is one slide-deck away. Skipping
+> these to keep the Keyhole narrative focused on edge-deployment
+> physics + vision pipeline."
 
-*Large table; about 17 rows of recipe variants with verdicts.*
-
-> "Switching tracks: the LLM side has its own fine-tuning campaign
-> running in parallel. Skippy is a domain-tuned variant of Qwen3-30B-
-> A3B for our embedded-world voice + safety profile. This slide is the
-> taxonomy of recipe variants we tried, with a verdict on each.
->
-> The currently-shipping production model is **Skippy 7B v4** — a
-> dense Qwen2.5-7B base, our v4 recipe. Production substring pass
-> rate of 70.5% on our v2-RAG evaluation.
->
-> Now — and this is going to feel counterintuitive — **that production
-> substring number is misleading**. Look at the column: '0.705
-> substring / 0.606 semantic.' The model passes 60.6% of the eval
-> under semantic grading, not 70.5%. There's an entire methodology
-> story behind that gap; we'll walk it on the next two slides. The
-> short version: **the substring grader had a Qwen-family format-bias
-> we caught two weeks ago** through a rigorous remediation arc.
->
-> Production decision is unaffected. We ship Skippy 7B v4 because the
-> three-gate framework — capability + voice + safety — caught the
-> silent substring failure and confirmed the production model ships
-> on voice + safety. The recipe was producing voice + safety, not
-> capability lift. We just didn't know it from the substring grader.
->
-> Two more rows worth pointing at on this slide: **Skippy 14B v4** at
-> the top of the table — same recipe on a 14B base — produces what
-> the substring grader scores as a +8.7pp lift over the 14B base.
-> Under semantic, that lifts +4.8 to +5.5pp. **One of only two
-> cross-family v4 cells that survives semantic regrade.** This
-> matters in the methodology story.
->
-> And **Yi-1.5-9B-Chat v4** — different family, intermediate
-> reasoning — produces a **−28.6pp substring regression**. Largest
-> regression in the entire dataset. Both judges corroborate. A
-> customer running this recipe on a cross-family base could ship a
-> model 28 points worse than the base they started with. We caught
-> that. The next slides explain how."
-
-### Slide 50 — Methodology arc (supersession trail)
-
-*Table of 7 framing supersessions with timestamps + triggers.*
-
-> "Seven different framings on what gotcha #7 — the cross-family
-> regression finding — actually was. Each row is correct at its
-> timestamp; each was superseded by the next when new data fired.
->
-> Started May 8 with a preliminary observation: 'recipe transfer is
-> base-family-coupled' — N=1 from Mistral, very weak signal.
->
-> Then Llama 8B v4 confirmed the pattern at N=2. Then Gemma 9B v4
-> *lifted*, falsifying the architecture-family reading. Then judge
-> evaluation showed the lifts erased — the recipe wasn't producing
-> the capability the substring claimed. Then cross-judge with GPT-4o
-> corroborated that finding on a second independent judge.
->
-> Then the two-factor model emerged: lift requires ceiling reasoning
-> *or* family-match to corpus source. Phi-4, a pre-registered
-> falsifier, regressed as the model predicted. External reviewer
-> declared closure.
->
-> Then — and this is the crucial supersession — we ran a bulk
-> semantic regrade on 33 catalog entries. The production model's
-> substring +3.1pp lift **flipped to a semantic −4.8pp regression**.
-> Sign reversal. The substring grader had a Qwen-family format bias
-> we hadn't seen at any prior stage.
->
-> **Why this slide is on the deck:** reviewers care about whether a
-> team will catch its own over-claims. Each framing here was
-> superseded by new data the team gathered to test it — not by
-> external pushback. That self-correction discipline is what makes
-> the final framing credible."
-
-### Slide 51 — Data arc (headline-erosion + three-gate callout)
-
-*5-checkpoint headline-erosion table on the production cell.*
-
-> "This is the data side of the arc. Same model — Skippy 7B v4
-> production — under five different evaluations.
->
-> **Substring**, the original headline: +3.1pp lift over the Qwen 7B
-> base. We'd shipped on this.
->
-> **LLM-judge with Claude Sonnet**: Δ −0.350 on a 0-8 scale. The lift
-> erases on judge dimensions — faithfulness to RAG context drops; the
-> model gets less anchored to the retrieved evidence.
->
-> **Temperature 0.3** (stochastic sampling instead of greedy decoding):
-> Δ −29.3pp. The fine-tune is *temperature-brittle* — base models are
-> temp-flat, fine-tunes are not. Production runs at temp=0 so this
-> doesn't affect ship, but it tells us the substring lift is partly
-> trained-phrasing memorization rather than generalization.
->
-> **Cross-judge with GPT-4o**: Δ −0.690. Both judges agree v4 ≤ base.
-> Not Sonnet-specific.
->
-> **Semantic regrade**: Δ −4.8pp. Sign reversal. The original +3.1pp
-> lift was Qwen-family format-fidelity artifact — the corpus phrasings
-> come from Qwen, gold tokens are Qwen-shaped, substring rewards
-> Qwen-style FTs.
->
-> **The green callout at the bottom is the load-bearing claim**:
-> production decision unaffected. The three-gate framework — capability
-> + voice + safety — was designed exactly for this. Substring failed
-> silently on capability. Voice + safety carried the real signal.
-> Skippy 7B v4 ships *for voice and safety*, not for capability lift.
->
-> The customer recommendation that comes out of this: semantic-grade
-> by default. Substring alone isn't sufficient for FT-vs-base
-> comparisons on a Qwen-family-sourced corpus. The cost is about 66
-> cents per eval pass via GPT-4o with prompt caching — negligible
-> versus fine-tune compute."
-
-### Slide 52 — Skippy sister-model confound
-
-> "Adjacent methodology lesson, separate finding. An earlier framing
-> claimed the MoE fine-tune produced a +5.3pp domain lift. That number
-> compared to Thinking-2507 — the *wrong* sister-model baseline. Apples-
-> to-apples vs Instruct-2507 — the correct base reference — the
-> 'lift' becomes a −2.3pp regression. The 7.6pp gap between Instruct
-> and Thinking-2507 is *base-model property*, not fine-tune win.
->
-> The lesson: always validate FT recipes against both sister models
-> when the base family ships Instruct + Thinking variants. We caught
-> ourselves on this one too. Same self-correction pattern as the
-> Qwen-family bias arc."
-
-*Pause. This is the densest methodology section.*
+*Page forward without dwelling. If the audience asks for the training
+detail, defer to the Skippy deck (`personal-ai-use-cases.pptx`) and
+its presenter script. In a corporate-template branded variant rebuild,
+slides 49–52 will be removed entirely — see `ALIGNMENT_PLAN.md` in
+the repo for the deferred refactor scope.*
 
 ---
 
 ## Section 9 — Cross-cutting LLM findings (slides 53–54)
 
-### Slide 53 — Dense vs MoE bandwidth
+### Slide 53 — Dense vs MoE bandwidth (LLM deployment context)
 
-> "Cross-family LLM performance question. On the 5090, we measured
-> three 7B-class dense Q4_K_M models: Qwen 2.5 7B, Mistral 7B v0.3,
-> Llama 3.1 8B. All three land in 170-185 tokens/sec RAG decode —
-> within 7% of each other. **7B-class dense decode is family-invariant**
-> at this scale; differences track GGUF size, not vendor architecture.
+*Slide may show a cross-family comparison table; for Keyhole, focus
+narration on the MoE-on-edge deployment thesis. The cross-family
+content (Mistral / Llama / Yi / Phi-4) is Skippy-deck-relevant and
+should be skimmed in Keyhole.*
+
+> "The deployment-relevant LLM finding: **Mixture-of-Experts wins on
+> bandwidth-bound edge silicon at equivalent VRAM.** Qwen3-30B-A3B
+> at 159 tokens/sec RAG decode on 5090 beats Qwen 2.5 32B dense at
+> 34 tok/s — 4.7× at the same memory footprint. Per-token bandwidth
+> pays for the 3B active parameters, not the 30B total.
 >
-> Same comparison for Mixture-of-Experts: Qwen3-30B-A3B at 159 tok/s
-> beats Qwen 2.5 32B dense at 34 tok/s by **4.7× at equivalent VRAM**.
-> Per-token bandwidth pays for the 3B active params, not the 30B
-> total. The MoE-on-edge thesis lands empirically.
+> For Keyhole this matters because the LLM is co-hosted with vision
+> on a shared NPU. MoE keeps per-token bandwidth low so vision
+> coexistence stays viable; a 32B dense at the same quality tier
+> would consume 5× the per-token bandwidth and obliterate the
+> vision FPS budget.
 >
-> Take-home: at 7B-class, choose your base for quality, not perf.
-> If you need 30B-equivalent capacity at bandwidth-bound performance,
-> use MoE."
+> Cross-family base-model selection is documented in the Skippy
+> deck. For Keyhole's purposes the answer is fixed: Qwen3-30B-A3B
+> Q4_K_M, same artifact as Skippy product."
 
 ### Slide 54 — Multi-stream concurrency
 
@@ -789,18 +736,27 @@ Don't dwell — say the framing once, then page through.*
 >   currently can't reach for Conv backbones. The model wasn't broken;
 >   the tool-chain matured.
 >
-> - **Substring graders have format-fidelity bias** on corpus-targeted
->   FTs. The fix is semantic graders + cross-judge methodology.
->   Generalizable methodology lesson for any team doing fine-tuning
->   evaluation.
+> - **Hybrid V2 deploys on either NPU Mid or NPU High** — both are
+>   FP-capable. Mid is the headline silicon (cheaper, hits 36 FPS at
+>   720p); High is the upgrade path for concurrent workloads or
+>   capacity-bound deployments.
+>
+> - **The LLM in Keyhole is the Skippy product artifact, unmodified**
+>   — Qwen3-30B-A3B Q4_K_M. Training methodology, recipe taxonomy, and
+>   any cross-family base-selection story live in the Skippy deck.
+>   Keyhole uses the artifact; it does not retrain it.
+>
+> - **Three operational modes:** vision-only (default), vision + LLM
+>   (NLQ + agentic scene-queries; NPU coexistence is the engineering
+>   question), LLM-only (Skippy-product behavior inside keyhole-sizer).
 >
 > - **Integration-architecture matters.** The 36 FPS edge result holds
 >   on production SoCs with ISP + 2D-GPU offloads. On pure-NPU boards,
 >   plan accordingly.
 >
 > - **One measured edge silicon anchor today** (i.MX 95 yolov8n-seg).
->   The rest of the deck scales from 5090 reference via a 16.19×
->   bandwidth ratio. KH-P2-001 in the roadmap: get a Mid-class NPU
+>   The rest of the deck scales from 5090 reference via bandwidth-ratio
+>   projection. KH-P2-001 in the roadmap: get a Mid-class NPU
 >   measurement to close the gap.
 >
 > Thank you."
@@ -809,23 +765,46 @@ Don't dwell — say the framing once, then page through.*
 
 ## Notes for the script reviewer (Claude browser)
 
+This script is aligned to the **Keyhole conceptual frame** (2026-05-17,
+see `~/.claude/projects/.../memory/project_conceptual_frame.md`). Key
+divergences from the prior version:
+
+- **Section 8 removed.** Skippy training-methodology content (recipe
+  taxonomy, gotcha-#7 arc, headline-erosion data, sister-model
+  confound) is product-internal training material that belongs in the
+  Skippy deck, not in Keyhole. The plain deck's slides 49–52 still
+  contain that content — the script instructs the presenter to skim
+  them with a one-line pointer. A planned plain-deck refactor will
+  remove those slides; see `docs/ALIGNMENT_PLAN.md`.
+- **NPU tier framing updated.** Slides 4, 24/44, 26/46 narration now
+  treats Mid and High as **both FP-capable, on different memory buses**
+  (Mid @ 8.4 GT/s, High @ 11.2 GT/s) per the conceptual frame's slide
+  4 reference. Tier choice = bandwidth + capacity + TDP trade-off, not
+  a dtype trade-off. *Note for cross-deck reviewers:* this contradicts
+  the current PAI/Skippy deck slide 11 (which still shows Mid INT8-only
+  + same bus). Per the conceptual frame, both decks will converge to
+  the new framing; the Skippy deck has not yet been updated.
+- **Three operational modes** acknowledged on Slide 5 (vision-only,
+  vision + LLM, LLM-only). Sets up which mode each later section
+  addresses.
+- **LLM identity** stated on Slide 47: Qwen3-30B-A3B Q4_K_M, same
+  artifact as Skippy product, training story cross-referenced to Skippy
+  deck rather than reproduced.
+- **Slide 53 reframed** to drop cross-family base-selection content
+  (Mistral / Llama / Yi) — that's Skippy-deck-relevant. Keeps the
+  MoE-on-edge thesis (Qwen3-30B-A3B vs Qwen 2.5 32B dense) since it
+  bears on Keyhole's vision + LLM coexistence story.
+
 Things this script does:
 
-- **Leads with conclusions per slide**, then supports. Technical
-  managers parse fast; they need the headline up front.
-- **Surfaces the self-correction discipline** without
-  self-aggrandizement. The arc is positioned as "we caught ourselves"
-  not "look how rigorous we are."
+- **Leads with conclusions per slide**, then supports.
 - **Honest framings throughout**: 36 FPS sensitivity band ±15%, the
-  "56 FPS production-SoC projection is not measured," the "we ship
-  for voice and safety, not capability lift" reframe on Skippy 7B
-  v4 production.
+  "56 FPS production-SoC projection is not measured."
 - **Skips dense bake-off methodology** that doesn't bear on the bottom
   line. Per-clip results, prompt-count scaling, weight-only INT8
   rejection — these get one-paragraph mentions.
 - **Lingers on load-bearing findings**: architectural pivot (Slide 36),
-  TRT FP8 unblock (Slide 44), the gotcha-7 arc (Slides 50–51), the
-  e2e CPU crowding finding (Slide 63).
+  TRT FP8 unblock (Slide 44), the e2e CPU crowding finding (Slide 63).
 - **Pause points marked** where the presenter should slow down +
   invite questions.
 
@@ -835,20 +814,22 @@ Things this script does *not* do:
   anchors slide — by design (discipline rule).
 - Doesn't make claims about NPU Mid silicon measurements that we
   don't have (KH-P2-001 honestly scoped as the remaining gap).
-- Doesn't soften the Yi −28.6pp finding or the Skippy 7B v4 sign-
-  reversal under semantic — those are real and load-bearing for the
-  credibility story.
+- Doesn't reproduce Skippy training methodology — defers to Skippy deck.
 
 Open questions for the reviewer:
 
 1. Is the 45–60 minute runtime appropriate for a technical management
    audience, or should the script trim further?
-2. The methodology arc section (Slides 50–51) is the densest. Should
-   the speaker text lead with the closure verdict more directly, or
-   is the storytelling buildup ("we caught ourselves") more useful?
-3. The "the deck has 65 slides" volume — is that itself a problem for
-   the target audience? Should the speaker explicitly call out "I'll
-   skip 5 background slides" near the front to set expectations?
+2. The cross-deck NPU tier contradiction (this script says Mid
+   FP-capable + different buses; current PAI/Skippy deck slide 11 says
+   Mid INT8-only + same bus). For a reviewer presenting to mixed
+   audiences who might see both decks, is the convergence story
+   ("both decks updating to the new framing; PAI hasn't caught up")
+   adequate, or does the divergence need a footnote in delivery?
+3. The "the deck has 65 slides but presenter skips 4" volume — is
+   that itself a problem for the target audience? Should the speaker
+   explicitly call out "I'll skip slides 49–52 as Skippy-deck content"
+   near the front to set expectations?
 4. The conditional private slide — if the audience is NXP-internal and
    has clearance to see measured values, does the bounds-language
    framework I describe actually work in a live presentation, or does
