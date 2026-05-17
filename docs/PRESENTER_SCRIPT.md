@@ -79,13 +79,12 @@ to slow down + invite questions.
 *Table of host hardware + edge target.*
 
 > "Quick context on the hardware envelope. Our reference platform is an
-> RTX 5090 with an i9 host — all bake-offs measured here. The headline
-> edge target is **NPU Mid**: 134 GB/s LPDDR5X stock, 200 BF16 / 400
-> INT8 / 400 FP8 TOPS — FP-capable. Edge projections scale from 5090
-> measurement via bandwidth ratio (~16× to Mid; ~12× to High, which
-> has a faster 11.2 GT/s bus). Trustworthiness of that scale factor —
-> and the only-one-measured-edge-anchor caveat — comes up in the
-> methodology section."
+> RTX 5090 with an i9 host — all bake-offs measured here. The edge
+> target is **NPU Mid**: 134 GB/s LPDDR5X, 200 TOPS INT8, no FP path.
+> Edge projections scale from 5090 measurement via a 16.19× bandwidth
+> ratio. Trustworthiness of that scale factor — and the
+> only-one-measured-edge-anchor caveat — comes up in the methodology
+> section."
 
 ### Slide 4 — NPU tier assumptions
 
@@ -95,19 +94,17 @@ the work in this deck: Mid + High.*
 > "Edge NPU tier model we project against. The two that matter most:
 >
 > **NPU Mid** — 128-bit LPDDR5X @ 8.4 GT/s, 134.4 GB/s peak (94 GB/s
-> effective at 70% efficiency), 200 BF16 / 400 INT8 / 400 FP8 TOPS,
-> 24 GB DRAM, 25 W. **FP-capable** — runs BF16 and FP8 recipes natively.
+> effective at 70% efficiency), **200 TOPS INT8 — no FP path**, 24 GB
+> DRAM, 25 W.
 >
-> **NPU High** — 128-bit LPDDR5X @ 11.2 GT/s, 179.2 GB/s peak (125 GB/s
-> effective), 275 BF16 / 550 INT8 / 550 FP8 TOPS, 32 GB DRAM, 40 W.
-> Different memory bus from Mid (33% more bandwidth) plus higher TOPS,
-> capacity, and TDP.
+> **NPU High** — same 128-bit LPDDR5X @ 8.4 GT/s memory bus as Mid,
+> but FP-capable: 200 BF16 / 400 INT8 / 400 FP8 TOPS, 32 GB DRAM, 40 W.
 >
-> Both tiers are FP-capable. The choice between them is a
-> memory-bandwidth + compute-headroom + capacity trade-off, not a dtype
-> trade-off. INT8 and FP8 recipes deploy on either tier; tier selection
-> is driven by the workload's bandwidth budget, concurrent workloads,
-> and DRAM footprint."
+> Mid + High share the same stock memory class — the differentiator
+> is compute, capacity, and TDP. A bandwidth-bound workload projects
+> to the same edge FPS on either tier. The difference shows up when
+> a workload needs FP precision (CLIP, ViT alternatives, EfficientSAM3
+> variants) — those pin to NPU High."
 
 ### Slide 5 — Architecture diagram
 
@@ -348,8 +345,8 @@ Don't dwell — say the framing once, then page through.*
 > 5090 wall-time at 720p: FP16 → 0.67 ms; INT8 → 0.91 ms; FP8 → 0.68
 > ms. Edge projection on NPU Mid stock LPDDR5X: FP16 → 53.6 ms
 > (18.6 FPS); INT8 → 27.2 ms (**36.8 FPS**); FP8 → 27.2 ms (**36.8
-> FPS**). Real-time on Mid — the cheaper of our two FP-capable
-> tiers — is reached for the first time in this campaign.
+> FPS**). Real-time at 720p edge is reached for the first time in
+> this campaign.
 >
 > Two important findings here:
 >
@@ -362,11 +359,11 @@ Don't dwell — say the framing once, then page through.*
 > FP8 (0.91 vs 0.68 ms) because the INT8 path pays a dequant
 > overhead the native FP8 datapath doesn't. At the edge, both run on
 > identical 8-bit weights and the workload is bandwidth-bound — so
-> projected FPS collapses to the same 36.8 regardless of dtype. Both
-> Mid and High are FP-capable, so both recipes deploy on either tier.
-> Tier choice is driven by memory-bandwidth headroom (Mid is the
-> minimum bus that achieves 36 FPS at 720p; High has 33% more BW for
-> concurrent workloads) and by capacity / TDP — not by precision.
+> projected FPS collapses to the same 36.8 regardless of dtype. The
+> picking decision is therefore *silicon-class and quality*, not
+> wall-time: INT8 deploys on NPU Mid (INT8-only silicon, no FP path);
+> FP8 deploys on NPU High (FP-capable) with the bonus of matched-IoU
+> 0.998 vs FP16 — quantization drift essentially zero.
 >
 > The 'box recall' column here is engine-self-consistency: FP8 boxes
 > vs FP16 engine boxes, not ground truth. The relevant signal: FP8
@@ -388,13 +385,12 @@ Don't dwell — say the framing once, then page through.*
 > total speedup. Top-1 concept-tag agreement vs BF16 is 0.964 —
 > noise-level quality loss.
 >
-> The recipe is FP — and both Mid and High are FP-capable, so the
-> full open-vocab pipeline (YOLO-FP8 + CLIP-FP8 at 1 Hz debounce)
-> deploys on either tier. Mid is the headline silicon target because
-> it's the cheaper of the two and still hits the 36 FPS budget at
-> 720p. High is the upgrade path when the deployment is
-> capacity-bound, BW-bound on concurrent workloads, or co-hosting an
-> active LLM."
+> Important caveat: this is a **FP-only recipe**. NPU Mid is INT8-only
+> and there's no INT8 CLIP port in our tool-chain yet, so the full
+> open-vocab pipeline pins to NPU High silicon. On NPU Mid you'd ship
+> YOLO INT8 + raw COCO labels — no open-vocab labeling. That's the
+> deploy-split: detector-only on Mid, full Hybrid V2 (YOLO-FP8 + CLIP-
+> FP8 at 1 Hz debounce) on High."
 
 *Pause for questions on the bake-off arc.*
 
@@ -419,11 +415,12 @@ Don't dwell — say the framing once, then page through.*
 >
 > 5090 measurements at Q4_K_M: 250 tokens/sec decode @ 256-token
 > outputs; 159 tokens/sec on full RAG (8K context + 2K output).
-> Vendor-published edge anchors put NPU Mid at 37.85 tok/s and NPU
-> High at 50.46 tok/s decode on the same model — High has 33% more
-> memory bandwidth at stock (11.2 vs 8.4 GT/s), which is exactly the
-> decode ratio. Tier choice on LLM workloads = bandwidth budget; both
-> tiers are FP-capable and run the same artifact.
+> Vendor-published edge anchor: **NPU Mid at 37.85 tok/s decode** on
+> the same model. Mid and High share the 8.4 GT/s bus, so decode
+> rate is identical on either tier — High wins on TTFT (2× faster,
+> 176 ms vs 351 ms @ 1K prompt) due to compute headroom, not on
+> sustained throughput. Memory upgrades (LPDDR5T-11.2, LPDDR6) lift
+> decode on both tiers in lockstep. Q4_K_M is the recommended quant.
 >
 > *If asked: 'why don't you fine-tune this for Keyhole specifically?' —*
 > *say 'we use the Skippy artifact unmodified. The training methodology*
@@ -736,10 +733,11 @@ should be skimmed in Keyhole.*
 >   currently can't reach for Conv backbones. The model wasn't broken;
 >   the tool-chain matured.
 >
-> - **Hybrid V2 deploys on either NPU Mid or NPU High** — both are
->   FP-capable. Mid is the headline silicon (cheaper, hits 36 FPS at
->   720p); High is the upgrade path for concurrent workloads or
->   capacity-bound deployments.
+> - **Hybrid V2 deploy-split:** on NPU Mid (INT8-only silicon), the
+>   detector ships INT8 — open-vocab labels need an INT8 CLIP port
+>   we don't yet have, so Mid runs detector-only with COCO labels. On
+>   NPU High (FP-capable), the full Hybrid V2 stack (YOLO-FP8 + CLIP-
+>   FP8 at 1 Hz debounce) ships and hits 36 FPS at 720p.
 >
 > - **The LLM in Keyhole is the Skippy product artifact, unmodified**
 >   — Qwen3-30B-A3B Q4_K_M. Training methodology, recipe taxonomy, and
@@ -776,14 +774,15 @@ divergences from the prior version:
   contain that content — the script instructs the presenter to skim
   them with a one-line pointer. A planned plain-deck refactor will
   remove those slides; see `docs/ALIGNMENT_PLAN.md`.
-- **NPU tier framing updated.** Slides 4, 24/44, 26/46 narration now
-  treats Mid and High as **both FP-capable, on different memory buses**
-  (Mid @ 8.4 GT/s, High @ 11.2 GT/s) per the conceptual frame's slide
-  4 reference. Tier choice = bandwidth + capacity + TDP trade-off, not
-  a dtype trade-off. *Note for cross-deck reviewers:* this contradicts
-  the current PAI/Skippy deck slide 11 (which still shows Mid INT8-only
-  + same bus). Per the conceptual frame, both decks will converge to
-  the new framing; the Skippy deck has not yet been updated.
+- **NPU tier framing held to PAI golden.** Slides 4, 24/44, 26/46
+  narration keeps the existing framing: **NPU Mid is INT8-only**
+  (200 TOPS, no FP path) on 128-bit LPDDR5X @ 8.4 GT/s; **NPU High
+  is FP-capable** on the same memory class. The "deploy split" —
+  Mid detector-only, High full Hybrid V2 — is the canonical Keyhole
+  customer-deployment story and matches PAI deck slide 11. (An
+  earlier draft of this script aligned to a different framing in the
+  conceptual-frame brief that turned out to contradict PAI; reverted
+  on 2026-05-17 when Kyle confirmed PAI as the golden definition.)
 - **Three operational modes** acknowledged on Slide 5 (vision-only,
   vision + LLM, LLM-only). Sets up which mode each later section
   addresses.
@@ -820,12 +819,12 @@ Open questions for the reviewer:
 
 1. Is the 45–60 minute runtime appropriate for a technical management
    audience, or should the script trim further?
-2. The cross-deck NPU tier contradiction (this script says Mid
-   FP-capable + different buses; current PAI/Skippy deck slide 11 says
-   Mid INT8-only + same bus). For a reviewer presenting to mixed
-   audiences who might see both decks, is the convergence story
-   ("both decks updating to the new framing; PAI hasn't caught up")
-   adequate, or does the divergence need a footnote in delivery?
+2. The deploy-split framing on Slide 46 (Mid detector-only + COCO
+   labels; full Hybrid V2 pins to High because Mid has no FP path) —
+   is the customer-deployment narrative landing, or do reviewers
+   want the "INT8 CLIP port = ~1-2 weeks of focused work" roadmap
+   item from Slide 64 surfaced earlier so the deploy split reads as
+   "current limitation, not architectural"?
 3. The "the deck has 65 slides but presenter skips 4" volume — is
    that itself a problem for the target audience? Should the speaker
    explicitly call out "I'll skip slides 49–52 as Skippy-deck content"
