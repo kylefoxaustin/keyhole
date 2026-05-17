@@ -1,15 +1,15 @@
 # Keyhole plain-deck → conceptual-frame alignment plan
 
-**Status:** Phases A + B + C landed 2026-05-17. Plain deck dropped
-from 65 → 61 slides (Skippy removal), then rose to 63 slides with two
+**Status: ALL PHASES LANDED 2026-05-17.** Plain deck dropped from
+65 → 61 slides (Skippy removal), then rose to 63 slides with two
 new framing slides (three-modes at slide 6; LLM identity at slide 48).
-Script renumbered + uploaded. `CHANGES_2026-05-17.md` is the
-reviewer-facing summary. Remaining item: branded-deck rebuild (Phase E,
-separate manual NXP-template effort).
+Branded deck rebuilt from current source via `pptx_template_converter`
+(63 slides, NXP corporate template applied). Script renumbered +
+uploaded. `CHANGES_2026-05-17.md` is the reviewer-facing summary.
 Originally created when the [conceptual frame brief](#references)
 landed; revised same-day when the brief's NPU-tier claims were
-corrected to PAI golden; revised again when Phase A + B shipped; final
-revision at end-of-day with Phase C landed.
+corrected to PAI golden; revised again when Phase A + B shipped;
+revised when Phase C landed; closed end-of-day when Phase E landed.
 
 This document scopes the work required to align the **plain Keyhole
 deck** (`data/output/keyhole_results.pptx`, 65 slides) to the conceptual
@@ -114,11 +114,36 @@ This is a much smaller refactor than initially scoped:
 4. **Phase D — Re-script.** Update `PRESENTER_SCRIPT.md` to renumber
    for the new 61-slide structure once Phase A lands. Drop the
    Section 8 skip-pointer.
-5. **Phase E — Branded deck rebuild** (separate effort).
-   `scripts/update_branded_deck.py` only patches 4 slides — full
-   rebuild needs the corporate-template import operation that
-   `update_branded_deck.py` doesn't automate. Manual NXP-template
-   work; not blocked by the above.
+5. **Phase E — Branded deck rebuild** — ✅ DONE 2026-05-17.
+   Used the local `~/Documents/GitHub/pptx_template_converter` repo
+   (Strategy A theme-swap: graft template's blank-layout onto source
+   slides; preserve absolute positioning; remap source RGBs to theme
+   slots via `mappings/keyhole_to_corporate.json`). Workflow:
+   ```
+   # 1. Build merge-ready plain deck (light bg PNGs, no footer/accent stripe)
+   KEYHOLE_DECK_MERGE_TARGET=1 python scripts/build_deck.py
+   cp data/output/keyhole_results.pptx \
+       ~/Documents/GitHub/pptx_template_converter/input/keyhole_merge_ready_63.pptx
+   # 2. Convert
+   cd ~/Documents/GitHub/pptx_template_converter
+   python convert.py \
+     --input input/keyhole_merge_ready_63.pptx \
+     --template template/corporate_template.pptx \
+     --output output/keyhole_deck_branded_63.pptx \
+     --color-map mappings/keyhole_to_corporate.json
+   # 3. Copy back + restore plain deck
+   cp output/keyhole_deck_branded_63.pptx ~/Documents/GitHub/keyhole/data/output/keyhole_deck_branded.pptx
+   cd ~/Documents/GitHub/keyhole
+   python scripts/build_deck.py    # rebuilds plain (dark) variant
+   ```
+   `scripts/update_branded_deck.py` is now obsolete — its in-place
+   patches (slide 1 date, slide 4 anchor rows, slide 46 TRT CLIP,
+   slide 54 TRT takeaways) targeted the static 58-slide branded
+   variant whose data was getting stale. After a fresh rebuild from
+   current source the data is already current in every slide, and
+   the slide indices the patcher hardcodes don't line up with the
+   63-slide structure anyway. Keep the script for reference; don't
+   run it.
 
 ## Cross-session coordination needed
 
