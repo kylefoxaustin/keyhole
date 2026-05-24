@@ -1,5 +1,13 @@
 # Keyhole — Dependencies
 
+# Shared SoC sizing engine — pinned for future opt-in. keyhole backend is a
+# different domain (emulator + ncu + FastAPI + bake-off) and does not import
+# ratchet today; see CLAUDE.md / docs/decisions/phase4-scope-recon.md for why
+# we keep our own HardwareSpec + tomllib anchor loader. The <0.3.0 upper bound
+# is deliberate — ratchet's v0.3.0 will carry breaking heterogeneous-arch work
+# and consumers bump intentionally.
+ratchet>=0.2.4,<0.3.0
+
 # Core
 python-dotenv>=1.0.0
 click>=8.1.0
