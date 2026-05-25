@@ -4162,6 +4162,135 @@ def slide_measured_silicon_anchors(prs: Presentation):
     ], font_size=9)
 
 
+def slide_npu_sizing_principle(prs: Presentation):
+    """Slide: Exec-speak — Memory bandwidth is the first-order constraint when
+    sizing an NPU for a video AI gateway. Lessons-learned framing aimed at
+    technical-management buyers, not engineers."""
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Sizing an AI gateway — memory bandwidth is the decision",
+        "For video workloads, the binding constraint isn't TOPS. It's GB/s of memory bandwidth.",
+    )
+
+    # ── Hero stat strip: the 515× lever ──────────────────────────────────────
+    headers_hero = ["What we measured", "SAM 3 baseline", "Hybrid V2 (recommended)", "Reduction"]
+    rows_hero = [
+        ["DRAM traffic per shipping pipeline frame",
+         "118,975 MB/forward", "231 MB/frame (amortized, 1 Hz CLIP)", "**515× lower**"],
+        ["Edge FPS @ 720p (NPU Mid stock LPDDR5X)",
+         "0.4 FPS", "36 FPS", "90× higher"],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(1.7),
+        Inches(CONTENT_W), Inches(1.0), headers_hero, rows_hero,
+        highlight_rows=[1],   # the 515× row
+        font_size=11, header_font_size=11,
+    )
+
+    # ── Two-column principle: "what didn't work" / "what did" ────────────────
+    col_top = 2.9
+    col_h   = 2.3
+    col_w   = (CONTENT_W - 0.25) / 2
+
+    add_bullet_box(slide, CONTENT_LEFT, col_top, col_w, col_h, [
+        ("What we tried that did NOT close the gap", C.ACCENT_RED, True),
+        ("• Weight-only INT8 quantization — zero edge gain. Weights are a minority of the bytes a BW-bound video model moves; activations dominate.",),
+        ("• Aggressive activation quantization (torchao FP8) — gets ~50% of the way; tool-chain gap on Conv backbones blocks the rest.",),
+        ("• Prompt-count reduction, resolution cuts — architecture (RoPE-locked attention) refuses the cut. Bandwidth budget unchanged.",),
+        ("• 'Add more TOPS' — would not have helped. Compute headroom existed on every plausible edge SoC.",),
+    ], font_size=10)
+
+    add_bullet_box(slide, CONTENT_LEFT + col_w + 0.25, col_top, col_w, col_h, [
+        ("What worked — the architectural pivot", C.ACCENT_GREEN, True),
+        ("• Replace the monolithic 840M open-vocab segmenter with a two-stage pipeline: YOLO-seg (detect+segment, 10M params) + OpenCLIP visual tower (open-vocab labels).",),
+        ("• Debounce CLIP at 1 Hz — labels don't flicker frame-to-frame in real video. ~30× CLIP amortization without quality loss.",),
+        ("• TensorRT FP8 on Blackwell unblocks full-model Conv quantization that torchao's tool-chain couldn't reach.",),
+        ("• Result: real-time at 720p on NPU Mid stock LPDDR5X. The lever was bandwidth-per-frame, achieved via architecture.",),
+    ], font_size=10)
+
+    # ── Exec takeaway block ──────────────────────────────────────────────────
+    add_bullet_box(slide, CONTENT_LEFT, col_top + col_h + 0.2, CONTENT_W, 1.7, [
+        ("Executive takeaway — spec memory bandwidth first; spec TOPS second", C.ACCENT_BLUE, True),
+        ("• When a video AI pipeline is bandwidth-bound, MORE TOPS DOES NOT HELP. Memory-bandwidth headroom does. Every NPU silicon decision for a video gateway product starts with 'how many GB/s effective per stream?'",
+         C.ACCENT_INDIGO, True),
+        ("• When BW is exhausted (more streams, higher resolution, larger detector), the cheap fix is a MEMORY UPGRADE — LPDDR5T-11.2 / LPDDR6-12 / LPDDR6-14. These lift decode + frame throughput in lockstep across NPU Mid + NPU High silicon. The expensive (and ineffective) alternative is buying TOPS that the workload can't use.",
+         C.ACCENT_GREEN),
+        ("• The 515× win above did NOT come from quantization or more silicon — it came from replacing the model. For bandwidth-bound workloads, architectural choice is the highest-leverage lever in the gateway's sizing budget.",
+         C.TEXT_BRIGHT),
+    ], font_size=10)
+
+
+def slide_npu_gateway_decision_matrix(prs: Presentation):
+    """Slide: Exec-speak — when to choose NPU Mid vs NPU High for an AI gateway
+    that processes video. Decision-matrix framing aimed at buyers."""
+    slide = new_slide(prs, bg_color=C.BG_DARK)
+    add_title_subtitle(
+        slide,
+        "Mid vs High — choosing the NPU tier for an AI video gateway",
+        "Both tiers share the 8.4 GT/s memory bus. Tier choice is compute capability + dtype + capacity — not bandwidth.",
+    )
+
+    # ── Side-by-side "what you get" panels ──────────────────────────────────
+    panel_top = 1.7
+    panel_h   = 2.1
+    panel_w   = (CONTENT_W - 0.25) / 2
+
+    add_bullet_box(slide, CONTENT_LEFT, panel_top, panel_w, panel_h, [
+        ("NPU Mid (200 TOPS INT8, no FP path)", C.ACCENT_AMBER, True),
+        ("• 128-bit LPDDR5X @ 8.4 GT/s — 134 GB/s peak / 94 GB/s effective at 70%",),
+        ("• 24 GB DRAM, 25 W TDP",),
+        ("• Vision: YOLO-seg INT8 detector at 36 FPS / 720p single stream; multi-stream batching gives ~4 streams × ~26 FPS at batch=4.",),
+        ("• Open-vocab labels: NOT AVAILABLE on Mid silicon today (CLIP needs FP precision). Ships with raw COCO labels only.",),
+        ("• LLM coexistence: short queries OK at ~5% NPU duty cycle. Full RAG would obliterate vision FPS.",),
+        ("• Best fit: vision-only gateways, INT8 detector-only deployments, cost-optimized SKUs.",),
+    ], font_size=10)
+
+    add_bullet_box(slide, CONTENT_LEFT + panel_w + 0.25, panel_top, panel_w, panel_h, [
+        ("NPU High (200/400/400 BF/INT8/FP8 TOPS, FP-capable)", C.ACCENT_GREEN, True),
+        ("• Same 128-bit LPDDR5X @ 8.4 GT/s memory bus as Mid — SAME 94 GB/s effective bandwidth",),
+        ("• 32 GB DRAM (1.33× Mid), 40 W TDP (1.6× Mid)",),
+        ("• Vision: full Hybrid V2 stack (YOLO-FP8 + CLIP-FP8 @ 1 Hz) at 36 FPS / 720p with open-vocab labels.",),
+        ("• Compute headroom for compute-bound LLM prefill (TTFT 2× faster than Mid for the same model).",),
+        ("• LLM coexistence: short queries OK; RAG queries still tight, but compute headroom is the differentiator.",),
+        ("• Best fit: full open-vocab gateways, vision + LLM co-host deployments, room-to-grow product SKUs.",),
+    ], font_size=10)
+
+    # ── Decision-tree table ─────────────────────────────────────────────────
+    headers_dt = ["Question for the AI gateway product", "If yes →", "If no →"]
+    rows_dt = [
+        ["Does the gateway need open-vocab labeling (CLIP / ViT alternatives)?",
+         "NPU High (FP-capable; only tier that runs CLIP today)",
+         "NPU Mid OK"],
+        ["Will the LLM co-host on the same NPU? (short queries, agentic NLQ)",
+         "NPU High (compute headroom for TTFT)",
+         "NPU Mid OK"],
+        ["Multiple concurrent streams or 1080p+ inputs?",
+         "Either tier + LPDDR6 memory upgrade",
+         "NPU Mid stock OK at single stream / 720p"],
+        ["Pure INT8 detector, single stream, vision-only, cost-optimized?",
+         "NPU Mid (cheapest silicon class that delivers 36 FPS)",
+         "Step up to High"],
+    ]
+    add_styled_table(
+        slide, Inches(CONTENT_LEFT), Inches(panel_top + panel_h + 0.15),
+        Inches(CONTENT_W), Inches(1.6), headers_dt, rows_dt,
+        highlight_rows=[],
+        font_size=10, header_font_size=11,
+    )
+
+    # ── Key insight block at the bottom ─────────────────────────────────────
+    add_bullet_box(slide, CONTENT_LEFT, panel_top + panel_h + 1.85, CONTENT_W, 1.4, [
+        ("Key insight for sizing decisions", C.ACCENT_BLUE, True),
+        ("• Mid + High share the memory bus — same bandwidth ceiling. The tier choice is about COMPUTE + DTYPE + CAPACITY + TDP, not throughput per stream of the vision pipeline. A bandwidth-bound vision-only deployment hits the same FPS ceiling on either tier.",
+         C.ACCENT_INDIGO, True),
+        ("• Memory upgrades (LPDDR5T-11.2 → LPDDR6-12 → LPDDR6-14) apply equally to either tier — 1.33× and 1.67× the stock bandwidth respectively. The upgrade decision is independent of the tier decision.",
+         C.ACCENT_GREEN),
+        ("• Cheapest path to a real-time video AI gateway today: NPU Mid + raw COCO labels (vision-only). Cheapest path to a full open-vocab + LLM-co-hosted gateway: NPU High stock. Upgrade memory only when stream-count or resolution forces it.",
+         C.TEXT_BRIGHT),
+    ], font_size=10)
+
+
 def slide_optimization_roadmap(prs: Presentation):
     """Slide: Path to real-time on edge hardware."""
     slide = new_slide(prs)
@@ -4754,6 +4883,16 @@ def build_deck(output, runs_dir, data_dir, include_private):
     if Path("data/output/bakeoff/e2e_pipeline_summary.json").exists():
         console.print("  Building: End-to-end pipeline latency budget")
         slide_e2e_latency_budget(prs)
+
+    # Exec-speak sizing slides — inserted 2026-05-25 per the
+    # AI-gateway-sizing ask. Both slides target technical-management
+    # buyers, not engineers. Slide 62: BW-first principle + the 515x
+    # architectural lever. Slide 63: Mid vs High decision matrix for an
+    # AI gateway product.
+    console.print("  Building: NPU sizing principle (exec)")
+    slide_npu_sizing_principle(prs)
+    console.print("  Building: NPU gateway decision matrix (exec)")
+    slide_npu_gateway_decision_matrix(prs)
 
     # Optimization roadmap
     console.print("  Building: Optimization roadmap")

@@ -4,8 +4,10 @@
 domain — NPU silicon, edge ML — but want bottom-line + implications, not
 deep methodology dives).
 
-**Target runtime:** ~45–60 minutes for the plain deck (63 slides).
-Backgrounder slides skim; load-bearing slides get the linger. Skippy
+**Target runtime:** ~45–60 minutes for the plain deck (65 slides).
+Backgrounder slides skim; load-bearing slides get the linger. The two
+exec-speak sizing slides at 62 + 63 are the buyer-facing wrap-up before
+the engineering roadmap. Skippy
 training-methodology content has been removed from the Keyhole deck
 per the conceptual frame — the Skippy product deck owns that material.
 Two dedicated framing slides (three-modes at slide 6; LLM identity at
@@ -643,9 +645,99 @@ MoE). Cross-family content lives in the Skippy product deck.*
 
 ---
 
-## Section 12 — Roadmap + summary (slides 62–63)
+## Section 12 — Exec sizing + roadmap + summary (slides 62–65)
 
-### Slide 62 — Optimization roadmap
+### Slide 62 — Sizing an AI gateway: memory bandwidth is the decision
+
+*Exec-speak slide #1. Pause here. This is the buyer-facing
+take-home — say it slowly.*
+
+> "Here's the bottom line for technical management. If you're sizing
+> NPU silicon for a video AI gateway product, the binding constraint
+> is not how many TOPS the silicon advertises — it's how many
+> gigabytes per second of memory bandwidth the silicon delivers per
+> stream. Every other decision flows from that.
+>
+> The number above is the headline of this whole campaign:
+> **515× lower DRAM bandwidth per shipping pipeline frame**. SAM 3
+> moved a hundred and nineteen gigabytes of memory traffic per
+> forward; our recommended Hybrid V2 stack moves about two hundred
+> thirty megabytes per frame, amortizing CLIP at 1 Hz. That's not a
+> quantization win — quantization gave us zero. It's an architectural
+> win. We replaced the model.
+>
+> The left column lists what we tried that did NOT close the gap —
+> weight-only INT8, activation quantization tooling that got stuck,
+> resolution and prompt cuts the architecture refused. And critically,
+> **adding more TOPS would not have helped**. Compute headroom existed
+> on every plausible edge SoC we modeled.
+>
+> The right column is what worked: two-stage pipeline replacing the
+> monolithic open-vocab segmenter, 1 Hz CLIP debounce, TensorRT FP8
+> on Blackwell unblocking the Conv quantization tool-chain had been
+> stuck on.
+>
+> *Pause; let the bottom box land.*
+>
+> Three takeaways for the buyer. First: spec memory bandwidth first;
+> spec TOPS second. Second: when bandwidth runs out — more streams,
+> higher resolution, a larger detector — the cheap fix is a memory
+> upgrade, not more TOPS. LPDDR5T-11.2 or LPDDR6 lifts both Mid and
+> High silicon in lockstep. Third: for bandwidth-bound video
+> workloads, architectural choice is the highest-leverage lever in
+> the gateway's sizing budget. Not silicon, not optimization."
+
+### Slide 63 — Mid vs High: choosing the NPU tier for an AI video gateway
+
+*Exec-speak slide #2. Decision-matrix slide; spend ~90 seconds.*
+
+> "Now the practical decision the buyer is making. Mid versus High.
+> Both tiers share the same memory bus — 128-bit LPDDR5X at 8.4
+> gigatransfers, 94 GB/s effective. **They have identical bandwidth
+> ceilings for a vision-only pipeline.** The choice between them is
+> not about throughput per stream — it's about compute capability,
+> dtype, capacity, and TDP.
+>
+> *Walk the two panels at the top.*
+>
+> NPU Mid is the cheaper tier. INT8-only — 200 TOPS — no FP path.
+> Twenty-four gigabytes of DRAM, 25 watts. On Mid, you ship a
+> YOLO-INT8 detector and raw COCO labels. Thirty-six FPS at 720p
+> single stream; about four streams at twenty-six FPS each via
+> batching. Short LLM queries are viable co-host; full RAG is not.
+> Best fit: vision-only gateways, cost-optimized SKUs.
+>
+> NPU High is the same memory bus — same 94 GB/s effective bandwidth
+> — but FP-capable. Two hundred BF16 TOPS, four hundred FP8 TOPS.
+> Thirty-two gigabytes of DRAM, forty watts. On High, you ship the
+> full open-vocab stack: YOLO-FP8 plus CLIP-FP8 at 1 Hz debounce,
+> thirty-six FPS at 720p with arbitrary text-prompted labels. You
+> also get the compute headroom to co-host LLM workloads — TTFT is
+> twice as fast on High because prefill is compute-bound, not
+> bandwidth-bound. Best fit: full open-vocab gateways, vision +
+> LLM deployments, room-to-grow product SKUs.
+>
+> *Then the decision matrix — read each row.*
+>
+> Four questions for the buyer. Need open-vocab labels? Pick High.
+> LLM co-hosting? Pick High. Multiple streams or higher resolution?
+> Either tier, but spec a memory upgrade. Pure INT8 detector,
+> vision-only, cost-optimized? Mid is the cheapest silicon class
+> that delivers real-time.
+>
+> *Land the bottom block.*
+>
+> Two more sentences worth saying out loud. Mid and High share the
+> memory bus — same bandwidth ceiling. The tier decision is about
+> compute and dtype, not throughput per stream of the vision
+> pipeline. And the memory upgrade decision — LPDDR5T-11.2 to
+> LPDDR6 — is independent of the tier decision. You can stack a
+> memory upgrade on either tier.
+>
+> *Pause for questions. This is the decision-frame slide buyers walk
+> away with.*"
+
+### Slide 64 — Optimization roadmap
 
 > "Where we go from here. Three open methodology gaps:
 >
@@ -659,7 +751,7 @@ MoE). Cross-family content lives in the Skippy product deck.*
 >    silicon (not just High). Post-training quantization with
 >    calibration; ~1–2 weeks of focused work."
 
-### Slide 63 — Summary & findings
+### Slide 65 — Summary & findings
 
 *The final wrap-up slide — has hero stat bar + bulleted findings.*
 
@@ -698,7 +790,7 @@ MoE). Cross-family content lives in the Skippy product deck.*
 
 ## Conditional Section — Private Anchors Slide (only in `--include-private` build)
 
-### Slide 64 (private) — Measured silicon anchors
+### Slide 66 (private) — Measured silicon anchors
 
 > "If you're in the NXP-internal audience: this slide is in your
 > deck variant. It shows measured silicon anchor performance for
@@ -828,9 +920,9 @@ Open questions for the reviewer:
    labels; full Hybrid V2 pins to High because Mid has no FP path) —
    is the customer-deployment narrative landing, or do reviewers
    want the "INT8 CLIP port = ~1-2 weeks of focused work" roadmap
-   item from Slide 62 surfaced earlier so the deploy split reads as
+   item from Slide 64 surfaced earlier so the deploy split reads as
    "current limitation, not architectural"?
-3. The deck is now 63 slides (Skippy training removed; three-modes + LLM-identity framing slides added). Is that the right length for a 45–60 min technical-management slot,
+3. The deck is now 65 slides (Skippy training removed; two exec sizing slides added; three-modes + LLM-identity framing slides added). Is that the right length for a 45–60 min technical-management slot,
    or should we trim further?
 4. The conditional private slide — if the audience is NXP-internal and
    has clearance to see measured values, does the bounds-language
