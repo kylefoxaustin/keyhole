@@ -17,12 +17,26 @@ isn't really here. The full empirical reasoning lives in
 [`docs/decisions/phase4-scope-recon.md`](docs/decisions/phase4-scope-recon.md);
 this section captures what future contributors need to know.
 
-**The pin is real.** `ratchet>=0.2.4,<0.3.0` is in `requirements.txt`. ratchet
-is not imported anywhere in this repo today, but the dependency is wired so
-that if/when something here needs canonical types or the shared anchor
-schema, the import is available. The `<0.3.0` upper bound is the same
-discipline the sizers use — ratchet bumps to v0.3.0 are deliberate
-consumer-side opt-ins, not auto-upgrades.
+**The relationship is *data source*, not future consumer.** Refined cross-session
+2026-05-27: keyhole backend is the production CNN-inference + ncu-profiling +
+bake-off platform that **produces the vision-pipeline edge measurements
+keyhole-sizer's private anchors consume**. Inference runs through the vendor SDK
+at runtime; this backend doesn't *size* and doesn't import ratchet. Structurally
+that puts it closer to **Phase 5 Skippy** (an upstream data/spec authority for
+downstream consumers) than to a future ratchet consumer.
+
+The engine-extraction *consumer* loop closes at the three sizer-class surfaces
+(PAI sizer + keyhole-sizer + ratchet's own dev install). keyhole backend feeds
+that loop with data; it doesn't sit inside it.
+
+**About the pin.** `ratchet>=0.2.4,<0.3.0` is in `requirements.txt` from
+v1.0.1. It does not signal "this repo plans to consume ratchet" — the data-source
+framing above is the truthful relationship. Treat the pin as an **ecosystem
+checkpoint marker** (a machine-readable hook proving the Phase 4 audit decision
+existed) and as a `<0.3.0` opt-out boundary if something here ever *does* import
+ratchet later. If you don't want the pin's presence to imply "future consumer,"
+it's safe to remove it in a future cleanup — the CLAUDE.md narrative is the
+authoritative record of the relationship.
 
 ### Why we keep our own `HardwareSpec` (not ratchet's `Hardware`)
 
