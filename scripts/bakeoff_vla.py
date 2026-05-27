@@ -78,15 +78,15 @@ SUMMARY_PATH = REPO / "data" / "output" / "bakeoff" / "vla_summary.json"
 CACHED_FRAME_DIR = REPO / "data" / "frames" / "EW_clip_720p"  # mirrors other bake-offs
 
 DEFAULT_MODEL_KEY = "nora_3b"
-DEFAULT_HF_REPO_FOR_MODEL = {
-    # First-run-verify entries. The CSV doesn't encode the HF repo so we
-    # keep the best-guess defaults here. Override with --hf-repo if wrong.
+# Fallback HF repos used only when the CSV row's hf_repo cell is blank.
+# Primary source of truth is the `hf_repo` column in vla_model_data.csv —
+# new models should be added there, not here.
+DEFAULT_HF_REPO_FOR_MODEL_FALLBACK = {
     "nora_3b":               "declare-lab/nora",
     "nora_1p5":              "declare-lab/nora-1.5",
     "openvla_7b_single":     "openvla/openvla-7b",
-    "openvla_7b_cached":     "openvla/openvla-7b",     # same weights, cache is wrapper-only
-    "pi_0p5":                "lerobot/pi0_5",          # Physical Intelligence release on LeRobot
-    "bitvla":                "bitvla/bitvla-3b",       # placeholder; verify
+    "openvla_7b_cached":     "openvla/openvla-7b",
+    "pi_0p5":                "lerobot/pi0_5",
 }
 
 N_WARMUP_DEFAULT = 3
@@ -102,6 +102,7 @@ class VLAModelSpec:
     cells preserve None so the consumer can `if spec.measured_5090_ms_per_action`."""
     vla_key: str
     display_name: str
+    hf_repo: str                       # may be "" if model weights not yet public
     architecture: str
     total_params_b: float
     vlm_params_b: float
@@ -148,6 +149,7 @@ def load_vla_catalog(csv_path: Path = CSV_PATH) -> dict[str, VLAModelSpec]:
                 out[row["vla_key"]] = VLAModelSpec(
                     vla_key=row["vla_key"],
                     display_name=row["display_name"],
+                    hf_repo=row.get("hf_repo", ""),
                     architecture=row["architecture"],
                     total_params_b=float(row["total_params_b"]),
                     vlm_params_b=float(row["vlm_params_b"]),
@@ -420,14 +422,20 @@ def main():
     log.info("Reference:    %s (arXiv %s, %d)",
              spec.source_paper, spec.arxiv_id, spec.citation_year)
 
-    hf_repo = args.hf_repo or DEFAULT_HF_REPO_FOR_MODEL.get(spec.vla_key)
-    if hf_repo is None:
-        log.error("No HF repo configured for %r. Pass --hf-repo <id>.", spec.vla_key)
+    # Resolution order: --hf-repo CLI > CSV hf_repo column > script fallback dict.
+    hf_repo = (args.hf_repo
+               or (spec.hf_repo or None)
+               or DEFAULT_HF_REPO_FOR_MODEL_FALLBACK.get(spec.vla_key))
+    if not hf_repo:
+        log.error("No HF repo configured for %r. Either add to the CSV's "
+                  "hf_repo column or pass --hf-repo <id>.", spec.vla_key)
         sys.exit(2)
     if not args.hf_repo:
-        log.warning("Using default HF repo %r for %s — VERIFY this is correct "
-                    "before relying on the measurement. Override with --hf-repo.",
-                    hf_repo, spec.vla_key)
+        source = "CSV hf_repo column" if spec.hf_repo else "script fallback dict"
+        log.warning("Using HF repo %r for %s (source: %s) — VERIFY this is "
+                    "correct before relying on the measurement. Override with "
+                    "--hf-repo to test alternative paths.",
+                    hf_repo, spec.vla_key, source)
 
     # ── 2. Visual input ──────────────────────────────────────────────
     image = load_test_frame()
