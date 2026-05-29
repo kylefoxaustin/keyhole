@@ -1,9 +1,24 @@
-"""VLA (Vision-Language-Action) bake-off — phase 1: NORA 3B latency baseline on RTX 5090.
+"""VLA (Vision-Language-Action) bake-off — latency baselines on RTX 5090.
 
 Establishes the measurement pattern for VLA workloads so subsequent
 models (OpenVLA 7B, NORA-1.5, π0.5, BitVLA) can plug into the same
 harness. The CSV at `data/inputs/vla_model_data.csv` is the canonical
 catalog; this script defaults to the `nora_3b` row.
+
+Two measurement topologies share this harness:
+
+  • **single-loop** (NORA 3B, OpenVLA 7B) — one VLM prefill, then K *autoregressive*
+    action tokens, each a full forward through the LLM. The decode is brutally
+    bandwidth-walled (every token streams the whole weight set). Measured by the
+    measure_vlm_forward / measure_action_forward path below.
+
+  • **dual-loop** (NORA-1.5, π0.5) — the VLM backbone runs *once* per action
+    chunk → frozen KV cache; then a *separate, much smaller* action expert runs
+    N fixed flow-matching denoise steps against that cache, emitting a whole
+    H-action chunk at once. The expensive VLM is amortized across H actions and
+    the fast loop is a tiny model — a completely different latency/util profile.
+    Measured by the run_dual_loop path; see that section for the loop split the
+    sizer's Phase 3b consumes.
 
 What we measure for each model (single-loop autoregressive case):
 
@@ -495,7 +510,17 @@ def validate_openvla_action_path(model, processor, image, instruction: str,
 
 
 def resolve_family(vla_key: str) -> str:
-    """Map a catalog key to its harness family (load/preprocess/validate path)."""
+    """Map a catalog key to its harness family (load/preprocess/validate path).
+
+    - "dual_loop": flow-matching VLAs with a separate action expert (NORA-1.5).
+      π0.5 is *architecturally* dual-loop too, but its VLM is PaliGemma — it
+      needs a PaliGemma-side loader, not the vendored Qwen2.5-VL expert path —
+      so it stays routed away from this family until that loader exists.
+    - "openvla": Prismatic Llama-2 + discrete 256-bin tokens (separate venv).
+    - "nora": single-loop Qwen2.5-VL + FAST+ autoregressive decode.
+    """
+    if vla_key == "nora_1p5":
+        return "dual_loop"
     if vla_key.startswith("openvla"):
         return "openvla"
     if vla_key.startswith(("nora", "pi_")):
@@ -872,6 +897,591 @@ def analytical_bytes_per_decode_token(spec: VLAModelSpec, dtype: str) -> float:
     return spec.total_params_b * 1e9 * bytes_per_param
 
 
+# ════════════════════════ Dual-loop family ════════════════════════
+# NORA-1.5 / π0.5-class VLAs run TWO loops, not one autoregressive decode:
+#   • slow loop  — the VLM backbone runs ONCE per action chunk → frozen KV cache
+#   • fast loop  — a SEPARATE small action expert runs N flow-matching denoise
+#                  steps against that KV cache, emitting a whole H-action chunk
+# The expensive VLM is amortized across H actions; the fast loop is a tiny model.
+#
+# NORA-1.5's action expert + denoise loop live in declare-lab/nora-1.5's training
+# code, NOT the HF weights (the repo ships a bare model.safetensors + a config of
+# the expert hyperparameters). We vendor the inference-relevant subset at
+# scripts/vendor/nora15_modelling_expert.py (TF/dlimp deps stripped) and drive its
+# published `sample_actions` / `denoise_step` API verbatim. Runs under the
+# dedicated ~/.virtualenvs/nora15 venv (transformers 4.54.1) — the vendored MoT
+# attention reads the legacy tuple-style KV cache that 4.54 still exposes; newer
+# transformers changed the Cache __getitem__ contract and break the expert.
+
+VENDOR_DIR = REPO / "scripts" / "vendor"
+DUAL_LOOP_NUM_STEPS_DEFAULT = 10  # NORA-1.5 README: sample_actions(..., num_steps=10)
+
+
+def load_dual_loop_model(hf_repo: str, dtype: str, attn_impl: str = "sdpa"):
+    """Construct VLAWithExpert (VLM backbone + flow-matching action expert).
+
+    The config.json fields map 1:1 to VLAWithExpert.__init__ kwargs; from_pretrained
+    runs __init__ (which loads the VLM from `vlm_model_id`) then overlays the full
+    nora-1.5 state dict (fine-tuned VLM + action expert + projection heads) with
+    strict=False. We then cast the whole module to the target FP dtype — the
+    action expert REQUIRES floating point (INT8 of the diffusion head breaks task
+    success per QuantVLA / the CSV note), so bf16 is the faithful path. Returns
+    (model, processor, attn_backend).
+    """
+    log.info("Loading dual-loop VLA from HF: %s (dtype=%s)", hf_repo, dtype)
+    if str(VENDOR_DIR) not in sys.path:
+        sys.path.insert(0, str(VENDOR_DIR))
+    from nora15_modelling_expert import VLAWithExpert  # type: ignore
+    from huggingface_hub import hf_hub_download
+
+    cfg = json.load(open(hf_hub_download(hf_repo, "config.json")))
+    model = VLAWithExpert.from_pretrained(
+        hf_repo,
+        vlm_model_id=cfg.get("vlm_model_id", "declare-lab/nora-long"),
+        processor_id=cfg.get("processor_id", "declare-lab/nora"),
+        fast_tokenizer_id=cfg.get("fast_tokenizer_id", "physical-intelligence/fast"),
+        lm_expert_width_multiplier=cfg.get("lm_expert_width_multiplier", 0.375),
+        lm_expert_num_attention_head=cfg.get("lm_expert_num_attention_head", 6),
+        action_chunk_length=cfg.get("action_chunk_length", 5),
+        action_dim=cfg.get("action_dim", 7),
+    )
+    torch_dtype = DTYPE_TORCH[dtype]
+    model.to("cuda", dtype=torch_dtype)
+    model.eval()
+    actual_attn = getattr(model.vlm.config, "_attn_implementation", attn_impl)
+    log.info("Action expert: chunk_length=%d, width_mult=%.3f, heads=%d, attn=%s",
+             model.action_chunk_length,
+             cfg.get("lm_expert_width_multiplier", 0.375),
+             cfg.get("lm_expert_num_attention_head", 6), actual_attn)
+    return model, model.processor, actual_attn
+
+
+def build_dual_loop_inputs(model, image, prompt: str, device):
+    """Replicate VLAWithExpert.sample_actions preprocessing → model-ready inputs.
+
+    Mirrors the vendored path exactly: vendored resize_image (PIL LANCZOS, the
+    de-TF'd lanczos3 equivalent) → Qwen2.5-VL chat template at 224×224 → processor.
+    Image content is timing-invariant; a representative frame suffices.
+    """
+    import PIL.Image
+    from qwen_vl_utils import process_vision_info
+    import nora15_modelling_expert as nm  # type: ignore
+
+    if not isinstance(image, PIL.Image.Image):
+        image = PIL.Image.fromarray(image)
+    image = nm.resize_image(image)
+    messages = [{
+        "role": "user",
+        "content": [
+            {"type": "image", "image": image,
+             "resized_height": 224, "resized_width": 224},
+            {"type": "text", "text": prompt},
+        ],
+    }]
+    text = model.processor.apply_chat_template(
+        messages, tokenize=False, add_generation_prompt=True)
+    image_inputs, video_inputs = process_vision_info(messages)
+    inputs = model.processor(text=[text], images=image_inputs, videos=video_inputs,
+                             padding=True, return_tensors="pt")
+    return {k: v.to(device) for k, v in inputs.items()}
+
+
+def _build_denoise_conditioning(model, inputs: dict):
+    """Run the VLM backbone once and build the action-expert conditioning,
+    replicating VLAWithExpert.sample_actions up to (but not including) the loop.
+
+    Returns (vlm_kv_cache, full_2d_attn_mask, bsz). The KV cache is READ-ONLY
+    conditioning for the expert (the MoT attention concatenates it with the
+    expert's own K/V but never writes back), so it is safely reused across every
+    denoise step and every timing trial — which is exactly the amortization the
+    dual-loop architecture exploits.
+    """
+    import nora15_modelling_expert as nm  # type: ignore
+    device = model.vlm.device
+    bsz = int(inputs["input_ids"].shape[0])
+    L = model.action_chunk_length
+    with torch.no_grad():
+        vlm_outputs = model.vlm(**inputs)
+    vlm_kv_cache = vlm_outputs.past_key_values
+    if vlm_kv_cache is None:
+        with torch.no_grad():
+            vlm_kv_cache = model.vlm(**inputs, use_cache=True).past_key_values
+    vlm_pad_mask = inputs["attention_mask"].clone()
+    action_pad_mask = torch.ones(bsz, L, device=device).bool()
+    action_attn_mask = torch.zeros(bsz, L, device=device).bool()
+    concat_pad_mask = torch.cat([vlm_pad_mask, action_pad_mask], dim=1)
+    concat_attn_mask = torch.cat([vlm_pad_mask, action_attn_mask], dim=1)
+    full_2d_attn_mask = nm.make_att_2d_masks(concat_pad_mask, concat_attn_mask)
+    return vlm_kv_cache, full_2d_attn_mask, bsz
+
+
+def measure_vlm_backbone(model, inputs: dict, n_warmup: int, n_trials: int,
+                         nvtx_label: str, vision_module=None) -> dict[str, Any]:
+    """Time the dual-loop SLOW loop: one VLM backbone forward → KV cache.
+
+    Unlike the single-loop measure_vlm_forward (which times generate(max_new=1)),
+    the dual-loop VLM is invoked as a plain forward — exactly as sample_actions
+    does — because its only job is to produce the conditioning KV cache, not to
+    emit a token. Same vision/LLM-prefill component split (CUDA-event hooks on the
+    vision tower) the sizer's roofline consumes.
+    """
+    from src.profiling.nvtx_helpers import nvtx_range
+
+    vis_evt: dict[str, torch.cuda.Event] = {}
+    handles = []
+    if vision_module is not None:
+        def _pre(_m, _a):
+            e = torch.cuda.Event(enable_timing=True); e.record(); vis_evt["start"] = e
+        def _post(_m, _a, _o):
+            e = torch.cuda.Event(enable_timing=True); e.record(); vis_evt["end"] = e
+        handles.append(vision_module.register_forward_pre_hook(_pre))
+        handles.append(vision_module.register_forward_hook(_post))
+
+    log.info("VLM-backbone warmup: %d forwards", n_warmup)
+    for _ in range(n_warmup):
+        with torch.no_grad():
+            _ = model.vlm(**inputs)
+    torch.cuda.synchronize()
+
+    log.info("VLM-backbone timed: %d forwards%s", n_trials,
+             " (+vision/LLM split)" if vision_module is not None else "")
+    per_trial_ms: list[float] = []
+    per_vision_ms: list[float] = []
+    for _ in range(n_trials):
+        start = torch.cuda.Event(enable_timing=True)
+        end = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize(); vis_evt.clear()
+        with nvtx_range(nvtx_label), torch.no_grad():
+            start.record()
+            _ = model.vlm(**inputs)
+            end.record()
+        per_trial_ms.append(_cuda_event_ms(start, end))
+        if "start" in vis_evt and "end" in vis_evt:
+            vis_evt["end"].synchronize()
+            per_vision_ms.append(float(vis_evt["start"].elapsed_time(vis_evt["end"])))
+
+    for h in handles:
+        h.remove()
+
+    arr = np.array(per_trial_ms)
+    out: dict[str, Any] = {
+        "n_warmup": n_warmup, "n_trials": n_trials,
+        "per_trial_ms": per_trial_ms,
+        "mean_ms": float(arr.mean()),
+        "p50_ms": float(np.percentile(arr, 50)),
+        "p95_ms": float(np.percentile(arr, 95)),
+        "p99_ms": float(np.percentile(arr, 99)),
+    }
+    if per_vision_ms and len(per_vision_ms) == len(per_trial_ms):
+        v = np.array(per_vision_ms)
+        llm = arr - v
+        out["components"] = {
+            "vision_encoder": {"p50_ms": float(np.percentile(v, 50)),
+                               "p95_ms": float(np.percentile(v, 95)),
+                               "mean_ms": float(v.mean())},
+            "llm_prefill": {"p50_ms": float(np.percentile(llm, 50)),
+                            "p95_ms": float(np.percentile(llm, 95)),
+                            "mean_ms": float(llm.mean())},
+            "vision_frac_p50": round(float(np.percentile(v, 50) /
+                                           np.percentile(arr, 50)), 3),
+            "method": "forward-hook CUDA events around the VLM vision tower; "
+                      "llm_prefill = VLM-forward total − vision (paired per-trial).",
+        }
+    return out
+
+
+def measure_denoise_loop(model, vlm_kv_cache, full_2d_attn_mask, bsz: int,
+                         num_steps: int, n_warmup: int, n_trials: int,
+                         nvtx_label: str) -> dict[str, Any]:
+    """Time the dual-loop FAST loop: the action expert's flow-matching denoise.
+
+    Replicates VLAWithExpert.sample_actions' integration loop verbatim (dt =
+    -1/num_steps, time 1.0 → 0, `num_steps` denoise_step calls), reusing the
+    VLM KV cache passed in (the VLM is NOT re-run — that is the amortization).
+    Times both a single denoise step and the full num_steps loop; fresh noise is
+    sampled per trial (cheap, off the timed path's hot region). Returns p50/p95
+    for each plus the step count.
+    """
+    from src.profiling.nvtx_helpers import nvtx_range
+    device = model.vlm.device
+    L = model.action_chunk_length
+    dt = -1.0 / num_steps
+
+    def _full_loop():
+        x_t = model.sample_noise((bsz, L, 7), device=device)
+        time = torch.tensor(1.0, dtype=model.vlm.dtype, device=device)
+        while time >= -dt / 2:
+            v_t = model.denoise_step(x_t, time.expand(bsz), vlm_kv_cache,
+                                     full_2d_attn_mask)
+            x_t = x_t + dt * v_t
+            time = time + dt
+        return x_t
+
+    def _one_step():
+        x_t = model.sample_noise((bsz, L, 7), device=device)
+        t = torch.tensor(1.0, dtype=model.vlm.dtype, device=device)
+        return model.denoise_step(x_t, t.expand(bsz), vlm_kv_cache, full_2d_attn_mask)
+
+    log.info("Denoise warmup: %d loops (%d steps each)", n_warmup, num_steps)
+    for _ in range(n_warmup):
+        with torch.no_grad():
+            _ = _full_loop()
+    torch.cuda.synchronize()
+
+    log.info("Denoise timed: %d loops + %d single-steps", n_trials, n_trials)
+    loop_ms: list[float] = []
+    step_ms: list[float] = []
+    for _ in range(n_trials):
+        s = torch.cuda.Event(enable_timing=True); e = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize()
+        with nvtx_range(nvtx_label), torch.no_grad():
+            s.record(); _ = _full_loop(); e.record()
+        loop_ms.append(_cuda_event_ms(s, e))
+    for _ in range(n_trials):
+        s = torch.cuda.Event(enable_timing=True); e = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize()
+        with torch.no_grad():
+            s.record(); _ = _one_step(); e.record()
+        step_ms.append(_cuda_event_ms(s, e))
+
+    larr, sarr = np.array(loop_ms), np.array(step_ms)
+    return {
+        "n_warmup": n_warmup, "n_trials": n_trials,
+        "num_denoise_steps": num_steps,
+        "action_chunk_length": L,
+        "loop_per_trial_ms": loop_ms,
+        "loop_p50_ms": float(np.percentile(larr, 50)),
+        "loop_p95_ms": float(np.percentile(larr, 95)),
+        "loop_mean_ms": float(larr.mean()),
+        "step_p50_ms": float(np.percentile(sarr, 50)),
+        "step_p95_ms": float(np.percentile(sarr, 95)),
+        "step_mean_ms": float(sarr.mean()),
+    }
+
+
+def validate_dual_loop_action_path(model, image, prompt: str,
+                                   num_steps: int) -> dict[str, Any]:
+    """Prove the harness measures the real flow-matching path: sample_actions
+    must return a finite (1, action_chunk_length, action_dim) normalized action
+    chunk. CPU-orchestrated / single-shot; NOT part of the GPU timing.
+    """
+    try:
+        with torch.no_grad():
+            act = model.sample_actions(image, prompt, num_steps=num_steps)
+        arr = np.asarray(act)
+        L = model.action_chunk_length
+        ok = (arr.shape == (1, L, 7)) and bool(np.isfinite(arr).all())
+        return {
+            "token_level_ok": bool(ok),     # schema parity with single-loop validators
+            "fast_decode_ok": bool(ok),
+            "action_chunk_shape": list(arr.shape),
+            "action_chunk_length": L,
+            "action_dim": 7,
+            "num_denoise_steps": num_steps,
+            "action_chunk_sample": [round(float(x), 5) for x in np.ravel(arr)[:7]],
+        }
+    except Exception as e:  # noqa: BLE001 — validation must never abort timing
+        return {"token_level_ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
+
+
+def count_dual_loop_params(model) -> dict[str, int]:
+    """Real parameter counts per dual-loop component, read off the loaded model.
+    Keys: vlm_vision, vlm_body, vlm_head, action_expert, total."""
+    vlm_vision = _module_params(model, ("vlm.model.visual", "vlm.visual"))
+    vlm_body = _module_params(model, ("vlm.model.language_model", "vlm.language_model"))
+    vlm_head = _module_params(model, ("vlm.lm_head",))
+    action_expert = int(sum(p.numel() for p in model.action_expert.parameters()))
+    # Small flow-matching projection heads (in/out/time MLPs) live on the expert side.
+    proj = 0
+    for name in ("action_in_proj", "action_out_proj",
+                 "action_time_mlp_in", "action_time_mlp_out"):
+        mod = getattr(model, name, None)
+        if mod is not None:
+            proj += int(sum(p.numel() for p in mod.parameters()))
+    total = int(sum(p.numel() for p in model.parameters()))
+    return {"vlm_vision": vlm_vision, "vlm_body": vlm_body, "vlm_head": vlm_head,
+            "action_expert": action_expert + proj, "total": total}
+
+
+def dual_loop_flops(pc: dict[str, int], n_vision_patches: int, vlm_seqlen: int,
+                    action_chunk_length: int, num_steps: int) -> dict[str, Any]:
+    """Physical (not effective) per-component FLOP for the dual-loop topology,
+    same 2·P·T matmul convention as the single-loop attribution so the numbers
+    compose with the sizer's per-hw util constants.
+
+      • vision        = 2·P_vlm_vision·n_patches            (ViT, once per chunk)
+      • vlm_prefill   = 2·(P_vlm_body+P_vlm_head)·vlm_seqlen (LLM backbone, once)
+      • denoise_step  = 2·P_action_expert·action_chunk_length
+                        (the expert processes H action tokens per step; the
+                        cross-attention over the VLM KV is attention-quadratic,
+                        omitted per the <~2% convention — but note the caveat
+                        below, the VLM seqlen here is large relative to H)
+      • action_chunk  = vision + vlm_prefill + num_steps·denoise_step
+    Per-action FLOP = action_chunk / action_chunk_length. All values in GFLOP.
+    """
+    g = 1e9
+    P_v, P_body, P_head, P_exp = (pc["vlm_vision"], pc["vlm_body"],
+                                  pc["vlm_head"], pc["action_expert"])
+    vision = 2 * P_v * n_vision_patches / g
+    vlm_prefill = 2 * (P_body + P_head) * vlm_seqlen / g
+    denoise_step = 2 * P_exp * action_chunk_length / g
+    denoise_total = denoise_step * num_steps
+    action_chunk = vision + vlm_prefill + denoise_total
+    return {
+        "method": "physical matmul FLOP, 2·P·T per module (attention-quadratic "
+                  "term omitted). Dual-loop: VLM backbone (vision+prefill) runs "
+                  "ONCE per chunk; the action expert runs num_steps denoise steps "
+                  "over action_chunk_length tokens. Per-action = chunk / H.",
+        "params_millions": {k: round(v / 1e6, 1) for k, v in pc.items()},
+        "n_vision_patches": n_vision_patches,
+        "vlm_seqlen_tokens": vlm_seqlen,
+        "action_chunk_length": action_chunk_length,
+        "num_denoise_steps": num_steps,
+        "vision_encoder_gflop": round(vision, 2),
+        "vlm_prefill_gflop": round(vlm_prefill, 2),
+        "denoise_step_gflop": round(denoise_step, 4),
+        "denoise_total_gflop": round(denoise_total, 3),
+        "action_chunk_gflop": round(action_chunk, 2),
+        "per_action_gflop": round(action_chunk / action_chunk_length, 3),
+        "caveat_attention_quadratic": (
+            "action-expert cross-attention reads the full VLM KV (seqlen≈%d vs "
+            "H=%d), so the omitted QKᵀ/·V term is a larger share here than in the "
+            "single-loop case; treat denoise FLOP as a matmul-only lower bound."
+            % (vlm_seqlen, action_chunk_length)),
+    }
+
+
+def run_dual_loop(args, spec, hf_repo: str, image) -> None:
+    """End-to-end dual-loop measurement + summary write. Parallels main()'s
+    single-loop flow but for the VLM-once / expert-N-steps topology, and emits
+    the SAME result schema (vlm_forward / action_forward / derived / dram / flops
+    / calibration) plus a dual_loop block that makes the two-loop split explicit."""
+    num_steps = args.num_steps
+    log.info("Harness family: dual_loop (flow-matching action expert, %d steps)",
+             num_steps)
+
+    # ── Load + DRAM baseline ─────────────────────────────────────────
+    torch.cuda.reset_peak_memory_stats()
+    pre_load_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+    model, processor, attn_backend = load_dual_loop_model(hf_repo, args.dtype, args.attn)
+    post_load_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+    weight_vram_mb = post_load_mb - pre_load_mb
+    log.info("Weight VRAM:  %.0f MB (%.2f GB at %s)",
+             weight_vram_mb, weight_vram_mb / 1024, args.dtype)
+
+    inputs = build_dual_loop_inputs(model, image, args.prompt, model.vlm.device)
+
+    # ── Validate the flow-matching action path ───────────────────────
+    try:
+        action_validation = validate_dual_loop_action_path(model, image, args.prompt, num_steps)
+        if action_validation.get("token_level_ok"):
+            log.info("Action validation PASSED: chunk shape %s, sample %s",
+                     action_validation.get("action_chunk_shape"),
+                     action_validation.get("action_chunk_sample"))
+        else:
+            log.warning("Action validation FAILED — review before trusting "
+                        "latency: %s", action_validation)
+    except Exception as e:  # noqa: BLE001
+        log.warning("Action validation could not run (%s: %s).", type(e).__name__, e)
+        action_validation = {"token_level_ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    # ── Per-loop latency ─────────────────────────────────────────────
+    vlm_nvtx = f"vla_{spec.vla_key}__vlm"
+    denoise_nvtx = f"vla_{spec.vla_key}__denoise"
+
+    vision_module = find_vision_module(model.vlm)
+    if vision_module is None:
+        log.warning("VLM vision tower not located — skipping vision/LLM split.")
+    vlm = measure_vlm_backbone(model, inputs, n_warmup=args.warmup,
+                               n_trials=args.n_trials, nvtx_label=vlm_nvtx,
+                               vision_module=vision_module)
+
+    vlm_kv_cache, full_2d_attn_mask, bsz = _build_denoise_conditioning(model, inputs)
+    denoise = measure_denoise_loop(model, vlm_kv_cache, full_2d_attn_mask, bsz,
+                                   num_steps=num_steps, n_warmup=args.warmup,
+                                   n_trials=args.n_trials, nvtx_label=denoise_nvtx)
+
+    # ── Dual-loop derived rates ──────────────────────────────────────
+    L = model.action_chunk_length
+    vlm_ms = vlm["p50_ms"]
+    loop_ms = denoise["loop_p50_ms"]
+    # One fresh observation → one chunk of L actions: pay VLM once + the N-step loop.
+    chunk_ms = vlm_ms + loop_ms
+    amortized_ms_per_action = chunk_ms / L
+    control_hz_amortized = 1000.0 / amortized_ms_per_action if amortized_ms_per_action > 0 else 0
+    # Fast-loop-only rate: if the VLM context is reused / pipelined, the action
+    # expert alone emits L actions per denoise loop — the "expert at ~40 Hz" claim.
+    fast_loop_hz = (L * 1000.0 / loop_ms) if loop_ms > 0 else 0
+
+    log.info("=" * 70)
+    log.info("Dual-loop results for %s @ %s on RTX 5090:", spec.display_name, args.dtype)
+    log.info("  [slow] VLM backbone p50:    %.2f ms", vlm_ms)
+    if "components" in vlm:
+        c = vlm["components"]
+        log.info("    ├─ vision encoder p50:   %.2f ms  (%.0f%% of VLM forward)",
+                 c["vision_encoder"]["p50_ms"], 100 * c["vision_frac_p50"])
+        log.info("    └─ LLM prefill p50:      %.2f ms", c["llm_prefill"]["p50_ms"])
+    log.info("  [fast] denoise step p50:    %.3f ms  (×%d steps)",
+             denoise["step_p50_ms"], num_steps)
+    log.info("  [fast] denoise loop p50:    %.2f ms  (→ %d-action chunk)", loop_ms, L)
+    log.info("  Chunk latency (VLM+loop):   %.2f ms  → %d actions", chunk_ms, L)
+    log.info("  Amortized ms/action:        %.2f ms  (%.1f Hz control)",
+             amortized_ms_per_action, control_hz_amortized)
+    log.info("  Fast-loop-only rate:        %.1f Hz  (expert alone, VLM reused)",
+             fast_loop_hz)
+
+    peak_inference_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+    log.info("  Peak VRAM (incl. weights):  %.0f MB (%.2f GB)",
+             peak_inference_mb, peak_inference_mb / 1024)
+
+    # ── FLOP attribution ─────────────────────────────────────────────
+    pc = count_dual_loop_params(model)
+    vlm_seqlen = int(inputs["input_ids"].shape[1])  # Qwen2.5-VL: image tokens are in input_ids
+    flops = dual_loop_flops(pc, n_vision_patches=infer_vision_patches(model.vlm),
+                            vlm_seqlen=vlm_seqlen, action_chunk_length=L,
+                            num_steps=num_steps)
+    peak_gf_s = PEAK_BF16_TFLOPS_5090 * 1e3
+    comp = vlm.get("components", {})
+    vis_ms = comp.get("vision_encoder", {}).get("p50_ms")
+    pre_ms = comp.get("llm_prefill", {}).get("p50_ms")
+
+    def _util(gflop, ms):
+        return round(gflop / (ms / 1e3) / peak_gf_s, 4) if ms and ms > 0 else None
+    # Bottleneck classification for the denoise step — the number the sizer most
+    # needs to project the fast loop to edge correctly. A step reads the expert's
+    # weights once; effective BW = expert-weight-bytes / step-time. If both the
+    # compute util AND the effective BW are tiny fractions of peak, the step is
+    # neither compute- nor bandwidth-bound — it's kernel-launch / Python-dispatch
+    # bound (36 small expert layers × eager custom-Python MoT attention over only
+    # H tokens). This is CATEGORICALLY different from the single-loop AR-decode
+    # bandwidth-wall, and it means the fast loop has large optimization headroom
+    # (CUDA graphs / fusion / compile), so BW-wall edge scaling must NOT be
+    # applied to it the way it is to autoregressive decode.
+    bytes_per_param = {"bf16": 2.0, "fp16": 2.0, "fp32": 4.0,
+                       "int8": 1.0, "int4": 0.5}[args.dtype]
+    expert_weight_bytes = pc["action_expert"] * bytes_per_param
+    step_s = denoise["step_p50_ms"] / 1e3
+    denoise_eff_bw_gbs = round(expert_weight_bytes / step_s / 1e9, 1) if step_s > 0 else None
+    PEAK_BW_GBS_5090 = 1792.0  # RTX 5090 ~1.79 TB/s GDDR7
+    denoise_compute_util = _util(flops["denoise_step_gflop"], denoise["step_p50_ms"])
+    denoise_bw_util = (round(denoise_eff_bw_gbs / PEAK_BW_GBS_5090, 4)
+                       if denoise_eff_bw_gbs else None)
+    flops["achieved_util_5090"] = {
+        "peak_bf16_tflops": PEAK_BF16_TFLOPS_5090,
+        "peak_bw_gbs": PEAK_BW_GBS_5090,
+        "vision_encoder": _util(flops["vision_encoder_gflop"], vis_ms),
+        "vlm_prefill": _util(flops["vlm_prefill_gflop"], pre_ms),
+        "denoise_step": denoise_compute_util,
+        "denoise_step_effective_bw_gbs": denoise_eff_bw_gbs,
+        "denoise_step_bw_util": denoise_bw_util,
+        "denoise_bottleneck": "launch/overhead-bound",
+        "note": "physical FLOP / measured p50 / dense bf16 peak. KEY: the denoise "
+                "step is neither compute-bound (~%.2f%% of peak FLOP) NOR "
+                "bandwidth-bound (~%.1f%% of peak BW, eff %.0f GB/s) — it is "
+                "kernel-launch/dispatch-bound in stock eager HF (36 tiny expert "
+                "layers, custom-Python MoT attention over %d tokens). UNLIKE the "
+                "single-loop AR-decode BW-wall, this has large optimization "
+                "headroom; do NOT project it to edge via bandwidth scaling."
+                % (100 * (denoise_compute_util or 0),
+                   100 * (denoise_bw_util or 0),
+                   denoise_eff_bw_gbs or 0, L),
+    }
+    log.info("  Physical FLOP: vision %.0f GF | prefill %.0f GF | denoise %.2f GF/step "
+             "| chunk %.0f GF (%.1f GF/action)",
+             flops["vision_encoder_gflop"], flops["vlm_prefill_gflop"],
+             flops["denoise_step_gflop"], flops["action_chunk_gflop"],
+             flops["per_action_gflop"])
+    log.info("=" * 70)
+
+    expert_m = round(pc["action_expert"] / 1e6)
+    calibration_note = (
+        "Dual-loop native (NORA-1.5): the Qwen2.5-VL backbone runs ONCE per "
+        f"action chunk ({round(vlm_ms,1)} ms) and a separate flow-matching action "
+        f"expert (measured {expert_m}M params incl. projection heads — the CSV's "
+        f"800M over-counts) runs {num_steps} denoise steps ({round(loop_ms,1)} ms) "
+        f"to emit a {L}-action chunk. Amortized control = {round(control_hz_amortized,1)} "
+        f"Hz; the fast loop alone runs at {round(fast_loop_hz,1)} Hz (the published "
+        "'action expert at ~40 Hz' regime, achievable when the VLM context is "
+        "reused/pipelined across chunks). CRITICAL for edge projection: the "
+        f"denoise step ({round(denoise['step_p50_ms'],1)} ms) is launch/overhead-"
+        f"bound (eff {denoise_eff_bw_gbs} GB/s, ~{round(100*(denoise_bw_util or 0),1)}% "
+        "of peak BW), NOT bandwidth-walled like single-loop AR decode — so it has "
+        "large optimization headroom (CUDA graphs / fusion / compile) and must not "
+        "be scaled to edge by bandwidth. Stock HF forward, no CUDA graphs / static "
+        "cache / compile — an un-optimized floor. The action expert REQUIRES FP "
+        "(bf16 here); INT8 of the diffusion head breaks task success per the CSV "
+        "note, so unlike the VLM stages it has no INT8 path."
+    )
+
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "host": "RTX 5090",
+        "torch": torch.__version__,
+        "transformers": __import__("transformers").__version__,
+        "dtype": args.dtype,
+        "attn_backend": attn_backend,
+        "family": "dual_loop",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "csv_path": str(CSV_PATH.relative_to(REPO)),
+        "model_key": spec.vla_key,
+        "hf_repo": hf_repo,
+        "model_spec": asdict(spec),
+        "result": {
+            "action_validation": action_validation,
+            "vlm_forward": vlm,            # the slow loop — schema parity w/ single-loop
+            "action_forward": denoise,     # the fast loop (denoise) — dual-loop fields inside
+            "dual_loop": {
+                "topology": "vlm_backbone_once + action_expert_flow_matching_loop",
+                "num_denoise_steps": num_steps,
+                "action_chunk_length": L,
+                "action_dim": 7,
+                "vlm_backbone_p50_ms": round(vlm_ms, 3),
+                "denoise_step_p50_ms": round(denoise["step_p50_ms"], 4),
+                "denoise_loop_p50_ms": round(loop_ms, 3),
+                "chunk_latency_ms": round(chunk_ms, 3),
+                "amortized_ms_per_action": round(amortized_ms_per_action, 3),
+                "control_hz_amortized": round(control_hz_amortized, 2),
+                "fast_loop_only_hz": round(fast_loop_hz, 2),
+                "note": "amortized = (VLM once + N denoise steps) / H actions; "
+                        "fast_loop_only = H / denoise-loop (VLM reused).",
+            },
+            "derived": {
+                "e2e_ms_per_action_p50": round(amortized_ms_per_action, 3),
+                "action_rate_hz_p50": round(control_hz_amortized, 2),
+                "chunk_latency_ms": round(chunk_ms, 3),
+                "fast_loop_only_hz": round(fast_loop_hz, 2),
+            },
+            "dram": {
+                "weight_vram_mb": round(weight_vram_mb, 1),
+                "weight_vram_gb": round(weight_vram_mb / 1024, 2),
+                "peak_inference_mb": round(peak_inference_mb, 1),
+                "peak_inference_gb": round(peak_inference_mb / 1024, 2),
+            },
+            "flops": flops,
+            "csv_reference": {
+                "measured_5090_ms_per_action": spec.measured_5090_ms_per_action,
+                "inference_dram_gb_at_default": getattr(
+                    spec, f"inference_dram_gb_{spec.dtype_path_default}", None),
+            },
+            "calibration": {
+                "reference_ms_per_action": spec.measured_5090_ms_per_action,
+                "vlm_forward_p50_ms": round(vlm_ms, 2),
+                "note": calibration_note,
+            },
+            "nvtx_labels": {"vlm": vlm_nvtx, "denoise": denoise_nvtx},
+        },
+    }
+    blob = json.dumps(payload, indent=2, default=str)
+    SUMMARY_PATH.write_text(blob)
+    per_model = SUMMARY_PATH.parent / f"vla_summary_{spec.vla_key}.json"
+    per_model.write_text(blob)
+    log.info("Wrote %s and %s", SUMMARY_PATH.relative_to(REPO),
+             per_model.relative_to(REPO))
+    log.info("")
+    log.info("Next step — DRAM via ncu: NVTX ranges `%s` (slow loop) and `%s` "
+             "(fast loop) are set for profile_all_ncu.sh.", vlm_nvtx, denoise_nvtx)
+
+
 # ────────────────────────── Main ──────────────────────────
 
 def parse_args():
@@ -896,6 +1506,10 @@ def parse_args():
                    choices=["sdpa", "eager", "flash_attention_2"],
                    help="Attention backend (default: sdpa — flash kernels "
                         "without the flash_attn package)")
+    p.add_argument("--num-steps", type=int, default=DUAL_LOOP_NUM_STEPS_DEFAULT,
+                   help="Flow-matching denoise steps for the dual-loop action "
+                        f"expert (default: {DUAL_LOOP_NUM_STEPS_DEFAULT}, per the "
+                        "NORA-1.5 README). Single-loop families ignore this.")
     p.add_argument("--unnorm-key", default=DEFAULT_UNNORM_KEY,
                    help=f"norm_stats key for 7-DOF validation (default: "
                         f"{DEFAULT_UNNORM_KEY})")
@@ -946,6 +1560,14 @@ def main():
     # ── 2. Visual input + family ──────────────────────────────────────
     image = load_test_frame()
     family = resolve_family(spec.vla_key)
+
+    # Dual-loop (flow-matching action expert) is a wholly different topology —
+    # VLM once + expert N-step denoise loop — so it runs its own measurement path
+    # and emits the schema-compatible summary itself, then returns.
+    if family == "dual_loop":
+        run_dual_loop(args, spec, hf_repo, image)
+        return
+
     log.info("Harness family: %s", family)
 
     # ── 3. Model load + DRAM baseline ────────────────────────────────

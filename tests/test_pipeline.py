@@ -227,3 +227,68 @@ class TestProfileReport:
 
 
 import sys
+
+
+# --- VLA dual-loop harness tests (bakeoff_vla.py) ---
+
+def _import_bakeoff_vla():
+    """Import the VLA bake-off harness (lives under scripts/). Its dual-loop
+    helpers lazy-import the vendored modeling code inside the functions, so the
+    module imports cleanly without the nora15 venv."""
+    scripts = str(Path(__file__).resolve().parents[1] / "scripts")
+    if scripts not in sys.path:
+        sys.path.insert(0, scripts)
+    import bakeoff_vla
+    return bakeoff_vla
+
+
+class TestVLADualLoop:
+    def test_family_routing(self):
+        bv = _import_bakeoff_vla()
+        # NORA-1.5 is the native flow-matching dual-loop path.
+        assert bv.resolve_family("nora_1p5") == "dual_loop"
+        # π0.5 is architecturally dual-loop but stays on the NORA path until a
+        # PaliGemma-side loader exists (documented in resolve_family).
+        assert bv.resolve_family("pi_0p5") == "nora"
+        assert bv.resolve_family("nora_3b") == "nora"
+        assert bv.resolve_family("openvla_7b_single") == "openvla"
+
+    def test_dual_loop_flops_amortization_identity(self):
+        bv = _import_bakeoff_vla()
+        pc = {"vlm_vision": 669_000_000, "vlm_body": 3_089_000_000,
+              "vlm_head": 315_000_000, "action_expert": 228_000_000,
+              "total": 3_987_000_000}
+        f = bv.dual_loop_flops(pc, n_vision_patches=256, vlm_seqlen=94,
+                               action_chunk_length=5, num_steps=10)
+        # Chunk = vision (once) + vlm_prefill (once) + N denoise steps.
+        expected_chunk = (f["vision_encoder_gflop"] + f["vlm_prefill_gflop"]
+                          + f["denoise_step_gflop"] * 10)
+        assert abs(f["action_chunk_gflop"] - expected_chunk) < 0.1
+        # Per-action is the chunk amortized over H actions — the dual-loop win.
+        assert abs(f["per_action_gflop"] - f["action_chunk_gflop"] / 5) < 0.01
+        # denoise_total scales linearly with the step count.
+        assert abs(f["denoise_total_gflop"] - f["denoise_step_gflop"] * 10) < 0.01
+
+    def test_dual_loop_denoise_scales_with_steps(self):
+        bv = _import_bakeoff_vla()
+        pc = {"vlm_vision": 669_000_000, "vlm_body": 3_089_000_000,
+              "vlm_head": 315_000_000, "action_expert": 228_000_000,
+              "total": 3_987_000_000}
+        f10 = bv.dual_loop_flops(pc, 256, 94, 5, num_steps=10)
+        f20 = bv.dual_loop_flops(pc, 256, 94, 5, num_steps=20)
+        # Doubling steps doubles only the denoise term; vision+prefill are fixed.
+        fixed = f10["vision_encoder_gflop"] + f10["vlm_prefill_gflop"]
+        assert abs((f20["action_chunk_gflop"] - fixed)
+                   - 2 * (f10["action_chunk_gflop"] - fixed)) < 0.1
+
+    def test_amortization_beats_naive_peraction(self):
+        bv = _import_bakeoff_vla()
+        pc = {"vlm_vision": 669_000_000, "vlm_body": 3_089_000_000,
+              "vlm_head": 315_000_000, "action_expert": 228_000_000,
+              "total": 3_987_000_000}
+        f = bv.dual_loop_flops(pc, 256, 94, action_chunk_length=5, num_steps=10)
+        # Amortized per-action FLOP must be well under the cost of paying the full
+        # VLM backbone for every single action (the single-loop penalty the
+        # dual-loop topology avoids).
+        naive_per_action = f["vision_encoder_gflop"] + f["vlm_prefill_gflop"]
+        assert f["per_action_gflop"] < naive_per_action
