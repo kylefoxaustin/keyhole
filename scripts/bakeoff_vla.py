@@ -9,7 +9,10 @@ What we measure for each model (single-loop autoregressive case):
 
   1. **VLM forward latency**  — vision encoder + LLM prefill on the
      image + text-prompt pair. Run as `generate(..., max_new_tokens=1)`
-     so the cost is fully borne by the prefill pass.
+     so the cost is fully borne by the prefill pass. Forward hooks on the
+     vision tower additionally split this into a **vision-encoder vs
+     LLM-prefill** component breakdown (the roofline split the sizer
+     consumes) under `result.vlm_forward.components`.
 
   2. **Action forward latency** — the full NORA inference call: prefill +
      autoregressive FAST+ action-token decode to EOS. NORA emits a
@@ -415,19 +418,56 @@ def _cuda_event_ms(start: torch.cuda.Event, end: torch.cuda.Event) -> float:
     return float(start.elapsed_time(end))
 
 
+def find_vision_module(model):
+    """Locate the vision tower for per-component timing.
+
+    Qwen2.5-VL nests it at `model.model.visual`; older layouts expose
+    `model.visual`. Returns the module or None if the layout is unknown (in
+    which case the harness silently skips the component split and still reports
+    the aggregate VLM forward).
+    """
+    for path in ("model.visual", "visual"):
+        obj = model
+        try:
+            for attr in path.split("."):
+                obj = getattr(obj, attr)
+            return obj
+        except AttributeError:
+            continue
+    return None
+
+
 def measure_vlm_forward(model, processor, image, prompt: str,
                         n_warmup: int, n_trials: int,
-                        nvtx_label: str) -> dict[str, Any]:
+                        nvtx_label: str, vision_module=None) -> dict[str, Any]:
     """VLM forward = vision encoder + LLM prefill, timed via
     generate(max_new_tokens=1). Returns p50/p95 ms + per-trial.
 
     The first generated token costs essentially the full prefill (no
     cached past kv at trial start), so this isolates the perception
     cost from the action-decode loop.
+
+    When `vision_module` is provided, forward hooks place CUDA events around
+    the vision tower so each trial also yields the vision-encoder duration; the
+    LLM-prefill component is the paired remainder (VLM-forward total − vision,
+    i.e. embed-merge + LLM prefill + lm_head + 1-token sample). This is the
+    vision-vs-LLM roofline split the sizer consumes — added per their
+    2026-05-29 request.
     """
     from src.profiling.nvtx_helpers import nvtx_range
 
     inputs = build_nora_inputs(processor, image, prompt, model.device)
+
+    # Per-component instrumentation: time the vision tower via hooks.
+    vis_evt: dict[str, torch.cuda.Event] = {}
+    handles = []
+    if vision_module is not None:
+        def _pre(_mod, _args):
+            e = torch.cuda.Event(enable_timing=True); e.record(); vis_evt["start"] = e
+        def _post(_mod, _args, _out):
+            e = torch.cuda.Event(enable_timing=True); e.record(); vis_evt["end"] = e
+        handles.append(vision_module.register_forward_pre_hook(_pre))
+        handles.append(vision_module.register_forward_hook(_post))
 
     # Warmup (not timed)
     log.info("VLM warmup: %d forwards", n_warmup)
@@ -436,20 +476,29 @@ def measure_vlm_forward(model, processor, image, prompt: str,
             _ = model.generate(**inputs, max_new_tokens=1, do_sample=False)
     torch.cuda.synchronize()
 
-    log.info("VLM timed: %d forwards", n_trials)
+    log.info("VLM timed: %d forwards%s", n_trials,
+             " (+vision/LLM split)" if vision_module is not None else "")
     per_trial_ms: list[float] = []
+    per_vision_ms: list[float] = []
     for i in range(n_trials):
         start = torch.cuda.Event(enable_timing=True)
         end   = torch.cuda.Event(enable_timing=True)
         torch.cuda.synchronize()
+        vis_evt.clear()
         with nvtx_range(nvtx_label), torch.inference_mode():
             start.record()
             _ = model.generate(**inputs, max_new_tokens=1, do_sample=False)
             end.record()
         per_trial_ms.append(_cuda_event_ms(start, end))
+        if "start" in vis_evt and "end" in vis_evt:
+            vis_evt["end"].synchronize()
+            per_vision_ms.append(float(vis_evt["start"].elapsed_time(vis_evt["end"])))
+
+    for h in handles:
+        h.remove()
 
     arr = np.array(per_trial_ms)
-    return {
+    out: dict[str, Any] = {
         "n_warmup": n_warmup,
         "n_trials": n_trials,
         "per_trial_ms": per_trial_ms,
@@ -458,6 +507,30 @@ def measure_vlm_forward(model, processor, image, prompt: str,
         "p95_ms":  float(np.percentile(arr, 95)),
         "p99_ms":  float(np.percentile(arr, 99)),
     }
+
+    # Paired per-trial split (vision_i and total_i are the same trial).
+    if per_vision_ms and len(per_vision_ms) == len(per_trial_ms):
+        v = np.array(per_vision_ms)
+        llm = arr - v  # remainder: embed-merge + LLM prefill + lm_head + sample
+        out["components"] = {
+            "vision_encoder": {
+                "p50_ms": float(np.percentile(v, 50)),
+                "p95_ms": float(np.percentile(v, 95)),
+                "mean_ms": float(v.mean()),
+            },
+            "llm_prefill": {
+                "p50_ms": float(np.percentile(llm, 50)),
+                "p95_ms": float(np.percentile(llm, 95)),
+                "mean_ms": float(llm.mean()),
+            },
+            "vision_frac_p50": round(float(np.percentile(v, 50) /
+                                           np.percentile(arr, 50)), 3),
+            "method": "forward-hook CUDA events around the vision tower; "
+                      "llm_prefill = VLM-forward total − vision (paired per-trial). "
+                      "llm_prefill bundles embed-merge + LLM prefill + lm_head + "
+                      "1-token sample.",
+        }
+    return out
 
 
 def measure_action_forward(model, processor, image, prompt: str,
@@ -657,9 +730,14 @@ def main():
     vlm_nvtx    = f"vla_{spec.vla_key}__vlm"
     action_nvtx = f"vla_{spec.vla_key}__action"
 
+    vision_module = find_vision_module(model)
+    if vision_module is None:
+        log.warning("Vision tower not located — skipping per-component split "
+                    "(aggregate VLM forward still measured).")
     vlm = measure_vlm_forward(
         model, processor, image, args.prompt,
         n_warmup=args.warmup, n_trials=args.n_trials, nvtx_label=vlm_nvtx,
+        vision_module=vision_module,
     )
     action = measure_action_forward(
         model, processor, image, args.prompt,
@@ -687,6 +765,11 @@ def main():
     log.info("=" * 70)
     log.info("Results for %s @ %s on RTX 5090:", spec.display_name, args.dtype)
     log.info("  VLM forward p50:           %.2f ms", vlm["p50_ms"])
+    if "components" in vlm:
+        c = vlm["components"]
+        log.info("    ├─ vision encoder p50:   %.2f ms  (%.0f%% of VLM forward)",
+                 c["vision_encoder"]["p50_ms"], 100 * c["vision_frac_p50"])
+        log.info("    └─ LLM prefill p50:      %.2f ms", c["llm_prefill"]["p50_ms"])
     log.info("  Action chunk p50:          %.2f ms  (%d FAST+ tokens decoded)",
              action["p50_ms"], action.get("n_generated_tokens", 0))
     log.info("  Decode ms/token (derived): %.2f ms", ms_per_decode_token)
