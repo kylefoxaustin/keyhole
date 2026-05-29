@@ -77,6 +77,15 @@ onnxscript>=0.6.0
 # see REPRODUCE.md.
 huggingface-hub>=0.35.0
 
+# VLA bake-off (bakeoff_vla.py — NORA 3B / Qwen2.5-VL-based VLAs)
+transformers>=4.50.0
+qwen-vl-utils>=0.0.8        # process_vision_info — NORA's image preprocessing
+accelerate>=1.0.0           # from_pretrained device placement
+# NOTE: the 7-DOF FAST+ float decode (physical-intelligence/fast processor) is
+# pinned to transformers~=4.50 and does not instantiate under transformers 5.x.
+# The harness validates the action path at the token level (action-range tokens
+# + EOS) instead; sentencepiece/tiktoken do NOT fix the 5.x skew.
+
 # Dev / Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
