@@ -108,6 +108,11 @@ DEFAULT_PROMPT = "Pick up the red object on the table."
 # check. NORA trains on Open X-Embodiment; bridge_orig is the canonical BridgeV2
 # key used in the model card example. Validation-only — does not affect latency.
 DEFAULT_UNNORM_KEY = "bridge_orig"
+# RTX 5090 dense bf16 matmul peak (TFLOP/s) — matches the sizer's roofline
+# (peak_bf16=209). Used only to report an achieved-util cross-check alongside
+# the hardware-independent physical FLOP; the FLOP numbers themselves carry no
+# util assumption.
+PEAK_BF16_TFLOPS_5090 = 209.0
 
 # ────────────────────────── CSV / spec ──────────────────────────
 
@@ -560,6 +565,53 @@ def find_vision_module(model):
     return None
 
 
+def find_llm_module(model):
+    """Locate the LLM decoder body (text model) — used to capture the true
+    prefill sequence length for the FLOP attribution."""
+    for path in ("model.language_model", "language_model"):
+        obj = model
+        try:
+            for attr in path.split("."):
+                obj = getattr(obj, attr)
+            return obj
+        except AttributeError:
+            continue
+    return None
+
+
+def capture_llm_prefill_seqlen(model, inputs: dict, llm_module) -> int | None:
+    """Ground-truth count of tokens the LLM actually processes at prefill.
+
+    `input_ids.shape[1]` is NOT reliable across families: NORA (Qwen2.5-VL)
+    expands image patches into input_ids placeholders (so it's already counted),
+    but OpenVLA injects 256 vision tokens as *embeddings* — they never appear in
+    input_ids, so input_ids length (~24, text-only) would undercount the LLM
+    prefill ~10x. A forward pre-hook on the LLM body reads the real sequence
+    length of its input (inputs_embeds / input_ids / hidden states) on the
+    prefill pass. Returns None if it can't be captured (caller falls back to
+    input_ids length).
+    """
+    if llm_module is None:
+        return None
+    seen: dict[str, int] = {}
+
+    def _pre(_mod, args, kwargs):
+        for cand in (kwargs.get("inputs_embeds"), kwargs.get("input_ids"),
+                     kwargs.get("hidden_states"),
+                     args[0] if args else None):
+            if torch.is_tensor(cand) and cand.dim() >= 2:
+                seen["len"] = max(seen.get("len", 0), int(cand.shape[1]))
+                break
+
+    h = llm_module.register_forward_pre_hook(_pre, with_kwargs=True)
+    try:
+        with torch.inference_mode():
+            model.generate(**inputs, max_new_tokens=1, do_sample=False)
+    finally:
+        h.remove()
+    return seen.get("len")
+
+
 def measure_vlm_forward(model, inputs: dict, n_warmup: int, n_trials: int,
                         nvtx_label: str, vision_module=None) -> dict[str, Any]:
     """VLM forward = vision encoder + LLM prefill, timed via
@@ -710,6 +762,95 @@ def measure_action_forward(model, inputs: dict, max_action_tokens: int,
         "p50_ms":  float(np.percentile(arr, 50)),
         "p95_ms":  float(np.percentile(arr, 95)),
         "p99_ms":  float(np.percentile(arr, 99)),
+    }
+
+
+def _module_params(model, paths) -> int:
+    """Sum parameters of the first submodule found at any of `paths` (0 if none)."""
+    for path in paths:
+        obj = model
+        try:
+            for attr in path.split("."):
+                obj = getattr(obj, attr)
+            return int(sum(p.numel() for p in obj.parameters()))
+        except AttributeError:
+            continue
+    return 0
+
+
+def count_component_params(model, family: str) -> dict[str, int]:
+    """Real parameter counts per component, read off the loaded model — far more
+    accurate than the CSV's round-number estimates. Used to drive the physical
+    FLOP attribution. Keys: vision, llm_body, lm_head, projector, total."""
+    vision = _module_params(model, ("model.visual", "visual", "vision_backbone"))
+    llm_body = _module_params(model, ("model.language_model", "language_model"))
+    lm_head = _module_params(model, ("lm_head", "language_model.lm_head"))
+    projector = _module_params(model, ("projector", "multi_modal_projector"))
+    total = int(sum(p.numel() for p in model.parameters()))
+    return {"vision": vision, "llm_body": llm_body, "lm_head": lm_head,
+            "projector": projector, "total": total}
+
+
+def infer_vision_patches(model, default: int = 256) -> int:
+    """Number of patches the vision ViT processes — drives the vision FLOP term.
+
+    Tries (image_size // patch_size)² from the vision config; falls back to 256
+    (224×224 input at patch-14, the standard for both NORA's Qwen2.5-VL ViT and
+    OpenVLA's SigLIP/DINOv2). The LLM-side token count is measured directly
+    (input_len), so this assumption only affects the vision term.
+    """
+    cfg = getattr(model, "config", None)
+    for attr in ("vision_config",):
+        vc = getattr(cfg, attr, None)
+        if vc is None:
+            continue
+        img = getattr(vc, "image_size", None)
+        patch = getattr(vc, "patch_size", None)
+        if isinstance(img, (list, tuple)):
+            img = img[0]
+        if img and patch:
+            return int((img // patch) ** 2)
+    return default
+
+
+def analytical_component_flops(pc: dict[str, int], n_vision_patches: int,
+                               input_len: int, n_action_tokens: int) -> dict[str, Any]:
+    """Physical (not effective) per-component FLOP attribution via the standard
+    matmul rule: a module with P params processing T tokens costs ~2·P·T FLOPs
+    (2 = MAC). This is the same convention the sizer's roofline uses, so the
+    numbers compose with their per-hw util constants and kill the
+    effective-FLOP-at-5090-util footgun.
+
+    Split (per the sizer's 2026-05-29 guidance — no double-counting):
+      • vision     = 2·P_vision·n_patches               (ViT over image patches)
+      • llm_prefill= 2·P_llm_body·input_len + 2·P_lm_head + 2·P_projector·n_patches
+      • llm_decode = 2·(P_llm_body + P_lm_head) per generated token
+    Both NORA (FAST+) and OpenVLA (discrete 256-bin) decode *through the LLM +
+    lm_head* — there is no standalone action-head FLOP to add. The attention
+    quadratic term is omitted (<~2% at these sequence lengths); matmul-dominated.
+    All values in GFLOP.
+    """
+    P_v, P_llm, P_head, P_proj = (pc["vision"], pc["llm_body"],
+                                  pc["lm_head"], pc["projector"])
+    g = 1e9
+    vision = 2 * P_v * n_vision_patches / g
+    prefill = (2 * P_llm * input_len + 2 * P_head + 2 * P_proj * n_vision_patches) / g
+    decode_per_tok = 2 * (P_llm + P_head) / g
+    e2e = vision + prefill + decode_per_tok * n_action_tokens
+    return {
+        "method": "physical matmul FLOP, 2·P·T per module (attention-quadratic "
+                  "term omitted, <~2%); params counted off the loaded model. "
+                  "Decode runs through LLM body + lm_head (no standalone action "
+                  "head — applies to both NORA FAST+ and OpenVLA discrete tokens).",
+        "params_millions": {k: round(v / 1e6, 1) for k, v in pc.items()},
+        "n_vision_patches": n_vision_patches,
+        "input_len_tokens": input_len,
+        "n_action_tokens": n_action_tokens,
+        "vision_encoder_gflop": round(vision, 2),
+        "llm_prefill_gflop": round(prefill, 2),
+        "llm_decode_gflop_per_token": round(decode_per_tok, 3),
+        "llm_decode_gflop_total": round(decode_per_tok * n_action_tokens, 2),
+        "e2e_action_gflop": round(e2e, 2),
     }
 
 
@@ -891,6 +1032,44 @@ def main():
     bpt = analytical_bytes_per_decode_token(spec, args.dtype)
     decode_tok_s_bw = (peak_inference_mb * 1e6) / bpt if bpt > 0 else 0  # informational only
 
+    # ── 6b. Physical per-component FLOP attribution (sizer ask) ──────
+    param_counts = count_component_params(model, family)
+    # True LLM prefill length (text + injected vision embeds), not input_ids len.
+    llm_seqlen = capture_llm_prefill_seqlen(model, inputs, find_llm_module(model))
+    input_len_tok = llm_seqlen or int(inputs["input_ids"].shape[1])
+    n_act_tok = action.get("n_generated_tokens", action_max_tokens)
+    log.info("LLM prefill seq len (true, incl. vision embeds): %s "
+             "(input_ids len was %d)", input_len_tok, int(inputs["input_ids"].shape[1]))
+    flops = analytical_component_flops(
+        param_counts, n_vision_patches=infer_vision_patches(model),
+        input_len=input_len_tok, n_action_tokens=n_act_tok)
+
+    # Achieved-util cross-check: physical FLOP ÷ measured latency ÷ peak. Reveals
+    # how compute-saturated each stage actually is (the sizer's per-hw util input,
+    # measured rather than assumed). Decode util being tiny = the BW-wall.
+    peak_gf_s = PEAK_BF16_TFLOPS_5090 * 1e3
+    comp = vlm.get("components", {})
+    vis_ms = comp.get("vision_encoder", {}).get("p50_ms")
+    pre_ms = comp.get("llm_prefill", {}).get("p50_ms")
+    def _util(gflop, ms):
+        return round(gflop / (ms / 1e3) / peak_gf_s, 4) if ms and ms > 0 else None
+    flops["achieved_util_5090"] = {
+        "peak_bf16_tflops": PEAK_BF16_TFLOPS_5090,
+        "vision_encoder": _util(flops["vision_encoder_gflop"], vis_ms),
+        "llm_prefill": _util(flops["llm_prefill_gflop"], pre_ms),
+        "llm_decode_per_token": _util(flops["llm_decode_gflop_per_token"],
+                                      ms_per_decode_token),
+        "note": "physical FLOP / measured p50 latency / dense bf16 peak. Low "
+                "decode util = bandwidth-bound (weights streamed per token), the "
+                "edge BW-wall driver.",
+    }
+    log.info("  Physical FLOP: vision %.0f GF (util %.0f%%) | prefill %.0f GF (util %.0f%%) | "
+             "decode %.1f GF/tok (util %.1f%%) | e2e %.0f GF",
+             flops["vision_encoder_gflop"], 100 * (flops["achieved_util_5090"]["vision_encoder"] or 0),
+             flops["llm_prefill_gflop"], 100 * (flops["achieved_util_5090"]["llm_prefill"] or 0),
+             flops["llm_decode_gflop_per_token"], 100 * (flops["achieved_util_5090"]["llm_decode_per_token"] or 0),
+             flops["e2e_action_gflop"])
+
     # ── 7. Report + write ────────────────────────────────────────────
     log.info("=" * 70)
     log.info("Results for %s @ %s on RTX 5090:", spec.display_name, args.dtype)
@@ -969,6 +1148,7 @@ def main():
                 "bytes_per_decode_token_analytical": round(bpt, 0),
                 "bytes_per_decode_token_unit": "bytes",
             },
+            "flops": flops,
             "csv_reference": {
                 "measured_5090_ms_per_action": spec.measured_5090_ms_per_action,
                 "inference_dram_gb_at_default": getattr(
@@ -990,8 +1170,14 @@ def main():
             },
         },
     }
-    SUMMARY_PATH.write_text(json.dumps(payload, indent=2, default=str))
-    log.info("Wrote %s", SUMMARY_PATH.relative_to(REPO))
+    blob = json.dumps(payload, indent=2, default=str)
+    SUMMARY_PATH.write_text(blob)
+    # Per-model copy so multi-model runs don't clobber each other (the canonical
+    # vla_summary.json always holds the most recent run).
+    per_model = SUMMARY_PATH.parent / f"vla_summary_{spec.vla_key}.json"
+    per_model.write_text(blob)
+    log.info("Wrote %s and %s", SUMMARY_PATH.relative_to(REPO),
+             per_model.relative_to(REPO))
 
     # ── 8. ncu sweep follow-up note ──────────────────────────────────
     log.info("")
