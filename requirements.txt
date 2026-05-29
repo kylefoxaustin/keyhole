@@ -77,7 +77,8 @@ onnxscript>=0.6.0
 # see REPRODUCE.md.
 huggingface-hub>=0.35.0
 
-# VLA bake-off (bakeoff_vla.py — NORA 3B / Qwen2.5-VL-based VLAs)
+# VLA bake-off (bakeoff_vla.py)
+# --- NORA family (Qwen2.5-VL-based: nora_3b, etc.) — keyhole venv, transformers 5.x ---
 transformers>=4.50.0
 qwen-vl-utils>=0.0.8        # process_vision_info — NORA's image preprocessing
 accelerate>=1.0.0           # from_pretrained device placement
@@ -85,6 +86,19 @@ accelerate>=1.0.0           # from_pretrained device placement
 # pinned to transformers~=4.50 and does not instantiate under transformers 5.x.
 # The harness validates the action path at the token level (action-range tokens
 # + EOS) instead; sentencepiece/tiktoken do NOT fix the 5.x skew.
+#
+# --- OpenVLA family (openvla_7b_*) — SEPARATE venv, NOT this one ---
+# OpenVLA's custom Prismatic code is pinned to the transformers 4.40 era and
+# runs TEXT-ONLY (pixel_values silently dropped by its prepare_inputs_for_
+# generation) under transformers 5.x AND 4.57. It needs its own venv:
+#   python3.10 -m venv ~/.virtualenvs/openvla
+#   pip install torch==2.8.0 torchvision==0.23.0 --index-url .../cu128  # Blackwell
+#   pip install transformers==4.40.1 tokenizers==0.19.1 timm==0.9.16 \
+#               accelerate==0.30.1 'numpy<2.0' 'huggingface-hub<1.0' \
+#               Pillow opencv-python sentencepiece
+# Run: ~/.virtualenvs/openvla/bin/python scripts/bakeoff_vla.py --model-key openvla_7b_single
+# (the harness auto-routes by family via resolve_family()). Acceptance gate:
+# vision_backbone must fire AND the action must change with the input image.
 
 # Dev / Testing
 pytest>=8.0.0
