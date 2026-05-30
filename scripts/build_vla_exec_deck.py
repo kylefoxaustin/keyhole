@@ -66,8 +66,8 @@ def slide_tldr(prs):
         "π0.5's 50-action chunk → 367 Hz on 5090, 148.9 Hz on NPU High. But the "
         "flow-matching head needs floating point → won't run on INT8-only tiers.",
         "OFT parallel-chunk (BitVLA, ternary): one parallel forward emits the chunk — "
-        "no AR loop, no bandwidth-wall. The only model that runs on INT8-only Mid; "
-        "6 GB footprint (ternary memory win).",
+        "no AR loop, no bandwidth-wall. The only model that runs on INT8-only Mid — "
+        "and it runs FAST (53 Hz Mid, 118 Hz High); 6 GB footprint (ternary memory win).",
         ("Bottom line: the same edge silicon that strands a 3B single-loop VLA at "
          "1.8 Hz runs a 3B dual-loop VLA at 100+ Hz. Architecture is the lever.", EMPH, True),
     ], font_size=15)
@@ -131,11 +131,11 @@ def slide_edge_projection(prs):
                        "keyhole-sizer engine, 5090-anchored · green measured / blue calibrated / orange cross-class")
     headers = ["Model", "5090", "NPU Mid (INT8-only)", "NPU High", "Edge story"]
     rows = [
-        ["NORA-3B", "12.6 Hz", "~1.8 Hz (blue)", "~1.8 Hz (blue)", "BW-walled; High ≈ Mid"],
-        ["OpenVLA-7B", "7.9 Hz", "~0.95 Hz (blue)", "~0.95 Hz (blue)", "BW-walled (7B, worse)"],
+        ["NORA-3B", "12.6 Hz", "1.76 Hz (blue)", "1.84 Hz (blue)", "BW-walled; High ≈ Mid"],
+        ["OpenVLA-7B", "7.9 Hz", "0.94 Hz (blue)", "0.97 Hz (blue)", "BW-walled (7B, worse)"],
         ["NORA-1.5", "27 Hz", "✗ won't run", "21.0 Hz (blue)", "FP-gated off INT8 Mid"],
         ["π0.5", "367 Hz", "✗ won't run", "148.9 Hz (blue)", "FP-gated; amortizes huge"],
-        ["BitVLA", "65 Hz", "runs (int8, blue)", "runs (int8, blue)", "only int-only model"],
+        ["BitVLA", "65 Hz", "53.5 Hz (blue)", "118 Hz (blue)", "int-only — runs FAST on Mid"],
     ]
     add_styled_table(s, Inches(0.5), Inches(1.7), Inches(12.3), Inches(3.4),
                      headers, rows,
@@ -202,7 +202,8 @@ def slide_oft(prs):
         "Prefill-shaped (compute-bound, util ~9–14%) → projects like a prefill, not a "
         "BW-walled decode. ~8× OpenVLA's per-action rate at similar VLM scale.",
         ("Ternary (1-bit) backbone → 6 GB footprint vs OpenVLA-7B's 14.4 GB, and NO FP "
-         "gate: BitVLA is the one model that runs on INT8-only NPU Mid.", EMPH, True),
+         "gate: BitVLA is the one model that runs on INT8-only NPU Mid — at 53.5 Hz "
+         "(118 Hz on High), not a crawl.", EMPH, True),
     ], font_size=15)
     add_text_box(s, CONTENT_LEFT, 5.6, CONTENT_W, 1.3,
                  "⚠ Honesty caveat: in the public bf16 checkpoint the ternary weights run "
@@ -266,8 +267,8 @@ def slide_takeaways(prs):
     add_title_subtitle(s, "Takeaways for NXP edge silicon",
                        "Matching VLA topology to NPU tier")
     add_bullet_box(s, CONTENT_LEFT, 1.6, CONTENT_W, 4.4, [
-        "INT8-only tier (NPU Mid): only OFT/ternary VLAs (BitVLA) run usefully. "
-        "Single-loop is BW-walled to ~1–2 Hz; dual-loop is FP-gated out entirely.",
+        "INT8-only tier (NPU Mid): only OFT/ternary VLAs run usefully — BitVLA at "
+        "53.5 Hz. Single-loop is BW-walled to ~1–2 Hz; dual-loop is FP-gated out entirely.",
         "FP-capable tier (NPU High): unlocks dual-loop — π0.5 at ~149 Hz control "
         "(3 cameras), NORA-1.5 at ~21 Hz. This is the high-rate robotics story.",
         ("Differentiator: NPU High can run a 3-camera π0.5 control loop AND keep video "
