@@ -78,6 +78,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import sys
 import time
 from dataclasses import dataclass, field, asdict
@@ -523,6 +524,8 @@ def resolve_family(vla_key: str) -> str:
         return "dual_loop"
     if vla_key == "pi_0p5":
         return "pi05"
+    if vla_key == "bitvla":
+        return "bitvla"   # OpenVLA-OFT ternary, parallel-chunk (separate venv)
     if vla_key.startswith("openvla"):
         return "openvla"
     if vla_key.startswith(("nora", "pi_")):
@@ -1888,6 +1891,324 @@ def run_pi05_dual_loop(args, spec, hf_repo: str, image) -> None:
              per_model.relative_to(REPO))
 
 
+# ════════════════════════ BitVLA family (OpenVLA-OFT, ternary) ════════════════
+# BitVLA is a 1-bit (ternary {-1,0,1}) VLA on the OpenVLA-OFT architecture: a
+# SigLIP vision tower + a ternary-BitLinear LLM backbone + a parallel L1-regression
+# action head (+ proprio projector). Unlike single-loop AR decode (OpenVLA 7B) or
+# the flow-matching dual-loop (NORA-1.5/π0.5), OFT does ONE VLM forward over
+# [image tokens ×N cams + prompt + ACTION_DIM·NUM_ACTIONS_CHUNK action placeholders
+# + proprio] and the action head reads the action-position hidden states in
+# PARALLEL → a whole H-action chunk from a single forward (no AR loop, no denoise).
+#
+# Runs ONLY in ~/.virtualenvs/bitvla (Python 3.10, torch cu128 for Blackwell, the
+# BitVLA transformers fork v4.51 + openvla-oft `prismatic`, both editable-installed
+# from a clone at $KEYHOLE_BITVLA_OFT, default /tmp/BitVLA/openvla-oft). prismatic's
+# __init__ eagerly pulls the RLDS *training* data pipeline (dlimp/TF) which inference
+# never calls; we inject permissive stub modules for those heavy/git-only deps so the
+# light constants/action-head/proprio modules import. The "bf16" checkpoint runs the
+# ternary BitLinear as bf16 matmuls — ternary buys MEMORY (weights pack to ~1.58-bit),
+# not compute speed, unless bitblas/LUT kernels are used (not in this HF path).
+
+BITVLA_OFT_DIR = Path(os.environ.get("KEYHOLE_BITVLA_OFT", "/tmp/BitVLA/openvla-oft"))
+BITVLA_DEFAULT_REPO = "hongyuw/ft-bitvla-bitsiglipL-224px-libero_goal-bf16"
+
+
+def _inject_bitvla_stubs():
+    """Permissive stub modules for the training-only deps prismatic imports at
+    module load (dlimp / TensorFlow) but never calls during inference. Spec'd +
+    dunder-safe so transformers' availability probe and inspect/import machinery
+    still behave (TF reads as 'absent' via missing distribution metadata)."""
+    import types, importlib.machinery
+
+    class _Stub(types.ModuleType):
+        def __getattr__(self, n):
+            if n.startswith("__") and n.endswith("__"):
+                raise AttributeError(n)
+            return _Stub(n)
+        def __call__(self, *a, **k):
+            return _Stub("call")
+
+    for name in ("tensorflow", "tensorflow.io", "tensorflow.data", "dlimp",
+                 "tensorflow_datasets", "tensorflow_graphics",
+                 "tensorflow_graphics.geometry",
+                 "tensorflow_graphics.geometry.transformation"):
+        if name in sys.modules:
+            continue
+        s = _Stub(name)
+        s.__spec__ = importlib.machinery.ModuleSpec(name, None)
+        s.__path__ = []
+        sys.modules[name] = s
+
+
+def run_bitvla(args, spec, hf_repo: str, image) -> None:
+    """End-to-end BitVLA (OpenVLA-OFT, ternary) measurement: one parallel VLM
+    forward → H-action chunk via the L1-regression head. Emits a summary that
+    mirrors the other VLA schemas (vlm_forward + components, derived, flops)."""
+    from types import SimpleNamespace
+    _inject_bitvla_stubs()
+    oft = str(BITVLA_OFT_DIR)
+    for p in (oft, oft + "/bitvla"):   # second path fixes a bare `from configuration_bit_vla import`
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    if not BITVLA_OFT_DIR.exists():
+        log.error("BitVLA openvla-oft not found at %s. Clone ustcwhy/BitVLA "
+                  "(recursive) and set $KEYHOLE_BITVLA_OFT, or build the bitvla "
+                  "venv per the commit notes.", BITVLA_OFT_DIR)
+        sys.exit(2)
+
+    from experiments.robot.bitnet_utils import get_bitnet_vla, get_bitnet_vla_action
+    from experiments.robot.openvla_utils import (
+        get_processor, get_action_head, get_proprio_projector)
+    from prismatic.vla.constants import NUM_ACTIONS_CHUNK, ACTION_DIM, PROPRIO_DIM
+    from bitvla.constants import (
+        BITNET_DEFAULT_IMAGE_TOKEN_IDX, BITNET_PROPRIO_PAD_IDX, BITNET_IGNORE_INDEX,
+        BITNET_ACTION_TOKEN_BEGIN_IDX, BITNET_STOP_INDEX)
+    from huggingface_hub import snapshot_download
+    from src.profiling.nvtx_helpers import nvtx_range
+
+    # prismatic's import (overwatch) raises the root log level to WARNING, which
+    # would swallow our INFO result block — restore it.
+    logging.getLogger().setLevel(logging.INFO)
+    log.setLevel(logging.INFO)
+
+    log.info("Harness family: bitvla (OpenVLA-OFT ternary; parallel %d-action "
+             "chunk, dim %d)", NUM_ACTIONS_CHUNK, ACTION_DIM)
+
+    # ── Load (mirrors run_libero_eval_bitnet.py exactly) ──────────────
+    torch.cuda.reset_peak_memory_stats()
+    pre_load_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+    local = snapshot_download(hf_repo)
+    cfg = SimpleNamespace(
+        pretrained_checkpoint=local, model_family="bitnet",
+        num_images_in_input=2, use_proprio=True,
+        use_l1_regression=True, use_diffusion=False, num_diffusion_steps=0,
+        # center_crop is a fixed train-time aug — latency-neutral; off here to avoid
+        # the TF-stubbed crop path (does not change the GPU forward being timed).
+        center_crop=False, num_open_loop_steps=NUM_ACTIONS_CHUNK,
+        load_in_8bit=False, load_in_4bit=False, lora_rank=0,
+    )
+    vla = get_bitnet_vla(cfg)
+    vla.set_constant(image_token_idx=BITNET_DEFAULT_IMAGE_TOKEN_IDX,
+                     proprio_pad_idx=BITNET_PROPRIO_PAD_IDX, ignore_idx=BITNET_IGNORE_INDEX,
+                     action_token_begin_idx=BITNET_ACTION_TOKEN_BEGIN_IDX,
+                     stop_index=BITNET_STOP_INDEX)
+    llm_dim = vla.config.text_config.hidden_size
+    cfg.unnorm_key = next(iter(vla.norm_stats))   # e.g. "libero_goal_no_noops"
+    processor = get_processor(cfg)
+    action_head = get_action_head(cfg, llm_dim)
+    proprio_projector = get_proprio_projector(cfg, llm_dim, proprio_dim=PROPRIO_DIM)
+    post_load_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+    weight_vram_mb = post_load_mb - pre_load_mb
+    log.info("Loaded BitVLA: llm_dim=%d, unnorm_key=%s, %d cameras, chunk=%d",
+             llm_dim, cfg.unnorm_key, cfg.num_images_in_input, NUM_ACTIONS_CHUNK)
+    log.info("Weight VRAM: %.0f MB (%.2f GB, bf16-stored ternary)",
+             weight_vram_mb, weight_vram_mb / 1024)
+
+    # ── Build a synthetic observation (timing-invariant) ─────────────
+    import cv2
+    img224 = image if image.shape[:2] == (224, 224) else cv2.resize(image, (224, 224))
+    obs = {"full_image": img224, "wrist_image": img224,
+           "state": np.zeros(PROPRIO_DIM, dtype=np.float32)}
+    task_label = args.prompt
+
+    # ── Validate the action path ─────────────────────────────────────
+    try:
+        out = get_bitnet_vla_action(cfg, vla, processor, obs, task_label,
+                                    action_head=action_head, proprio_projector=proprio_projector)
+        a = np.asarray(out)
+        ok = (a.shape == (NUM_ACTIONS_CHUNK, ACTION_DIM)) and bool(np.isfinite(a).all())
+        action_validation = {
+            "token_level_ok": bool(ok), "fast_decode_ok": bool(ok),
+            "action_chunk_shape": list(a.shape), "action_chunk_length": NUM_ACTIONS_CHUNK,
+            "action_dim": ACTION_DIM,
+            "action_chunk_sample": [round(float(x), 5) for x in np.ravel(a)[:7]],
+        }
+        log.info("Action validation %s: chunk %s", "PASSED" if ok else "FAILED", list(a.shape))
+    except Exception as e:  # noqa: BLE001
+        log.warning("Action validation could not run (%s: %s).", type(e).__name__, e)
+        action_validation = {"token_level_ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    # ── Per-call timing: wrap predict_action (GPU forward) + hook vision tower ──
+    vision_tower = getattr(vla, "vision_tower", None) or getattr(getattr(vla, "model", None), "vision_tower", None)
+    vis_store: list = []
+    handles = []
+    if vision_tower is not None:
+        vpre, vpost = _evt_pair_hooks(vis_store)
+        handles += [vision_tower.register_forward_pre_hook(vpre),
+                    vision_tower.register_forward_hook(vpost)]
+    fwd_store: list = []
+    _orig_predict = vla.predict_action
+    def _timed_predict(*a, **k):
+        s = torch.cuda.Event(enable_timing=True); e = torch.cuda.Event(enable_timing=True)
+        s.record(); out = _orig_predict(*a, **k); e.record()
+        fwd_store.append((s, e))
+        return out
+    vla.predict_action = _timed_predict
+    nvtx_label = f"vla_{spec.vla_key}__forward"
+
+    log.info("Warmup: %d forwards", args.warmup)
+    for _ in range(args.warmup):
+        vis_store.clear(); fwd_store.clear()
+        get_bitnet_vla_action(cfg, vla, processor, obs, task_label,
+                              action_head=action_head, proprio_projector=proprio_projector)
+    torch.cuda.synchronize()
+
+    log.info("Timed: %d forwards (parallel-chunk; vision split)", args.n_trials)
+    fwd_ms_all, vision_ms_all = [], []
+    for _ in range(args.n_trials):
+        vis_store.clear(); fwd_store.clear()
+        with nvtx_range(nvtx_label):
+            get_bitnet_vla_action(cfg, vla, processor, obs, task_label,
+                                  action_head=action_head, proprio_projector=proprio_projector)
+        fd = _pair_durations(fwd_store)
+        vd = _pair_durations(vis_store)
+        if fd:
+            fwd_ms_all.append(fd[0])
+        vision_ms_all.append(float(sum(vd)))
+
+    for h in handles:
+        h.remove()
+    vla.predict_action = _orig_predict
+
+    def _p50(xs):
+        return float(np.percentile(np.array(xs), 50)) if xs else None
+    fwd_p50 = _p50(fwd_ms_all)
+    vision_p50 = _p50(vision_ms_all)
+    llm_p50 = (fwd_p50 - (vision_p50 or 0)) if fwd_p50 else None
+    peak_inference_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+
+    # OFT predicts the whole chunk in ONE forward → amortized per-action = forward/H.
+    amortized_ms_per_action = fwd_p50 / NUM_ACTIONS_CHUNK if fwd_p50 else None
+    control_hz = 1000.0 / amortized_ms_per_action if amortized_ms_per_action else 0
+
+    log.info("=" * 70)
+    log.info("BitVLA (OFT ternary) results @ bf16 on RTX 5090:")
+    log.info("  Action forward p50 (1 parallel pass): %.2f ms  → %d-action chunk",
+             fwd_p50 or 0, NUM_ACTIONS_CHUNK)
+    log.info("    ├─ vision encoder p50:  %.2f ms (×%d cams)", vision_p50 or 0, cfg.num_images_in_input)
+    log.info("    └─ LLM (ternary) p50:   %.2f ms", llm_p50 or 0)
+    log.info("  Amortized ms/action:      %.2f ms  (%.1f Hz)", amortized_ms_per_action or 0, control_hz)
+    log.info("  Peak VRAM (incl weights): %.0f MB (%.2f GB)", peak_inference_mb, peak_inference_mb / 1024)
+
+    # ── Physical FLOP (single parallel forward) ──────────────────────
+    P_vision = int(sum(p.numel() for p in vision_tower.parameters())) if vision_tower else 0
+    lm = getattr(vla, "language_model", None) or getattr(getattr(vla, "model", None), "language_model", None)
+    P_llm = int(sum(p.numel() for p in lm.parameters())) if lm is not None else 0
+    P_total = int(sum(p.numel() for p in vla.parameters()))
+    patches_per_cam = infer_vision_patches(vla, default=256)
+    # OFT prefix seqlen: image tokens ×cams + prompt(+proprio) + action placeholders.
+    seqlen = patches_per_cam * cfg.num_images_in_input + 32 + ACTION_DIM * NUM_ACTIONS_CHUNK
+    g = 1e9
+    vision_gflop = 2 * P_vision * patches_per_cam * cfg.num_images_in_input / g
+    llm_gflop = 2 * P_llm * seqlen / g
+    forward_gflop = vision_gflop + llm_gflop
+    peak_gf_s = PEAK_BF16_TFLOPS_5090 * 1e3
+    def _util(gf, ms):
+        return round(gf / (ms / 1e3) / peak_gf_s, 4) if ms and ms > 0 else None
+    flops = {
+        "method": "physical matmul FLOP 2·P·T for ONE parallel OFT forward "
+                  "(vision ×cams + ternary-LLM over the full prefix incl. "
+                  f"{ACTION_DIM}·{NUM_ACTIONS_CHUNK} action-placeholder tokens). "
+                  "Ternary weights do NOT reduce matmul FLOP; the bf16 BitLinear "
+                  "runs dense bf16 matmuls — ternary buys memory/BW, not compute "
+                  "speed, absent bitblas/LUT kernels (not used in this HF path).",
+        "params_millions": {"vision": round(P_vision / 1e6, 1), "llm_ternary": round(P_llm / 1e6, 1),
+                            "total": round(P_total / 1e6, 1)},
+        "n_vision_patches": patches_per_cam, "n_cameras": cfg.num_images_in_input,
+        "prefix_seqlen_tokens": seqlen, "action_chunk_length": NUM_ACTIONS_CHUNK,
+        "vision_encoder_gflop": round(vision_gflop, 2),
+        "llm_forward_gflop": round(llm_gflop, 2),
+        "action_forward_gflop": round(forward_gflop, 2),
+        "per_action_gflop": round(forward_gflop / NUM_ACTIONS_CHUNK, 2),
+        "achieved_util_5090": {
+            "peak_bf16_tflops": PEAK_BF16_TFLOPS_5090,
+            "vision_encoder": _util(vision_gflop, vision_p50),
+            "llm_forward": _util(llm_gflop, llm_p50),
+            "note": "ternary backbone, bf16 matmuls. The OFT parallel forward over "
+                    f"{NUM_ACTIONS_CHUNK} action positions is compute-shaped like a "
+                    "prefill (no per-token weight re-streaming), so it AVOIDS the "
+                    "single-loop AR-decode bandwidth-wall — the OFT speed story.",
+        },
+    }
+    log.info("  Physical FLOP: vision %.0f GF | LLM %.0f GF | forward %.0f GF (%.1f GF/action)",
+             vision_gflop, llm_gflop, forward_gflop, flops["per_action_gflop"])
+    log.info("=" * 70)
+
+    calibration_note = (
+        "BitVLA = 1-bit (ternary) VLA on OpenVLA-OFT. ONE parallel VLM forward "
+        f"({round(fwd_p50 or 0,1)} ms) emits the whole {NUM_ACTIONS_CHUNK}-action "
+        f"chunk via an L1-regression head (no AR decode, no denoise loop) → "
+        f"{round(amortized_ms_per_action or 0,1)} ms/action = {round(control_hz,1)} Hz. "
+        f"Peak VRAM {round(peak_inference_mb/1024,2)} GB — far below OpenVLA-7B's "
+        "14.4 GB: the ternary backbone's memory win (weights pack to ~1.58-bit; "
+        "here stored bf16, ~6 GB). KEY CAVEAT: this HF path runs ternary BitLinear "
+        "as DENSE bf16 matmuls — ternary reduces memory/bandwidth, NOT compute "
+        "FLOP or latency, unless bitblas/LUT ternary kernels are used (they are "
+        "not here). So the latency is an OpenVLA-OFT-class bf16 number; the 'orange "
+        "optimistic INT/ternary floor' is a MEMORY/BW floor, not a compute-speed "
+        "floor, in this measurement. Stock HF forward, no CUDA graphs / compile. "
+        "center_crop disabled (latency-neutral train-time aug). proprio=zeros "
+        "(content-invariant for timing)."
+    )
+
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "host": "RTX 5090",
+        "torch": torch.__version__,
+        "transformers": __import__("transformers").__version__,
+        "dtype": "bf16 (ternary BitLinear stored/computed bf16)",
+        "attn_backend": "sdpa (OFT default)",
+        "family": "bitvla",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "csv_path": str(CSV_PATH.relative_to(REPO)),
+        "model_key": spec.vla_key,
+        "hf_repo": hf_repo,
+        "model_spec": asdict(spec),
+        "result": {
+            "action_validation": action_validation,
+            "vlm_forward": {
+                "p50_ms": round(fwd_p50 or 0, 3), "n_trials": args.n_trials,
+                "topology": "single parallel OFT forward (no AR/denoise loop)",
+                "components": {
+                    "vision_encoder": {"p50_ms": round(vision_p50 or 0, 3),
+                                       "n_cameras": cfg.num_images_in_input},
+                    "llm_forward": {"p50_ms": round(llm_p50 or 0, 3)},
+                    "vision_frac_p50": round((vision_p50 or 0) / fwd_p50, 3) if fwd_p50 else None,
+                    "method": "CUDA-event wrap of predict_action + vision-tower hook.",
+                },
+            },
+            "derived": {
+                "action_chunk_length": NUM_ACTIONS_CHUNK,
+                "e2e_ms_per_action_p50": round(amortized_ms_per_action or 0, 3),
+                "action_rate_hz_p50": round(control_hz, 2),
+                "action_forward_p50_ms": round(fwd_p50 or 0, 3),
+            },
+            "dram": {
+                "weight_vram_mb": round(weight_vram_mb, 1),
+                "weight_vram_gb": round(weight_vram_mb / 1024, 2),
+                "peak_inference_mb": round(peak_inference_mb, 1),
+                "peak_inference_gb": round(peak_inference_mb / 1024, 2),
+            },
+            "flops": flops,
+            "csv_reference": {
+                "measured_5090_ms_per_action": spec.measured_5090_ms_per_action,
+            },
+            "calibration": {
+                "reference_ms_per_action": spec.measured_5090_ms_per_action,
+                "vlm_forward_p50_ms": round(fwd_p50 or 0, 2),
+                "note": calibration_note,
+            },
+            "nvtx_labels": {"forward": nvtx_label},
+        },
+    }
+    blob = json.dumps(payload, indent=2, default=str)
+    SUMMARY_PATH.write_text(blob)
+    per_model = SUMMARY_PATH.parent / f"vla_summary_{spec.vla_key}.json"
+    per_model.write_text(blob)
+    log.info("Wrote %s and %s", SUMMARY_PATH.relative_to(REPO),
+             per_model.relative_to(REPO))
+
+
 # ────────────────────────── Main ──────────────────────────
 
 def parse_args():
@@ -1975,6 +2296,9 @@ def main():
         return
     if family == "pi05":
         run_pi05_dual_loop(args, spec, hf_repo, image)
+        return
+    if family == "bitvla":
+        run_bitvla(args, spec, hf_repo, image)
         return
 
     log.info("Harness family: %s", family)

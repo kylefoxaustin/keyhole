@@ -249,6 +249,8 @@ class TestVLADualLoop:
         assert bv.resolve_family("nora_1p5") == "dual_loop"
         # π0.5 is dual-loop via the lerobot PI05Policy stack.
         assert bv.resolve_family("pi_0p5") == "pi05"
+        # BitVLA is OpenVLA-OFT (ternary, parallel-chunk) — its own family/venv.
+        assert bv.resolve_family("bitvla") == "bitvla"
         assert bv.resolve_family("nora_3b") == "nora"
         assert bv.resolve_family("openvla_7b_single") == "openvla"
 
