@@ -512,15 +512,17 @@ def validate_openvla_action_path(model, processor, image, instruction: str,
 def resolve_family(vla_key: str) -> str:
     """Map a catalog key to its harness family (load/preprocess/validate path).
 
-    - "dual_loop": flow-matching VLAs with a separate action expert (NORA-1.5).
-      π0.5 is *architecturally* dual-loop too, but its VLM is PaliGemma — it
-      needs a PaliGemma-side loader, not the vendored Qwen2.5-VL expert path —
-      so it stays routed away from this family until that loader exists.
+    - "dual_loop": flow-matching VLAs with a separate action expert, NORA-1.5
+      vendored-Qwen2.5-VL path (~/.virtualenvs/nora15).
+    - "pi05": π0.5 dual-loop via the lerobot PI05Policy stack (PaliGemma + Gemma
+      expert), run in ~/.virtualenvs/pi05.
     - "openvla": Prismatic Llama-2 + discrete 256-bin tokens (separate venv).
     - "nora": single-loop Qwen2.5-VL + FAST+ autoregressive decode.
     """
     if vla_key == "nora_1p5":
         return "dual_loop"
+    if vla_key == "pi_0p5":
+        return "pi05"
     if vla_key.startswith("openvla"):
         return "openvla"
     if vla_key.startswith(("nora", "pi_")):
@@ -1482,6 +1484,410 @@ def run_dual_loop(args, spec, hf_repo: str, image) -> None:
              "(fast loop) are set for profile_all_ncu.sh.", vlm_nvtx, denoise_nvtx)
 
 
+# ════════════════════════ π0.5 family (lerobot flow-matching) ════════════════
+# π0.5 is dual-loop like NORA-1.5 but a different stack: a PaliGemma (gemma_2b)
+# VLM + a Gemma-300M-class flow-matching action expert, served through the
+# lerobot framework (lerobot/pi05_base). Same two-loop shape — VLM prefix forward
+# ONCE → KV cache, then N=10 denoise steps through the expert — but the published
+# inference is PI05Policy.predict_action_chunk over a robot-observation batch
+# (3 cameras + state + task), NOT a simple (image, instruction). We drive that
+# real lerobot path and extract the loop split by hooking the shared
+# `paligemma_with_expert` module: call 0 is the VLM prefill, calls 1..N are the
+# denoise steps. The SigLIP vision tower runs inside embed_prefix (before the
+# prefill call), so it is hooked separately. One VLM forward amortizes over the
+# whole 50-action chunk — the largest amortization in the bake-off.
+#
+# Runs ONLY in ~/.virtualenvs/pi05 (Python 3.12, lerobot>=0.5.2, transformers
+# 5.5.x). The PyPI lerobot 0.4.4 hard-gates pi0/pi05 on an unshipped patched
+# transformers; lerobot 0.5.2 (main) removed that gate but requires Python 3.12.
+
+PI05_REPO = "lerobot/pi05_base"
+
+
+def _evt_pair_hooks(store: list):
+    """forward_pre/forward hooks that push (start_event, end_event) per call into
+    `store`, for per-call CUDA-event timing of a shared module."""
+    def _pre(_m, _a):
+        e = torch.cuda.Event(enable_timing=True); e.record(); store.append([e, None])
+    def _post(_m, _a, _o):
+        e = torch.cuda.Event(enable_timing=True); e.record()
+        if store:
+            store[-1][1] = e
+    return _pre, _post
+
+
+def _pair_durations(store: list) -> list[float]:
+    """Resolve a list of [start,end] event pairs to elapsed ms (after sync)."""
+    out = []
+    for s, e in store:
+        if s is not None and e is not None:
+            e.synchronize()
+            out.append(float(s.elapsed_time(e)))
+    return out
+
+
+def run_pi05_dual_loop(args, spec, hf_repo: str, image) -> None:
+    """End-to-end π0.5 dual-loop measurement via the lerobot PI05Policy, emitting
+    the same dual-loop summary schema as run_dual_loop (vlm_forward / action_forward
+    / dual_loop / derived / flops)."""
+    import cv2  # noqa: F401  (image is already an ndarray; kept for parity)
+    from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+    from lerobot.policies.factory import make_pre_post_processors
+
+    num_steps = args.num_steps
+    log.info("Harness family: pi05 (lerobot flow-matching dual-loop, %d steps)", num_steps)
+
+    # ── Load + DRAM baseline ─────────────────────────────────────────
+    torch.cuda.reset_peak_memory_stats()
+    pre_load_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+    log.info("Loading π0.5 via lerobot PI05Policy: %s", hf_repo)
+    policy = PI05Policy.from_pretrained(hf_repo)
+    # pi05's flow-matching expert hardcodes float32 internals (sinusoidal time
+    # embedding → time_mlp), the openpi convention, so weight-casting to bf16
+    # breaks it. The faithful bf16 path for lerobot is AMP autocast: float32
+    # master weights, bf16 matmuls (== lerobot's use_amp inference). We run all
+    # forwards under autocast(bf16); reported dtype reflects that.
+    policy.to("cuda").eval()
+    model_dtype = next(policy.model.parameters()).dtype
+    use_autocast = args.dtype in ("bf16", "fp16")
+    autocast_dtype = DTYPE_TORCH[args.dtype] if use_autocast else model_dtype
+    log.info("Master weight dtype: %s | compute: %s",
+             model_dtype, f"autocast {args.dtype}" if use_autocast else str(model_dtype))
+    cfg = policy.config
+    post_load_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+    weight_vram_mb = post_load_mb - pre_load_mb
+    log.info("chunk_size=%d, num_inference_steps=%d, cameras=%d, max_action_dim=%d",
+             cfg.chunk_size, cfg.num_inference_steps, len(list(cfg.image_features)),
+             cfg.max_action_dim)
+    log.info("Weight VRAM: %.0f MB (%.2f GB at %s)",
+             weight_vram_mb, weight_vram_mb / 1024, args.dtype)
+
+    # ── Build a model-ready observation batch via lerobot's own preprocessor ──
+    # (normalization + state-token + tokenization + batch dim) — faithful, no drift.
+    import PIL.Image  # noqa: F401
+    img224 = image
+    if img224.shape[:2] != (224, 224):
+        import cv2 as _cv2
+        img224 = _cv2.resize(image, (224, 224))
+    img_t = torch.from_numpy(img224).permute(2, 0, 1).float() / 255.0
+    raw = {f"observation.images.{k.split('.')[-1]}": img_t.clone()
+           for k in cfg.image_features}
+    raw["observation.state"] = torch.zeros(cfg.max_state_dim)
+    raw["task"] = args.prompt
+    pre, _post_proc = make_pre_post_processors(policy.config, hf_repo)
+    batch = pre(raw)
+    batch = {k: (v.to("cuda") if torch.is_tensor(v) else v) for k, v in batch.items()}
+
+    n_cameras = len(list(cfg.image_features))
+    L = cfg.chunk_size
+    # Fixed noise (timing-invariant) at the master-weight dtype so it composes
+    # with autocast. predict_action_chunk forwards **kwargs → sample_actions(noise=...).
+    noise = torch.randn((1, L, cfg.max_action_dim), device="cuda", dtype=model_dtype)
+    import contextlib
+    def _ac():
+        return (torch.autocast("cuda", dtype=autocast_dtype) if use_autocast
+                else contextlib.nullcontext())
+    action_dim = cfg.output_features[__import__("lerobot").constants.ACTION].shape[0] \
+        if hasattr(__import__("lerobot"), "constants") else cfg.max_action_dim
+
+    # ── Validate the action path ─────────────────────────────────────
+    try:
+        with torch.no_grad(), _ac():
+            act = policy.predict_action_chunk(batch, noise=noise)
+        a = act.detach().float().cpu().numpy()
+        ok = (a.shape[0] == 1 and a.shape[1] == L) and bool(np.isfinite(a).all())
+        action_validation = {
+            "token_level_ok": bool(ok), "fast_decode_ok": bool(ok),
+            "action_chunk_shape": list(a.shape), "action_chunk_length": L,
+            "num_denoise_steps": num_steps,
+            "action_chunk_sample": [round(float(x), 5) for x in np.ravel(a)[:7]],
+        }
+        log.info("Action validation %s: chunk %s sample %s",
+                 "PASSED" if ok else "FAILED", list(a.shape),
+                 action_validation["action_chunk_sample"])
+    except Exception as e:  # noqa: BLE001
+        log.warning("Action validation could not run (%s: %s).", type(e).__name__, e)
+        action_validation = {"token_level_ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    # ── Per-loop latency via per-call hooks on the shared modules ────
+    from src.profiling.nvtx_helpers import nvtx_range
+    pwe = policy.model.paligemma_with_expert
+    vision_tower = pwe.paligemma.model.vision_tower
+    vis_store: list = []
+    pwe_store: list = []
+    # Vision tower is invoked via __call__, so forward hooks fire for it.
+    vpre, vpost = _evt_pair_hooks(vis_store)
+    handles = [
+        vision_tower.register_forward_pre_hook(vpre),
+        vision_tower.register_forward_hook(vpost),
+    ]
+    # lerobot calls `paligemma_with_expert.forward(...)` DIRECTLY (not __call__),
+    # so forward hooks never fire — wrap the bound method to record CUDA events
+    # per call instead. Call 0 = VLM prefill; calls 1..N = denoise steps.
+    _orig_pwe_forward = pwe.forward
+    def _timed_pwe_forward(*a, **k):
+        s = torch.cuda.Event(enable_timing=True); e = torch.cuda.Event(enable_timing=True)
+        s.record()
+        out = _orig_pwe_forward(*a, **k)
+        e.record()
+        pwe_store.append((s, e))
+        return out
+    pwe.forward = _timed_pwe_forward
+    nvtx_label = f"vla_{spec.vla_key}__chunk"
+
+    log.info("Warmup: %d chunks", args.warmup)
+    for _ in range(args.warmup):
+        vis_store.clear(); pwe_store.clear()
+        with torch.no_grad(), _ac():
+            _ = policy.predict_action_chunk(batch, noise=noise)
+    torch.cuda.synchronize()
+
+    log.info("Timed: %d chunks (per-call vision / prefill / denoise split)", args.n_trials)
+    chunk_ms_all, vision_ms_all, prefill_ms_all = [], [], []
+    step_ms_all, loop_ms_all = [], []
+    for _ in range(args.n_trials):
+        vis_store.clear(); pwe_store.clear()
+        cs = torch.cuda.Event(enable_timing=True); ce = torch.cuda.Event(enable_timing=True)
+        torch.cuda.synchronize()
+        with nvtx_range(nvtx_label), torch.no_grad(), _ac():
+            cs.record()
+            _ = policy.predict_action_chunk(batch, noise=noise)
+            ce.record()
+        chunk_ms_all.append(_cuda_event_ms(cs, ce))
+        vdur = _pair_durations(vis_store)        # n_cameras vision-tower calls
+        pdur = _pair_durations(pwe_store)        # [prefill, denoise×N]
+        vision_ms_all.append(float(sum(vdur)))
+        if pdur:
+            prefill_ms_all.append(pdur[0])
+            steps = pdur[1:]
+            if steps:
+                step_ms_all.extend(steps)
+                loop_ms_all.append(float(sum(steps)))
+
+    for h in handles:
+        h.remove()
+    pwe.forward = _orig_pwe_forward  # restore
+
+    def _p50(xs):
+        return float(np.percentile(np.array(xs), 50)) if xs else None
+    chunk_p50 = _p50(chunk_ms_all)
+    vision_p50 = _p50(vision_ms_all)
+    prefill_p50 = _p50(prefill_ms_all)
+    step_p50 = _p50(step_ms_all)
+    loop_p50 = _p50(loop_ms_all)
+    vlm_backbone_p50 = (vision_p50 or 0) + (prefill_p50 or 0)
+
+    # ── Dual-loop derived rates (amortized over the 50-action chunk) ──
+    amortized_ms_per_action = chunk_p50 / L if chunk_p50 else None
+    control_hz_amortized = 1000.0 / amortized_ms_per_action if amortized_ms_per_action else 0
+    fast_loop_hz = (L * 1000.0 / loop_p50) if loop_p50 else 0
+    peak_inference_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+
+    log.info("=" * 70)
+    log.info("π0.5 dual-loop results @ %s on RTX 5090:", args.dtype)
+    log.info("  [slow] VLM backbone p50:    %.2f ms (vision %.2f ×%d cams + prefill %.2f)",
+             vlm_backbone_p50, vision_p50 or 0, n_cameras, prefill_p50 or 0)
+    log.info("  [fast] denoise step p50:    %.3f ms  (×%d)", step_p50 or 0, num_steps)
+    log.info("  [fast] denoise loop p50:    %.2f ms  (→ %d-action chunk)", loop_p50 or 0, L)
+    log.info("  Chunk latency (full):       %.2f ms  → %d actions", chunk_p50 or 0, L)
+    log.info("  Amortized ms/action:        %.2f ms  (%.1f Hz control)",
+             amortized_ms_per_action or 0, control_hz_amortized)
+    log.info("  Fast-loop-only rate:        %.1f Hz", fast_loop_hz)
+    log.info("  Peak VRAM (incl. weights):  %.0f MB (%.2f GB)",
+             peak_inference_mb, peak_inference_mb / 1024)
+
+    # ── Param counts + FLOP attribution (dual-loop) ──────────────────
+    def _pc(mod):
+        return int(sum(p.numel() for p in mod.parameters()))
+    P_vision = _pc(vision_tower)
+    P_body = _pc(pwe.paligemma.model.language_model)
+    P_expert = _pc(pwe.gemma_expert.model)   # transformer only; expert lm_head unused for action
+    P_proj = _pc(pwe.paligemma.model.multi_modal_projector)
+    for nm in ("action_in_proj", "action_out_proj", "action_time_mlp_in",
+               "action_time_mlp_out", "state_proj"):
+        if hasattr(policy.model, nm):
+            P_proj += _pc(getattr(policy.model, nm))
+    P_total = _pc(policy.model)
+    pc = {"vlm_vision": P_vision, "vlm_body": P_body, "vlm_head": 0,
+          "action_expert": P_expert + P_proj, "total": P_total}
+
+    # Prefix seqlen: 3 cameras × image-tokens + language tokens (real, from mask).
+    patches_per_cam = infer_vision_patches(pwe.paligemma)
+    lang_mask = batch.get("observation.language.attention_mask")
+    n_lang = int(lang_mask.sum().item()) if lang_mask is not None else cfg.tokenizer_max_length
+    vlm_seqlen = patches_per_cam * n_cameras + n_lang
+    flops = dual_loop_flops(pc, n_vision_patches=patches_per_cam * n_cameras,
+                            vlm_seqlen=vlm_seqlen, action_chunk_length=L,
+                            num_steps=num_steps)
+    peak_gf_s = PEAK_BF16_TFLOPS_5090 * 1e3
+
+    def _util(gflop, ms):
+        return round(gflop / (ms / 1e3) / peak_gf_s, 4) if ms and ms > 0 else None
+    # AMP keeps float32 master weights; weight-streaming bytes reflect the actual
+    # stored dtype, not the autocast compute dtype.
+    bytes_per_param = {torch.float32: 4.0, torch.bfloat16: 2.0,
+                       torch.float16: 2.0}.get(model_dtype, 4.0)
+    expert_weight_bytes = pc["action_expert"] * bytes_per_param
+    denoise_eff_bw_gbs = (round(expert_weight_bytes / (step_p50 / 1e3) / 1e9, 1)
+                          if step_p50 else None)
+    PEAK_BW_GBS_5090 = 1792.0
+    denoise_bw_util = (round(denoise_eff_bw_gbs / PEAK_BW_GBS_5090, 4)
+                       if denoise_eff_bw_gbs else None)
+    denoise_compute_util = _util(flops["denoise_step_gflop"], step_p50)
+
+    # Data-driven bottleneck classification (don't hardcode — π0.5's 430M float32
+    # expert over 50 tokens streams real weight bytes, unlike NORA-1.5's tiny one).
+    def _classify(cu, bw):
+        cu, bw = cu or 0, bw or 0
+        if cu >= 0.40:
+            return "compute-bound"
+        if bw >= 0.40:
+            return "bandwidth-bound"
+        if cu < 0.05 and bw < 0.05:
+            return "launch/overhead-bound"
+        return "mixed (partial-BW + launch overhead)"
+    denoise_bottleneck = _classify(denoise_compute_util, denoise_bw_util)
+    flops["achieved_util_5090"] = {
+        "peak_bf16_tflops": PEAK_BF16_TFLOPS_5090, "peak_bw_gbs": PEAK_BW_GBS_5090,
+        "vision_encoder": _util(flops["vision_encoder_gflop"], vision_p50),
+        "vlm_prefill": _util(flops["vlm_prefill_gflop"], prefill_p50),
+        "denoise_step": denoise_compute_util,
+        "denoise_step_effective_bw_gbs": denoise_eff_bw_gbs,
+        "denoise_step_bw_util": denoise_bw_util,
+        "denoise_bottleneck": denoise_bottleneck,
+        "weight_bytes_per_param": bytes_per_param,
+        "note": "physical FLOP / measured p50 / dense bf16 peak. π0.5's denoise "
+                "step is %s (compute %.1f%% / BW %.1f%% of peak) — NOT the AR-decode "
+                "BW-wall, but more BW-leaning than NORA-1.5's tiny launch-bound "
+                "expert because this expert is 430M and processes the full 50-action "
+                "chunk per step. CAVEAT: bf16-AMP keeps float32 (4-byte) master "
+                "weights, so the effective-BW / BW-util are an UPPER bound; true "
+                "bf16-weight deployment would roughly halve them (→ more launch-"
+                "leaning). The 50-action chunk gives the largest VLM amortization in "
+                "the bake-off (one VLM forward per 50 actions → %.0f Hz amortized)."
+                % (denoise_bottleneck, 100 * (denoise_compute_util or 0),
+                   100 * (denoise_bw_util or 0), control_hz_amortized),
+    }
+    log.info("  Physical FLOP: vision %.0f GF | prefill %.0f GF | denoise %.2f GF/step "
+             "| chunk %.0f GF (%.1f GF/action)",
+             flops["vision_encoder_gflop"], flops["vlm_prefill_gflop"],
+             flops["denoise_step_gflop"], flops["action_chunk_gflop"],
+             flops["per_action_gflop"])
+    log.info("=" * 70)
+
+    expert_m = round(pc["action_expert"] / 1e6)
+    calibration_note = (
+        "π0.5 dual-loop (lerobot pi05_base): PaliGemma (gemma_2b) VLM backbone "
+        f"runs ONCE ({round(vlm_backbone_p50,1)} ms = SigLIP vision ×{n_cameras} "
+        f"cameras + gemma_2b prefill over {vlm_seqlen} tokens) and a Gemma-class "
+        f"flow-matching expert (measured {expert_m}M params incl. projections — "
+        f"the CSV's 300M under-counts) runs {num_steps} denoise steps "
+        f"({round(loop_p50 or 0,1)} ms) to emit a {L}-action chunk. Amortized "
+        f"control = {round(control_hz_amortized,1)} Hz; fast loop alone "
+        f"{round(fast_loop_hz,1)} Hz. The {L}-action chunk is the largest "
+        "amortization in the bake-off (one VLM forward per 50 actions). Denoise "
+        f"step is {denoise_bottleneck} (compute {round(100*(denoise_compute_util or 0),1)}%"
+        f" / BW {round(100*(denoise_bw_util or 0),1)}%, eff {denoise_eff_bw_gbs} GB/s) — "
+        "not the AR-decode BW-wall, but more BW-leaning than NORA-1.5. NOTE: bf16-AMP "
+        "(float32 master weights, autocast matmuls) — the lerobot mixed-precision "
+        "path, since pi05's expert hardcodes float32 time-embedding internals so "
+        "true bf16-weight load is not faithful; BW util is thus an upper bound. "
+        "Stock lerobot forward (eager attention), no CUDA graphs / compile — an "
+        "un-optimized floor."
+    )
+
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "host": "RTX 5090",
+        "torch": torch.__version__,
+        "transformers": __import__("transformers").__version__,
+        "lerobot": __import__("lerobot").__version__,
+        "dtype": (f"{args.dtype}-amp (float32 master weights, autocast matmuls)"
+                  if use_autocast else str(model_dtype)),
+        "attn_backend": "eager (lerobot sample_actions default)",
+        "family": "pi05",
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "csv_path": str(CSV_PATH.relative_to(REPO)),
+        "model_key": spec.vla_key,
+        "hf_repo": hf_repo,
+        "model_spec": asdict(spec),
+        "result": {
+            "action_validation": action_validation,
+            "vlm_forward": {
+                "p50_ms": round(vlm_backbone_p50, 3),
+                "n_trials": args.n_trials,
+                "components": {
+                    "vision_encoder": {"p50_ms": round(vision_p50 or 0, 3),
+                                       "n_cameras": n_cameras},
+                    "llm_prefill": {"p50_ms": round(prefill_p50 or 0, 3)},
+                    "vision_frac_p50": round((vision_p50 or 0) / vlm_backbone_p50, 3)
+                    if vlm_backbone_p50 else None,
+                    "method": "per-call CUDA-event hooks: SigLIP vision tower "
+                              "(fires once per camera) + paligemma_with_expert "
+                              "call 0 (gemma_2b prefill). Vision runs in "
+                              "embed_prefix, before the prefill call.",
+                },
+            },
+            "action_forward": {
+                "n_trials": args.n_trials,
+                "num_denoise_steps": num_steps,
+                "action_chunk_length": L,
+                "step_p50_ms": round(step_p50 or 0, 4),
+                "loop_p50_ms": round(loop_p50 or 0, 3),
+                "chunk_total_p50_ms": round(chunk_p50 or 0, 3),
+            },
+            "dual_loop": {
+                "topology": "paligemma_vlm_once + gemma_expert_flow_matching_loop",
+                "stack": "lerobot PI05Policy.predict_action_chunk",
+                "num_denoise_steps": num_steps,
+                "action_chunk_length": L,
+                "action_dim": int(action_dim),
+                "n_cameras": n_cameras,
+                "vlm_backbone_p50_ms": round(vlm_backbone_p50, 3),
+                "denoise_step_p50_ms": round(step_p50 or 0, 4),
+                "denoise_loop_p50_ms": round(loop_p50 or 0, 3),
+                "chunk_latency_ms": round(chunk_p50 or 0, 3),
+                "amortized_ms_per_action": round(amortized_ms_per_action or 0, 3),
+                "control_hz_amortized": round(control_hz_amortized, 2),
+                "fast_loop_only_hz": round(fast_loop_hz, 2),
+                "note": "chunk_latency = full predict_action_chunk wall time "
+                        "(VLM once + N denoise + embed/proj overhead); amortized "
+                        "= chunk / H actions; fast_loop_only = H / denoise-loop.",
+            },
+            "derived": {
+                "e2e_ms_per_action_p50": round(amortized_ms_per_action or 0, 3),
+                "action_rate_hz_p50": round(control_hz_amortized, 2),
+                "chunk_latency_ms": round(chunk_p50 or 0, 3),
+                "fast_loop_only_hz": round(fast_loop_hz, 2),
+            },
+            "dram": {
+                "weight_vram_mb": round(weight_vram_mb, 1),
+                "weight_vram_gb": round(weight_vram_mb / 1024, 2),
+                "peak_inference_mb": round(peak_inference_mb, 1),
+                "peak_inference_gb": round(peak_inference_mb / 1024, 2),
+            },
+            "flops": flops,
+            "csv_reference": {
+                "measured_5090_ms_per_action": spec.measured_5090_ms_per_action,
+                "inference_dram_gb_at_default": getattr(
+                    spec, f"inference_dram_gb_{spec.dtype_path_default}", None),
+            },
+            "calibration": {
+                "reference_ms_per_action": spec.measured_5090_ms_per_action,
+                "vlm_forward_p50_ms": round(vlm_backbone_p50, 2),
+                "note": calibration_note,
+            },
+            "nvtx_labels": {"chunk": nvtx_label},
+        },
+    }
+    blob = json.dumps(payload, indent=2, default=str)
+    SUMMARY_PATH.write_text(blob)
+    per_model = SUMMARY_PATH.parent / f"vla_summary_{spec.vla_key}.json"
+    per_model.write_text(blob)
+    log.info("Wrote %s and %s", SUMMARY_PATH.relative_to(REPO),
+             per_model.relative_to(REPO))
+
+
 # ────────────────────────── Main ──────────────────────────
 
 def parse_args():
@@ -1566,6 +1972,9 @@ def main():
     # and emits the schema-compatible summary itself, then returns.
     if family == "dual_loop":
         run_dual_loop(args, spec, hf_repo, image)
+        return
+    if family == "pi05":
+        run_pi05_dual_loop(args, spec, hf_repo, image)
         return
 
     log.info("Harness family: %s", family)

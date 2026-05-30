@@ -245,13 +245,26 @@ def _import_bakeoff_vla():
 class TestVLADualLoop:
     def test_family_routing(self):
         bv = _import_bakeoff_vla()
-        # NORA-1.5 is the native flow-matching dual-loop path.
+        # NORA-1.5 is the native flow-matching dual-loop path (vendored Qwen expert).
         assert bv.resolve_family("nora_1p5") == "dual_loop"
-        # π0.5 is architecturally dual-loop but stays on the NORA path until a
-        # PaliGemma-side loader exists (documented in resolve_family).
-        assert bv.resolve_family("pi_0p5") == "nora"
+        # π0.5 is dual-loop via the lerobot PI05Policy stack.
+        assert bv.resolve_family("pi_0p5") == "pi05"
         assert bv.resolve_family("nora_3b") == "nora"
         assert bv.resolve_family("openvla_7b_single") == "openvla"
+
+    def test_pi05_flops_amortization_over_chunk(self):
+        bv = _import_bakeoff_vla()
+        # π0.5 shape: gemma_2b body, no lm_head in prefill, 50-action chunk.
+        pc = {"vlm_vision": 412_000_000, "vlm_body": 2_508_000_000,
+              "vlm_head": 0, "action_expert": 430_000_000, "total": 4_143_000_000}
+        f = bv.dual_loop_flops(pc, n_vision_patches=256 * 3, vlm_seqlen=915,
+                               action_chunk_length=50, num_steps=10)
+        # vlm_head=0 → prefill is body-only (no logits projection in pi05 prefix forward).
+        assert abs(f["vlm_prefill_gflop"] - 2 * 2_508_000_000 * 915 / 1e9) < 1.0
+        # The 50-action chunk amortizes the (vision+prefill) backbone heavily:
+        # per-action FLOP must be far below the one-shot backbone cost.
+        backbone = f["vision_encoder_gflop"] + f["vlm_prefill_gflop"]
+        assert f["per_action_gflop"] < backbone / 10
 
     def test_dual_loop_flops_amortization_identity(self):
         bv = _import_bakeoff_vla()
