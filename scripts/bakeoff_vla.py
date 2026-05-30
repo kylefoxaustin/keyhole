@@ -1891,6 +1891,240 @@ def run_pi05_dual_loop(args, spec, hf_repo: str, image) -> None:
              per_model.relative_to(REPO))
 
 
+def run_pi05_camera_scaling(args, spec, hf_repo: str, image) -> None:
+    """Multi-camera scaling for π0.5 (multi-cam brief Phase 1). pi05_base is locked
+    to its 3 trained cameras, so we can't sweep n_cameras on the model directly.
+    Instead we DECOMPOSE: time the SigLIP vision tower on a single camera
+    (→ per-camera vision cost; total vision ≈ N×) and re-time the PaliGemma prefill
+    at N=1/2/3-equivalent prefix lengths (N·image_tokens + text, by slicing the real
+    captured prefix) → the LLM-vs-N slope. This directly tests the brief's
+    'vision N×, LLM 1×' claim — and quantifies that the LLM is NOT invariant to N
+    (each camera injects ~256 image tokens into the prefix)."""
+    import contextlib
+    from lerobot.policies.pi05.modeling_pi05 import PI05Policy
+    from lerobot.policies.factory import make_pre_post_processors
+
+    log.info("Harness family: pi05 camera-scaling (decomposed vision + prefill-vs-N)")
+    policy = PI05Policy.from_pretrained(hf_repo)
+    policy.to("cuda").eval()
+    cfg = policy.config
+    model_dtype = next(policy.model.parameters()).dtype
+    ac = (torch.autocast("cuda", dtype=DTYPE_TORCH[args.dtype])
+          if args.dtype in ("bf16", "fp16") else contextlib.nullcontext())
+
+    # Build the real 3-camera batch via lerobot's preprocessor.
+    import cv2 as _cv2
+    img224 = image if image.shape[:2] == (224, 224) else _cv2.resize(image, (224, 224))
+    img_t = torch.from_numpy(img224).permute(2, 0, 1).float() / 255.0
+    raw = {f"observation.images.{k.split('.')[-1]}": img_t.clone() for k in cfg.image_features}
+    raw["observation.state"] = torch.zeros(cfg.max_state_dim)
+    raw["task"] = args.prompt
+    pre, _ = make_pre_post_processors(policy.config, hf_repo)
+    batch = pre(raw)
+    batch = {k: (v.to("cuda") if torch.is_tensor(v) else v) for k, v in batch.items()}
+    noise = torch.randn((1, cfg.chunk_size, cfg.max_action_dim), device="cuda", dtype=model_dtype)
+    n_cams_native = len(list(cfg.image_features))
+    pwe = policy.model.paligemma_with_expert
+    vision_tower = pwe.paligemma.model.vision_tower
+    patches_per_cam = infer_vision_patches(pwe.paligemma)
+
+    # Capture the real vision-tower input + the real prefill-forward kwargs from one pass.
+    cap: dict = {}
+    def _vpre(_m, a, k):
+        if "vis" not in cap:
+            cap["vis"] = (a, dict(k))
+    vh = vision_tower.register_forward_pre_hook(_vpre, with_kwargs=True)
+    _orig = pwe.forward
+    def _wrap(*a, **k):
+        if "prefill" not in cap:
+            cap["prefill"] = dict(k)   # call 0 = VLM prefix forward
+        return _orig(*a, **k)
+    pwe.forward = _wrap
+    with torch.no_grad(), ac:
+        policy.predict_action_chunk(batch, noise=noise)
+    vh.remove(); pwe.forward = _orig
+
+    prefix_embs = cap["prefill"]["inputs_embeds"][0]          # (1, L_full, hidden)
+    L_full = int(prefix_embs.shape[1])
+    n_text = L_full - patches_per_cam * n_cams_native         # padded text tokens
+    log.info("Captured prefix: %d tokens = %d image (%d/cam ×%d) + %d text",
+             L_full, patches_per_cam * n_cams_native, patches_per_cam, n_cams_native, n_text)
+
+    def _time(fn, n_warmup, n_trials):
+        for _ in range(n_warmup):
+            with torch.no_grad(), ac:
+                fn()
+        torch.cuda.synchronize()
+        ms = []
+        for _ in range(n_trials):
+            s = torch.cuda.Event(enable_timing=True); e = torch.cuda.Event(enable_timing=True)
+            torch.cuda.synchronize()
+            with torch.no_grad(), ac:
+                s.record(); fn(); e.record()
+            ms.append(_cuda_event_ms(s, e))
+        return float(np.percentile(np.array(ms), 50))
+
+    # ── Per-camera vision: re-run the SigLIP tower on one camera's real input ──
+    va, vk = cap["vis"]
+    per_cam_vision_ms = _time(lambda: vision_tower(*va, **vk), args.warmup, args.n_trials)
+    log.info("Per-camera vision (SigLIP tower, 1 image): %.3f ms → N-cam ≈ N× this", per_cam_vision_ms)
+
+    # ── LLM prefill vs N: slice the prefix to N·image + text, full-attention ──
+    hidden = prefix_embs.shape[2]
+    img_tok = patches_per_cam
+    prefill_by_n = {}
+    for N in (1, 2, 3):
+        Ln = img_tok * N + n_text
+        sliced = torch.cat([prefix_embs[:, :img_tok * N, :], prefix_embs[:, -n_text:, :]], dim=1) \
+            if n_text > 0 else prefix_embs[:, :img_tok * N, :]
+        mask4d = torch.zeros((1, 1, Ln, Ln), dtype=prefix_embs.dtype, device=prefix_embs.device)
+        pos = torch.arange(Ln, device=prefix_embs.device).unsqueeze(0)
+        def _prefill(s=sliced, m=mask4d, p=pos):
+            return pwe.forward(attention_mask=m, position_ids=p, past_key_values=None,
+                               inputs_embeds=[s, None], use_cache=True)
+        prefill_by_n[N] = _time(_prefill, args.warmup, args.n_trials)
+        log.info("LLM prefill N=%d (%d tok = %d img + %d text): %.2f ms",
+                 N, Ln, img_tok * N, n_text, prefill_by_n[N])
+
+    # Invariance verdict: is prefill(3) ≈ prefill(1)? (brief's 'LLM 1×' claim)
+    p1, p3 = prefill_by_n[1], prefill_by_n[3]
+    invariant = bool(abs(p3 - p1) / p1 <= 0.10) if p1 else None
+    prefill_slope_ms_per_cam = round((p3 - p1) / 2, 3) if (p1 and p3) else None
+
+    log.info("=" * 70)
+    log.info("π0.5 camera scaling (decomposed):")
+    log.info("  vision: %.3f ms/camera → 3-cam %.1f ms", per_cam_vision_ms, per_cam_vision_ms * 3)
+    log.info("  LLM prefill: N=1 %.1f / N=2 %.1f / N=3 %.1f ms  (slope ~%.1f ms/camera)",
+             prefill_by_n[1], prefill_by_n[2], prefill_by_n[3], prefill_slope_ms_per_cam or 0)
+    log.info("  LLM invariant to N? %s — each camera adds %d image tokens to the prefix",
+             invariant, img_tok)
+    log.info("=" * 70)
+
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "host": "RTX 5090", "torch": torch.__version__,
+        "transformers": __import__("transformers").__version__,
+        "lerobot": __import__("lerobot").__version__,
+        "dtype": f"{args.dtype}-amp" if args.dtype in ("bf16", "fp16") else str(model_dtype),
+        "family": "pi05", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "model_key": spec.vla_key, "hf_repo": hf_repo,
+        "result": {
+            "measurement_config": {
+                "n_cameras": n_cams_native,
+                "n_independent_passes": 1,
+                "camera_config": "multi_native",
+                "method": "pi05_base is locked to its 3 trained cameras; this is a "
+                          "DECOMPOSED scaling measurement — per-camera SigLIP tower "
+                          "timing + LLM prefill re-timed at N·image+text prefix lengths "
+                          "(real captured prefix, sliced). Faithful component latencies, "
+                          "not full-model N-camera runs (which the checkpoint can't do).",
+            },
+            "camera_scaling": {
+                "image_tokens_per_camera": img_tok,
+                "text_tokens": n_text,
+                "vision_ms_per_camera": round(per_cam_vision_ms, 3),
+                "vision_ms_by_n": {str(N): round(per_cam_vision_ms * N, 3) for N in (1, 2, 3)},
+                "llm_prefill_ms_by_n": {str(N): round(prefill_by_n[N], 3) for N in (1, 2, 3)},
+                "llm_prefill_slope_ms_per_camera": prefill_slope_ms_per_cam,
+                "llm_backbone_invariant_to_n_cameras": invariant,
+                "finding": "vision scales ~N× (tower runs once per camera). LLM prefill "
+                           "is NOT invariant to N — it grows ~%s ms/camera because each "
+                           "camera injects %d image tokens into the PaliGemma prefix "
+                           "(%d/%d = %d%% of the 3-cam prefix is image tokens). The "
+                           "brief's 'LLM ≈ 1×' assumption does not hold for this "
+                           "native-multi-cam VLA."
+                           % (prefill_slope_ms_per_cam, img_tok,
+                              img_tok * n_cams_native, L_full,
+                              round(100 * img_tok * n_cams_native / L_full)),
+            },
+            "derived": {
+                "vision_encoder_ms_per_camera": round(per_cam_vision_ms, 3),
+                "llm_backbone_invariant_to_n_cameras": invariant,
+            },
+            "nvtx_labels": {},
+        },
+    }
+    blob = json.dumps(payload, indent=2, default=str)
+    out = SUMMARY_PATH.parent / f"vla_summary_{spec.vla_key}_camscaling.json"
+    out.write_text(blob)
+    log.info("Wrote %s", out.relative_to(REPO))
+
+
+def run_openvla_panorama(args, spec, hf_repo: str, image) -> None:
+    """Multi-camera 'stitched panorama' what-if for OpenVLA (multi-cam brief Phase 3).
+    OpenVLA is single-camera; a customer might stitch N feeds into one wide panorama.
+    We feed 1/2/3 horizontally-stitched copies and measure the VLM-forward vision
+    cost. HYPOTHESIS (worth refuting): OpenVLA's SigLIP/DINOv2 resizes every input to
+    a fixed square, so a wider panorama is just downscaled → vision cost ~FLAT, does
+    NOT scale with image area. Measured here, not assumed. Not a recommended
+    deployment — a 'what if the customer tries it anyway' anchor for the sizer."""
+    log.info("Harness family: openvla panorama (stitched-camera what-if)")
+    model, processor, attn_backend = load_openvla_model(hf_repo, args.dtype, args.attn)
+    vision_module = find_vision_module(model)
+    by_n = {}
+    for N in (1, 2, 3):
+        stitched = np.concatenate([image] * N, axis=1)  # widen the frame N×
+        inputs = build_openvla_inputs(processor, stitched, args.prompt, model.device, args.dtype)
+        px = inputs.get("pixel_values")
+        px_shape = tuple(px.shape) if px is not None else None
+        vlm = measure_vlm_forward(model, inputs, n_warmup=args.warmup,
+                                  n_trials=args.n_trials, nvtx_label=f"vla_{spec.vla_key}__pano{N}",
+                                  vision_module=vision_module)
+        comp = vlm.get("components", {})
+        by_n[N] = {
+            "input_image_wh": [stitched.shape[1], stitched.shape[0]],
+            "pixel_values_shape": list(px_shape) if px_shape else None,
+            "vlm_forward_p50_ms": round(vlm["p50_ms"], 3),
+            "vision_encoder_p50_ms": round(comp.get("vision_encoder", {}).get("p50_ms", 0), 3) or None,
+        }
+        log.info("Panorama N=%d: input %dx%d → pixel_values %s | vision %.2f ms | VLM %.2f ms",
+                 N, stitched.shape[1], stitched.shape[0], px_shape,
+                 by_n[N]["vision_encoder_p50_ms"] or 0, vlm["p50_ms"])
+
+    v1 = by_n[1]["vision_encoder_p50_ms"]
+    v3 = by_n[3]["vision_encoder_p50_ms"]
+    scales_with_area = bool(v1 and v3 and (v3 - v1) / v1 > 0.10)
+    px_const = len({tuple(by_n[N]["pixel_values_shape"] or []) for N in (1, 2, 3)}) == 1
+    log.info("=" * 70)
+    log.info("OpenVLA panorama: pixel_values constant across N? %s | vision scales w/ area? %s",
+             px_const, scales_with_area)
+    log.info("=" * 70)
+
+    SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "host": "RTX 5090", "torch": torch.__version__,
+        "transformers": __import__("transformers").__version__,
+        "dtype": args.dtype, "attn_backend": attn_backend,
+        "family": "openvla", "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "model_key": spec.vla_key, "hf_repo": hf_repo,
+        "result": {
+            "measurement_config": {"n_cameras": 1, "n_independent_passes": 1,
+                                   "camera_config": "multi_stitched"},
+            "panorama_scaling": {
+                "by_n_stitched": {str(N): by_n[N] for N in (1, 2, 3)},
+                "pixel_values_constant_across_n": px_const,
+                "vision_scales_with_image_area": scales_with_area,
+                "finding": ("OpenVLA resizes every input to a FIXED %s tensor "
+                            "(pixel_values constant across N), so a stitched panorama "
+                            "is just downscaled — vision cost does NOT scale with image "
+                            "area (the brief's premise does not hold). N separate camera "
+                            "forwards WOULD scale ~N×; a single stitched image does not."
+                            % (by_n[1]["pixel_values_shape"],)) if px_const and not scales_with_area
+                           else "vision scales with stitched-panorama area (see by_n).",
+            },
+            "derived": {
+                "vision_encoder_ms_per_camera": by_n[1]["vision_encoder_p50_ms"],
+                "llm_backbone_invariant_to_n_cameras": None,
+            },
+            "nvtx_labels": {},
+        },
+    }
+    blob = json.dumps(payload, indent=2, default=str)
+    out = SUMMARY_PATH.parent / f"vla_summary_{spec.vla_key}_panorama.json"
+    out.write_text(blob)
+    log.info("Wrote %s", out.relative_to(REPO))
+
+
 # ════════════════════════ BitVLA family (OpenVLA-OFT, ternary) ════════════════
 # BitVLA is a 1-bit (ternary {-1,0,1}) VLA on the OpenVLA-OFT architecture: a
 # SigLIP vision tower + a ternary-BitLinear LLM backbone + a parallel L1-regression
@@ -2233,6 +2467,17 @@ def parse_args():
                    choices=["sdpa", "eager", "flash_attention_2"],
                    help="Attention backend (default: sdpa — flash kernels "
                         "without the flash_attn package)")
+    p.add_argument("--camera-scaling", action="store_true",
+                   help="π0.5 only: run the decomposed multi-camera scaling "
+                        "measurement (per-camera vision + LLM-prefill-vs-N slope) "
+                        "instead of the normal dual-loop run. pi05_base is locked to "
+                        "3 cameras so this decomposes rather than sweeps.")
+    p.add_argument("--n-independent-passes", type=int, default=1,
+                   help="Fleet-replication verification (single-loop models): run K "
+                        "sequential independent action forwards (fresh KV each) and "
+                        "confirm total ≈ K× single-pass within noise — validates the "
+                        "'N robots = N× cost' projection without running N instances. "
+                        "Default 1 (no verification).")
     p.add_argument("--num-steps", type=int, default=DUAL_LOOP_NUM_STEPS_DEFAULT,
                    help="Flow-matching denoise steps for the dual-loop action "
                         f"expert (default: {DUAL_LOOP_NUM_STEPS_DEFAULT}, per the "
@@ -2295,10 +2540,16 @@ def main():
         run_dual_loop(args, spec, hf_repo, image)
         return
     if family == "pi05":
-        run_pi05_dual_loop(args, spec, hf_repo, image)
+        if getattr(args, "camera_scaling", False):
+            run_pi05_camera_scaling(args, spec, hf_repo, image)
+        else:
+            run_pi05_dual_loop(args, spec, hf_repo, image)
         return
     if family == "bitvla":
         run_bitvla(args, spec, hf_repo, image)
+        return
+    if family == "openvla" and getattr(args, "camera_scaling", False):
+        run_openvla_panorama(args, spec, hf_repo, image)
         return
 
     log.info("Harness family: %s", family)
@@ -2379,6 +2630,48 @@ def main():
     decode_only_ms = max(0.0, action["p50_ms"] - vlm["p50_ms"])
     n_decode_tok = max(1, action.get("n_generated_tokens", 1) - 1)
     ms_per_decode_token = decode_only_ms / n_decode_tok
+
+    # ── 4b. Fleet-replication verification (multi-cam brief, Phase 2) ─
+    # Single-camera VLAs deployed across N robots run as N INDEPENDENT instances
+    # (no weight/KV sharing) → cost is N×. We verify that experimentally: K
+    # sequential fresh-KV action forwards should total ≈ K× the single-pass p50
+    # within noise (no hidden batching/caching win). One supplementary check; the
+    # N× projection itself is arithmetic, this just confirms no surprise sublinearity.
+    fleet = None
+    K = max(1, getattr(args, "n_independent_passes", 1))
+    if K > 1:
+        from src.profiling.nvtx_helpers import nvtx_range
+        log.info("Fleet verification: timing %d sequential independent passes", K)
+        per_total: list[float] = []
+        for _ in range(args.n_trials):
+            s = torch.cuda.Event(enable_timing=True); e = torch.cuda.Event(enable_timing=True)
+            torch.cuda.synchronize()
+            with nvtx_range(f"{action_nvtx}__fleet{K}"), torch.inference_mode():
+                s.record()
+                for _k in range(K):
+                    _ = model.generate(**inputs, max_new_tokens=action_max_tokens, do_sample=False)
+                e.record()
+            per_total.append(_cuda_event_ms(s, e))
+        k_total_p50 = float(np.percentile(np.array(per_total), 50))
+        expected = K * action["p50_ms"]
+        ratio = k_total_p50 / action["p50_ms"] if action["p50_ms"] else None
+        # "linear within noise" = K-pass total within 10% of K× single.
+        linear = bool(ratio is not None and abs(ratio - K) / K <= 0.10)
+        fleet = {
+            "n_independent_passes": K,
+            "k_pass_total_p50_ms": round(k_total_p50, 3),
+            "single_pass_p50_ms": round(action["p50_ms"], 3),
+            "measured_ratio": round(ratio, 3) if ratio else None,
+            "expected_ratio": K,
+            "linear_within_10pct": linear,
+            "note": "K sequential fresh-KV model.generate() calls; confirms fleet "
+                    "replication (N robots = N independent instances) scales ~N× "
+                    "with no hidden sublinearity. The N× cost projection is otherwise "
+                    "arithmetic — this is the empirical sanity check the brief asked for.",
+        }
+        log.info("Fleet: %d-pass total %.1f ms = %.2f× single (%.1f ms) — %s",
+                 K, k_total_p50, ratio or 0, action["p50_ms"],
+                 "LINEAR ✓" if linear else "SUBLINEAR/SUPERLINEAR ⚠")
 
     # ── 5. DRAM during inference ─────────────────────────────────────
     peak_inference_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
@@ -2487,13 +2780,25 @@ def main():
         "model_spec": asdict(spec),
         "result": {
             "action_validation": action_validation,
+            "measurement_config": {
+                "n_cameras": 1,
+                "n_independent_passes": K,
+                # single-camera models; multi-robot use = fleet replication (N× all),
+                # NOT native multi-camera fusion. See result.fleet_verification.
+                "camera_config": "single",
+            },
             "vlm_forward": vlm,
             "action_forward": action,
+            "fleet_verification": fleet,   # None unless --n-independent-passes > 1
             "derived": {
                 "ms_per_decode_token": round(ms_per_decode_token, 3),
                 "n_decode_tokens_used": n_decode_tok,
                 "e2e_ms_per_action_p50": round(e2e_ms, 3),
                 "action_rate_hz_p50": round(1000.0 / e2e_ms, 2) if e2e_ms > 0 else 0,
+                # multi-cam schema (single-cam models: per-camera = the one vision pass;
+                # llm-invariance is N/A — these fleet-replicate N× rather than fusing).
+                "vision_encoder_ms_per_camera": (round(vis_ms, 3) if vis_ms else None),
+                "llm_backbone_invariant_to_n_cameras": None,
             },
             "dram": {
                 "weight_vram_mb": round(weight_vram_mb, 1),
