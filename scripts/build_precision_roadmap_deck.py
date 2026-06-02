@@ -26,6 +26,8 @@ SLIDES = [
      "Edge AI Use Cases on NPU Silicon", "4 · Precision migration timeline · Jun 2026"),
     ("data/output/precision_composition.png",
      "Edge AI Use Cases on NPU Silicon", "5 · Today's measured INT/FP composition · Jun 2026"),
+    ("data/output/precision_5090_ladder.png",
+     "Edge AI Use Cases on NPU Silicon", "6 · Decode is bandwidth-bound — measured ladder + MoE decoupling · Jun 2026"),
 ]
 
 
