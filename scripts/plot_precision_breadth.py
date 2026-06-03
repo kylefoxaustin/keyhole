@@ -45,9 +45,11 @@ FAM = {
 
 # label | display | format-family | size-class (circle = size-controlled ~7-8B, diamond = larger)
 RUNS_SPEC = [
-    # Tier-1 size-controlled anchor: Qwen3-8B at three precisions.
+    # Tier-1 size-controlled anchor: Qwen3-8B at FOUR precisions on IDENTICAL weights —
+    # the clean same-base quad (INT4 and NVFP4 below differ only in format, not model).
     ("bf16",               "Qwen3-8B BF16",        "bf16", "ctrl"),
     ("fp8",                "Qwen3-8B FP8",         "fp8",  "ctrl"),
+    ("qwen3_8b_awq_int4",  "Qwen3-8B INT4 (AWQ)",  "int4", "ctrl"),
     ("nvfp4",              "Qwen3-8B NVFP4",       "fp4",  "ctrl"),
     # Breadth FP8/BF16 reproducibility (other ~7-8B archs).
     ("llama8b_bf16",       "Llama-8B BF16",        "bf16", "ctrl"),
@@ -66,9 +68,15 @@ RUNS_SPEC = [
 CUSTOM_LABEL = {
     "fp8":                 "Qwen3-8B FP8",
     "nvfp4":               "Qwen3-8B NVFP4",
+    "qwen3_8b_awq_int4":   "Qwen3-8B INT4 (AWQ)",
     "qwen7b_awq_int4":     "Qwen2.5-7B INT4 (AWQ, GPTQ)",
     "gptoss20b_mxfp4":     "gpt-oss-20B MXFP4",
     "deepseekv2lite_fp8":  "DeepSeek-V2-Lite FP8 (MoE)",
+}
+# Per-label annotation offsets (pts). INT4 labels drop below the floor to avoid the marker.
+LABEL_DXY = {
+    "qwen3_8b_awq_int4": (7, -11),
+    "qwen7b_awq_int4":   (7, -27),   # extra drop so the two INT4 labels sit on distinct lines
 }
 
 
@@ -97,22 +105,40 @@ def main():
             "prefill_x": round(by[fp8l]["prefill_peak_tok_s"] / by[bf16l]["prefill_peak_tok_s"], 2),
         }
 
+    # Same-base quad: Qwen3-8B at BF16/FP8/INT4/NVFP4 on IDENTICAL weights — the
+    # size-confound-free core of the claim (no cross-model comparison needed).
+    quad = {}
+    for lab, nm in [("bf16", "BF16"), ("fp8", "FP8"),
+                    ("qwen3_8b_awq_int4", "INT4-AWQ"), ("nvfp4", "NVFP4")]:
+        quad[nm] = {"decode_tok_s": by[lab]["decode_tok_s"],
+                    "prefill_peak_tok_s": by[lab]["prefill_peak_tok_s"],
+                    "decode_x_bf16": round(by[lab]["decode_tok_s"] / by["bf16"]["decode_tok_s"], 2),
+                    "prefill_x_bf16": round(by[lab]["prefill_peak_tok_s"] / by["bf16"]["prefill_peak_tok_s"], 2)}
+    quad["int4_vs_nvfp4_prefill_split"] = round(
+        by["nvfp4"]["prefill_peak_tok_s"] / by["qwen3_8b_awq_int4"]["prefill_peak_tok_s"], 2)
+
     doc = {
         "__meta__": {
             "description": "vLLM breadth sweep on RTX 5090: decode (BW) vs prefill (compute) by "
                            "quantization format. INT4 = memory-only; FP4 = memory + compute.",
-            "schema_version": 1,
-            "methodology_version": "2026-06-02-precision-breadth-v1",
+            "schema_version": 2,
+            "methodology_version": "2026-06-03-precision-breadth-v2-samebase-quad",
             "runtime": "vLLM 0.22.0, single-stream (batch=1, greedy, ignore_eos), tg256 / prefill plateau",
-            "headline": "4-bit INT (AWQ/GPTQ) wins decode (~245-250 tok/s, bandwidth) but its prefill "
-                        "stays at bf16 level (~14.9k tok/s) — no low-precision tensor-core path; it "
-                        "dequantizes to compute. FP4 (NVFP4/MXFP4) wins BOTH decode and prefill on "
-                        "Blackwell's native FP4 tensor cores. FP8 is the mid anchor, ~1.6x decode / "
-                        "~1.7x prefill over bf16, reproduced across Qwen3-8B, Llama-8B, Mistral-7B.",
+            "headline": "Same-base Qwen3-8B quad (IDENTICAL weights): INT4-AWQ and NVFP4 TIE on decode "
+                        f"({quad['INT4-AWQ']['decode_tok_s']} vs {quad['NVFP4']['decode_tok_s']} tok/s, both "
+                        f"~{quad['NVFP4']['decode_x_bf16']}x bf16, bandwidth-bound) — but INT4 prefill is pinned "
+                        f"to the bf16 floor ({quad['INT4-AWQ']['prefill_x_bf16']}x) while NVFP4 prefill is "
+                        f"{quad['NVFP4']['prefill_x_bf16']}x bf16 — a {quad['int4_vs_nvfp4_prefill_split']}x prefill split "
+                        "on the same weights. INT4 dequantizes to compute (memory-only); FP4 has native sm_120 "
+                        "tensor cores (memory + compute). FP8 is the mid anchor (~1.6x/1.7x), reproduced across "
+                        "Qwen3-8B, Llama-8B, Mistral-7B.",
         },
         "rows": rows,
+        "same_base_quad_qwen3_8b": quad,
         "fp8_over_bf16_controlled": ratios,
         "establishes": [
+            "Same-base Qwen3-8B: INT4 and NVFP4 tie on decode but NVFP4 prefill is "
+            f"{quad['int4_vs_nvfp4_prefill_split']}x INT4's — controlled proof, no size confound.",
             "INT4 is a memory format: decode win (BW) but prefill ~= bf16 (no tensor-core compute path).",
             "FP4 (NVFP4/MXFP4) is a memory + compute format: wins decode AND prefill on native FP4 cores.",
             "FP8/BF16 advantage is architecture-general (~1.6x decode, ~1.7x prefill across 3 models).",
@@ -134,16 +160,28 @@ def main():
                    s=size, color=color, marker=marker, zorder=3,
                    edgecolor="white", linewidth=0.6, label=lbl)
         if r["label"] in CUSTOM_LABEL:
-            dy = -12 if r["label"] == "qwen7b_awq_int4" else 5   # INT4 label drops below floor
+            dxy = LABEL_DXY.get(r["label"], (7, 5))
             ax.annotate(CUSTOM_LABEL[r["label"]],
                         (r["decode_tok_s"], r["prefill_peak_tok_s"] / 1000.0),
-                        textcoords="offset points", xytext=(7, dy), fontsize=7.5)
+                        textcoords="offset points", xytext=dxy, fontsize=7.5)
 
     # Guide: the bf16 prefill floor — INT4 sits ON it despite winning decode.
     bf16_prefill_k = by["bf16"]["prefill_peak_tok_s"] / 1000.0
     ax.axhline(bf16_prefill_k, ls=":", color="#a0aec0", lw=1.1, zorder=1)
     ax.annotate("← bf16 prefill floor: INT4 wins decode but never clears it\n   (no FP tensor-core path — it dequantizes to compute)",
                 (150, 16.6), fontsize=8, color="#dd6b20")
+
+    # Same-base money shot: Qwen3-8B INT4 vs NVFP4 on IDENTICAL weights. Near-equal decode,
+    # but NVFP4 prefill is ~3.5x INT4's (which is pinned to the bf16 floor). Connect them.
+    i4 = by["qwen3_8b_awq_int4"]; f4 = by["nvfp4"]
+    split = f4["prefill_peak_tok_s"] / i4["prefill_peak_tok_s"]
+    ax.annotate("", xy=(f4["decode_tok_s"], f4["prefill_peak_tok_s"] / 1000.0),
+                xytext=(i4["decode_tok_s"], i4["prefill_peak_tok_s"] / 1000.0),
+                arrowprops=dict(arrowstyle="<->", color="#9b2c2c", lw=1.4), zorder=4)
+    ax.annotate(f"same weights · same decode\n{split:.1f}× prefill split (Qwen3-8B)",
+                ((i4["decode_tok_s"] + f4["decode_tok_s"]) / 2.0,
+                 (i4["prefill_peak_tok_s"] + f4["prefill_peak_tok_s"]) / 2000.0),
+                textcoords="offset points", xytext=(12, 0), fontsize=8, color="#9b2c2c", va="center")
 
     ax.set_xlabel("decode throughput (tok/s, single-stream tg256)  →  bandwidth-bound")
     ax.set_ylabel("prefill plateau (k tok/s)  →  compute-bound")
