@@ -211,6 +211,28 @@ Findings:
   clone qutlass `--recursive` (CUTLASS submodule); `CUDA_HOME=/home/kyle/cuda-12.9`. Env
   `~/.virtualenvs/quartet_fp4`.
 
+### ⚑ MEASURED (2026-06-03): FP4 training CONVERGES to BF16 quality (the accuracy half)
+
+End-to-end run in the Quartet harness (`scripts/plot_fp4_convergence.py` parses the logs →
+`data/output/fp4_training_convergence_5090.json`, slide 9). Trained a 30M-param Llama on
+WikiText-103 twice, identical config + init, single 5090: BF16 baseline vs FP4 (4-bit E2M1
+weights+activations, HadamardFP4Clip pseudo-quant, bf16 gradients). The FP4 val-loss curve
+**tracks BF16 within ~0.04 nats the whole way**; final **BF16 4.914 (pp 136.2) vs FP4 4.958
+(pp 142.2) — ~0.9% loss / ~4.4% perplexity gap.** So 4-bit training reaches ~BF16 quality —
+the Quartet thesis ("native FP4 training can be optimal") confirmed locally. Together with
+the GEMM-speed result above: **FP4 training is FAST *and* ACCURATE.**
+- Honest framing: pseudo-quant (emulated FP4 numerics for an accuracy/convergence measurement;
+  the *speed* is the kernel result, not this run — pseudo-quant is ~2.8× slower per step). The
+  full Quest+FP4-gradient recipe hit a **triton-3.6 incompat** in Quartet's custom MXFP4 kernel
+  (`mxfp4_triton.py` → `'NoneType' cannot be interpreted as integer`), so this is forward-path
+  FP4 (W+A) convergence via the pure-pytorch HadamardFP4Clip quantizer.
+- 🚨 Quartet-harness gotchas (patched locally in `~/Documents/GitHub/Quartet`): missing
+  `schedulefree`; `src/data/c4.py` does a module-level load of the **gated** `meta-llama/Llama-2-7b-hf`
+  tokenizer (fires on any data import → 403) — guard it; the WikiText-103 S3 URL is dead (301) →
+  Smerity mirror + a browser User-Agent (urllib default is 403'd); bits are NOT separate args
+  (`--w-bits` etc. are unrecognized — the quantizer name encodes FP4); BF16 baseline = the
+  defaults (`NoQuantizer` + `EW_EtX`).
+
 ## 4. INT4-vs-FP4 head-to-head (same base, both formats) — bake-off candidates
 
 Same base in both INT4 and NVFP4, **dense** (so sm_120 FP4 tensor cores actually engage),

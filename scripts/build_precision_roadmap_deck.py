@@ -34,6 +34,8 @@ SLIDES = [
      "Edge AI Use Cases on NPU Silicon", "7 · INT4 vs FP4 — a 4-bit memory format is not a compute format · Jun 2026"),
     ("data/output/precision_5090_fp4_lifecycle.png",
      "Edge AI Use Cases on NPU Silicon", "8 · FP4 wins inference AND training — the win grows with compute · Jun 2026"),
+    ("data/output/precision_5090_fp4_convergence.png",
+     "Edge AI Use Cases on NPU Silicon", "9 · FP4 training converges to BF16 quality — fast AND accurate · Jun 2026"),
 ]
 
 
