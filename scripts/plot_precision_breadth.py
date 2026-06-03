@@ -59,6 +59,9 @@ RUNS_SPEC = [
     # The INT4 stars (Qwen2.5-7B, ~size-matched to the Qwen3-8B anchor).
     ("qwen7b_awq_int4",    "Qwen2.5-7B INT4 (AWQ)",  "int4", "ctrl"),
     ("qwen7b_gptq_int4",   "Qwen2.5-7B INT4 (GPTQ)", "int4", "ctrl"),
+    # 2nd same-base quad at 14B (squares): the prefill split WIDENS with scale (3.5x -> 4.4x).
+    ("qwen3_14b_awq_int4", "Qwen3-14B INT4 (AWQ)",  "int4", "q14"),
+    ("qwen3_14b_nvfp4",    "Qwen3-14B NVFP4",       "fp4",  "q14"),
     # Larger breadth models — size break flagged as diamonds.
     ("gptoss20b_mxfp4",    "gpt-oss-20B MXFP4",    "fp4",  "big"),
     ("deepseekv2lite_fp8", "DeepSeek-V2-Lite FP8 (MoE)", "fp8", "big"),
@@ -70,13 +73,17 @@ CUSTOM_LABEL = {
     "nvfp4":               "Qwen3-8B NVFP4",
     "qwen3_8b_awq_int4":   "Qwen3-8B INT4 (AWQ)",
     "qwen7b_awq_int4":     "Qwen2.5-7B INT4 (AWQ, GPTQ)",
+    "qwen3_14b_awq_int4":  "Qwen3-14B INT4 (AWQ)",
+    "qwen3_14b_nvfp4":     "Qwen3-14B NVFP4",
     "gptoss20b_mxfp4":     "gpt-oss-20B MXFP4",
     "deepseekv2lite_fp8":  "DeepSeek-V2-Lite FP8 (MoE)",
 }
 # Per-label annotation offsets (pts). INT4 labels drop below the floor to avoid the marker.
 LABEL_DXY = {
-    "qwen3_8b_awq_int4": (7, -11),
-    "qwen7b_awq_int4":   (7, -27),   # extra drop so the two INT4 labels sit on distinct lines
+    "qwen3_8b_awq_int4":  (7, -11),
+    "qwen7b_awq_int4":    (7, -27),   # extra drop so the two INT4 labels sit on distinct lines
+    "qwen3_14b_awq_int4": (-150, -2), # 14B INT4 sits low-left; label to its left
+    "qwen3_14b_nvfp4":    (-118, 4),  # 14B NVFP4 label to its left to clear the 8B FP8 cluster
 }
 
 
@@ -117,6 +124,18 @@ def main():
     quad["int4_vs_nvfp4_prefill_split"] = round(
         by["nvfp4"]["prefill_peak_tok_s"] / by["qwen3_8b_awq_int4"]["prefill_peak_tok_s"], 2)
 
+    # 2nd same-base quad at 14B + the scale trend (the split widens with model size).
+    quad14 = {}
+    for lab, nm in [("qwen3_14b_awq_int4", "INT4-AWQ"), ("qwen3_14b_nvfp4", "NVFP4")]:
+        quad14[nm] = {"decode_tok_s": by[lab]["decode_tok_s"],
+                      "prefill_peak_tok_s": by[lab]["prefill_peak_tok_s"]}
+    quad14["int4_vs_nvfp4_prefill_split"] = round(
+        by["qwen3_14b_nvfp4"]["prefill_peak_tok_s"] / by["qwen3_14b_awq_int4"]["prefill_peak_tok_s"], 2)
+    quad14["decode_ratio_nvfp4_over_int4"] = round(
+        by["qwen3_14b_nvfp4"]["decode_tok_s"] / by["qwen3_14b_awq_int4"]["decode_tok_s"], 2)
+    prefill_split_by_scale = {"qwen3_8b": quad["int4_vs_nvfp4_prefill_split"],
+                              "qwen3_14b": quad14["int4_vs_nvfp4_prefill_split"]}
+
     doc = {
         "__meta__": {
             "description": "vLLM breadth sweep on RTX 5090: decode (BW) vs prefill (compute) by "
@@ -135,10 +154,15 @@ def main():
         },
         "rows": rows,
         "same_base_quad_qwen3_8b": quad,
+        "same_base_pair_qwen3_14b": quad14,
+        "prefill_split_by_scale": prefill_split_by_scale,
         "fp8_over_bf16_controlled": ratios,
         "establishes": [
             "Same-base Qwen3-8B: INT4 and NVFP4 tie on decode but NVFP4 prefill is "
             f"{quad['int4_vs_nvfp4_prefill_split']}x INT4's — controlled proof, no size confound.",
+            "The prefill split WIDENS with model size: "
+            f"{prefill_split_by_scale['qwen3_8b']}x at 8B -> {prefill_split_by_scale['qwen3_14b']}x at 14B "
+            "(larger GEMMs are more compute-bound, so the native-FP4 tensor-core win grows).",
             "INT4 is a memory format: decode win (BW) but prefill ~= bf16 (no tensor-core compute path).",
             "FP4 (NVFP4/MXFP4) is a memory + compute format: wins decode AND prefill on native FP4 cores.",
             "FP8/BF16 advantage is architecture-general (~1.6x decode, ~1.7x prefill across 3 models).",
@@ -150,9 +174,10 @@ def main():
     # ---- scatter: decode (x, bandwidth) vs prefill plateau (y, compute) ----
     fig, ax = plt.subplots(figsize=(9.2, 5.8))
     seen_fam = set()
+    MARKER = {"big": "D", "q14": "s"}   # diamond = larger breadth model; square = 14B same-base quad
     for r in rows:
         color, flabel = FAM[r["family"]]
-        marker = "D" if r["size_class"] == "big" else "o"
+        marker = MARKER.get(r["size_class"], "o")
         size = 130 if r["size_class"] == "big" else 95
         lbl = flabel if r["family"] not in seen_fam else None
         seen_fam.add(r["family"])
@@ -171,17 +196,26 @@ def main():
     ax.annotate("← bf16 prefill floor: INT4 wins decode but never clears it\n   (no FP tensor-core path — it dequantizes to compute)",
                 (150, 16.6), fontsize=8, color="#dd6b20")
 
-    # Same-base money shot: Qwen3-8B INT4 vs NVFP4 on IDENTICAL weights. Near-equal decode,
-    # but NVFP4 prefill is ~3.5x INT4's (which is pinned to the bf16 floor). Connect them.
-    i4 = by["qwen3_8b_awq_int4"]; f4 = by["nvfp4"]
-    split = f4["prefill_peak_tok_s"] / i4["prefill_peak_tok_s"]
-    ax.annotate("", xy=(f4["decode_tok_s"], f4["prefill_peak_tok_s"] / 1000.0),
-                xytext=(i4["decode_tok_s"], i4["prefill_peak_tok_s"] / 1000.0),
-                arrowprops=dict(arrowstyle="<->", color="#9b2c2c", lw=1.4), zorder=4)
-    ax.annotate(f"same weights · same decode\n{split:.1f}× prefill split (Qwen3-8B)",
-                ((i4["decode_tok_s"] + f4["decode_tok_s"]) / 2.0,
-                 (i4["prefill_peak_tok_s"] + f4["prefill_peak_tok_s"]) / 2000.0),
-                textcoords="offset points", xytext=(12, 0), fontsize=8, color="#9b2c2c", va="center")
+    # Same-base money shots: INT4 vs NVFP4 on IDENTICAL weights — near-equal decode, but
+    # NVFP4 prefill is several-x INT4's (pinned to its bf16 floor). The split WIDENS with
+    # scale: 3.5x at 8B, 4.4x at 14B. Connect each same-base pair with a labelled arrow.
+    def money_shot(int4_lab, fp4_lab, name, label_dx, full_text=True):
+        i4, f4 = by[int4_lab], by[fp4_lab]
+        split = f4["prefill_peak_tok_s"] / i4["prefill_peak_tok_s"]
+        ax.annotate("", xy=(f4["decode_tok_s"], f4["prefill_peak_tok_s"] / 1000.0),
+                    xytext=(i4["decode_tok_s"], i4["prefill_peak_tok_s"] / 1000.0),
+                    arrowprops=dict(arrowstyle="<->", color="#9b2c2c", lw=1.4), zorder=4)
+        txt = (f"same weights · same decode\n{split:.1f}× prefill split ({name})"
+               if full_text else f"{split:.1f}× split ({name})")
+        ha = "left" if label_dx >= 0 else "right"
+        ax.annotate(txt,
+                    ((i4["decode_tok_s"] + f4["decode_tok_s"]) / 2.0,
+                     (i4["prefill_peak_tok_s"] + f4["prefill_peak_tok_s"]) / 2000.0),
+                    textcoords="offset points", xytext=(label_dx, 0),
+                    fontsize=8, color="#9b2c2c", va="center", ha=ha)
+
+    money_shot("qwen3_8b_awq_int4", "nvfp4", "Qwen3-8B", 12, full_text=True)
+    money_shot("qwen3_14b_awq_int4", "qwen3_14b_nvfp4", "Qwen3-14B", -10, full_text=False)
 
     ax.set_xlabel("decode throughput (tok/s, single-stream tg256)  →  bandwidth-bound")
     ax.set_ylabel("prefill plateau (k tok/s)  →  compute-bound")
