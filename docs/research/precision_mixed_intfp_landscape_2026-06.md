@@ -215,17 +215,21 @@ Findings:
 
 End-to-end run in the Quartet harness (`scripts/plot_fp4_convergence.py` parses the logs →
 `data/output/fp4_training_convergence_5090.json`, slide 9). Trained a 30M-param Llama on
-WikiText-103 twice, identical config + init, single 5090: BF16 baseline vs FP4 (4-bit E2M1
-weights+activations, HadamardFP4Clip pseudo-quant, bf16 gradients). The FP4 val-loss curve
-**tracks BF16 within ~0.04 nats the whole way**; final **BF16 4.914 (pp 136.2) vs FP4 4.958
-(pp 142.2) — ~0.9% loss / ~4.4% perplexity gap.** So 4-bit training reaches ~BF16 quality —
-the Quartet thesis ("native FP4 training can be optimal") confirmed locally. Together with
-the GEMM-speed result above: **FP4 training is FAST *and* ACCURATE.**
+WikiText-103 twice, identical config + init, single 5090: BF16 baseline vs FP4 — the **full
+Quartet recipe**: QuestMXFP4 4-bit weights+activations **AND** AlbertTseng 4-bit gradients
+(stochastic) with the `Q(E)Q(Wt)t_Q(Et)Q(Xt)t` backward scheme. The FP4 val-loss curve
+**tracks BF16 within ~0.07 nats the whole way**; final **BF16 4.914 (pp 136.2) vs FP4 4.984
+(pp 146.0) — ~1.4% loss / ~7.2% perplexity gap.** So fully-4-bit training (incl. gradients)
+reaches ~BF16 quality — the Quartet thesis ("native FP4 training can be optimal") confirmed
+locally. Together with the GEMM-speed result above: **FP4 training is FAST *and* ACCURATE.**
 - Honest framing: pseudo-quant (emulated FP4 numerics for an accuracy/convergence measurement;
-  the *speed* is the kernel result, not this run — pseudo-quant is ~2.8× slower per step). The
-  full Quest+FP4-gradient recipe hit a **triton-3.6 incompat** in Quartet's custom MXFP4 kernel
-  (`mxfp4_triton.py` → `'NoneType' cannot be interpreted as integer`), so this is forward-path
-  FP4 (W+A) convergence via the pure-pytorch HadamardFP4Clip quantizer.
+  the *speed* is the kernel result, not this run).
+- 🔧 **We fixed Quartet's triton-3.6 incompat ourselves (1 line):** the custom MXFP4 kernel
+  (`mxfp4_triton.py`) passed `seed=None` to a non-constexpr `seed: int` kernel arg when
+  `stochastic_round=False` → triton ≥3.x rejects it (`'NoneType' cannot be interpreted as
+  integer`). `seed` is only read under the `stochastic_round=True` branch (dead-code-eliminated),
+  so setting `seed=0` is safe — full recipe then runs at ~10 it/s (faster than the pure-pytorch
+  HadamardFP4Clip fallback, which gave +0.044/1.04× forward-path-only as an interim result).
 - 🚨 Quartet-harness gotchas (patched locally in `~/Documents/GitHub/Quartet`): missing
   `schedulefree`; `src/data/c4.py` does a module-level load of the **gated** `meta-llama/Llama-2-7b-hf`
   tokenizer (fires on any data import → 403) — guard it; the WikiText-103 S3 URL is dead (301) →

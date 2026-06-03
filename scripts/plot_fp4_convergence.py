@@ -7,13 +7,14 @@ The GEMM bench (slide 8) showed FP4 training is FAST. This is the other half of
 We trained a 30M-param Llama on WikiText-103 twice in the Quartet harness on the RTX 5090,
 identical config + init, single GPU:
   - BF16 baseline (NoQuantizer)
-  - FP4: 4-bit (E2M1) weights + activations, HadamardFP4Clip pseudo-quant, bf16 gradients
+  - FP4: the FULL Quartet recipe — 4-bit (E2M1) weights + activations (QuestMXFP4) AND 4-bit
+    gradients (AlbertTseng, stochastic) with the Q(E)Q(Wt)t_Q(Et)Q(Xt)t backward scheme
 and compare validation-loss convergence. (Pseudo-quant = emulated FP4 numerics for an
 accuracy/convergence measurement; the SPEED is the separate kernel result on slide 8.
-The full Quest+FP4-gradient recipe was blocked by a triton-3.6 incompat in Quartet's
-custom kernel, so this is the forward-path-FP4 convergence.)
+Quartet's custom MXFP4 triton kernel needed a 1-line fix for triton 3.6 — a None seed passed
+to a non-constexpr `int` arg; set to 0 since it's only read under stochastic_round=True.)
 
-Parses ~/quartet_runs/{bf16,fp4}.log for the '>Eval ... val_loss=' curve,
+Parses ~/quartet_runs/{bf16.log,mxfp4_full.log} for the '>Eval ... val_loss=' curve,
 writes data/output/fp4_training_convergence_5090.json, renders
 data/output/precision_5090_fp4_convergence.png.
 """
@@ -43,14 +44,14 @@ def parse(logname):
 
 def main():
     bf16 = parse("bf16.log")
-    fp4 = parse("fp4.log")
+    fp4 = parse("mxfp4_full.log")  # full Quartet recipe: 4-bit W+A+gradients
     final_gap = round(fp4["val_loss"][-1] - bf16["val_loss"][-1], 3)
     pp_ratio = round(fp4["val_pp"][-1] / bf16["val_pp"][-1], 3)
     doc = {
         "__meta__": {
             "description": "FP4 vs BF16 training convergence on RTX 5090 (Quartet harness). 30M Llama, "
-                           "WikiText-103, identical config/init, single GPU. FP4 = HadamardFP4Clip "
-                           "pseudo-quant W+A (E2M1), bf16 gradients.",
+                           "WikiText-103, identical config/init, single GPU. FP4 = full Quartet recipe: "
+                           "QuestMXFP4 W+A (E2M1) + AlbertTseng 4-bit gradients + QEQWtt backward (pseudo-quant).",
             "claim": "native FP4 training converges to ~BF16 quality (Quartet arXiv 2505.14669)",
             "final_val_loss_bf16": bf16["val_loss"][-1],
             "final_val_loss_fp4": fp4["val_loss"][-1],
@@ -69,7 +70,7 @@ def main():
     ax.plot(bf16["iters"], bf16["val_loss"], "-o", color="#718096", lw=2.2, ms=7,
             label="BF16 baseline", zorder=3)
     ax.plot(fp4["iters"], fp4["val_loss"], "-s", color="#2f855a", lw=2.2, ms=7,
-            label="FP4 (4-bit W+A)", zorder=3)
+            label="FP4 (4-bit W+A+gradients)", zorder=3)
     # annotate the final gap
     xf = bf16["iters"][-1]
     ax.annotate(f"final: BF16 {bf16['val_loss'][-1]:.3f}  ·  FP4 {fp4['val_loss'][-1]:.3f}\n"
@@ -85,6 +86,7 @@ def main():
     ax.grid(True, alpha=0.3)
     ax.legend(frameon=False, fontsize=10, loc="upper right")
     ax.text(0.97, 0.55,
+            "Full Quartet recipe: 4-bit weights + activations + gradients.\n"
             "Pairs with the speed result (FP4 ~5.5× BF16 GEMM):\n"
             "FP4 training is FAST and ACCURATE → optimal.\n"
             "(pseudo-quant convergence run; speed from kernels.)",
