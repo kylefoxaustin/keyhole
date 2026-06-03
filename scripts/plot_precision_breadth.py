@@ -36,11 +36,13 @@ OUTJSON = os.path.join(REPO, "data/output/precision_5090_breadth.json")
 OUTPNG = os.path.join(REPO, "data/output/precision_5090_breadth.png")
 
 # Format family -> colour. The four regimes the chart is about.
+# Short legend labels — the title + floor annotation carry the "memory vs compute" teaching,
+# so keeping these compact avoids the legend creeping into the FP8 ratio box.
 FAM = {
-    "bf16": ("#718096", "BF16 (baseline)"),
-    "fp8":  ("#2b6cb0", "FP8 (native fp8 tensor cores)"),
-    "int4": ("#dd6b20", "INT4 AWQ/GPTQ (memory format)"),
-    "fp4":  ("#2f855a", "FP4 NVFP4/MXFP4 (memory + compute)"),
+    "bf16": ("#718096", "BF16"),
+    "fp8":  ("#2b6cb0", "FP8"),
+    "int4": ("#dd6b20", "INT4 (memory-only)"),
+    "fp4":  ("#2f855a", "FP4 (memory + compute)"),
 }
 
 # label | display | format-family | size-class (circle = size-controlled ~7-8B, diamond = larger)
@@ -243,7 +245,7 @@ def main():
     axL.grid(True, alpha=0.3)
     axL.legend(frameon=False, fontsize=8, loc="upper left")
     q = ratios["Qwen3-8B"]; l = ratios["Llama-8B"]; m = ratios["Mistral-7B"]
-    axL.text(0.30, 0.985,
+    axL.text(0.40, 0.985,
              "FP8 ÷ BF16, same model (size-controlled)\n"
              f"   Qwen3-8B   {q['decode_x']}× / {q['prefill_x']}×\n"
              f"   Llama-8B    {l['decode_x']}× / {l['prefill_x']}×\n"

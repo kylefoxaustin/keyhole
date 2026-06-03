@@ -126,14 +126,18 @@ def main():
     # Measured-validation badge on the 2030 LLM cell (the FP4 datapoint).
     mv = doc.get("measured_validation_2026")
     if mv:
-        ax.text(2.5, 1.5, "✓ measured on RTX 5090\n(Jun 2026)", ha="center", va="center",
-                fontsize=7.3, color="white", fontweight="bold", zorder=7,
-                bbox=dict(boxstyle="round,pad=0.25", facecolor="#1a1a1a", alpha=0.55, edgecolor="none"))
+        # Sit in the cell's empty top strip (above the centred title), single line, so it
+        # never covers the rationale/anchor body text.
+        ax.text(2.5, 1.86, "✓ measured on RTX 5090 · Jun 2026", ha="center", va="center",
+                fontsize=6.6, color="white", fontweight="bold", zorder=7,
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="#1a1a1a", alpha=0.55, edgecolor="none"))
 
     # ---- FP-mandatory line at the 2028 crossover (x=1.0) ----
     ax.plot([1.0, 1.0], [0.06, 4.06], color=RED, lw=2.4, ls=(0, (5, 3)), zorder=6)
-    ax.text(1.04, 0.10, "INT8-only past here\n= feature gap, not a cost win", ha="left",
-            va="bottom", fontsize=8, color=RED, style="italic")
+    # Place in the empty white band BELOW the grid (clear of the VLA-cell anchor text it
+    # used to overlap, and above the bit-width strip), still just right of the crossover line.
+    ax.text(1.08, -0.30, "INT8-only past here\n= feature gap, not a cost win", ha="left",
+            va="top", fontsize=7.6, color=RED, style="italic")
 
     # ---- Bit-width descent strip (tweak 4) ----
     by = -0.85

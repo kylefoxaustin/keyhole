@@ -63,18 +63,21 @@ def add_image_slide(prs, img_path, footer_left, footer_right):
     top = Emu(int((sh - Emu(int(0.45 * 914400)) - int(h)) / 2))
     slide.shapes.add_picture(os.path.join(REPO, img_path), left, top, width=w, height=h)
 
-    # Footer band (match the existing deck's footer convention).
+    # Footer band (match the existing deck's footer convention). Left + right footers each
+    # own HALF the width so they can't collide in the centre: left is left-aligned from the
+    # left margin, right is right-aligned to the right margin, leaving a gap between them.
+    from pptx.enum.text import PP_ALIGN
+    half = sw // 2 - margin
     tb = slide.shapes.add_textbox(margin, sh - Emu(int(0.40 * 914400)),
-                                  sw - 2 * margin, Emu(int(0.32 * 914400)))
+                                  half, Emu(int(0.32 * 914400)))
     tf = tb.text_frame
     tf.word_wrap = False
-    p = tf.paragraphs[0]
+    p = tf.paragraphs[0]; p.alignment = PP_ALIGN.LEFT
     r = p.add_run(); r.text = footer_left
     r.font.size = Pt(9); r.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
-    # right-aligned page label as a second textbox
+    # right-aligned page label as a second textbox, owning the right half
     tb2 = slide.shapes.add_textbox(sw // 2, sh - Emu(int(0.40 * 914400)),
-                                   sw // 2 - margin, Emu(int(0.32 * 914400)))
-    from pptx.enum.text import PP_ALIGN
+                                   half, Emu(int(0.32 * 914400)))
     p2 = tb2.text_frame.paragraphs[0]; p2.alignment = PP_ALIGN.RIGHT
     r2 = p2.add_run(); r2.text = footer_right
     r2.font.size = Pt(9); r2.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
