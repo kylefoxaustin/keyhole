@@ -4,11 +4,13 @@ build_precision_roadmap_deck.py — append the two precision charts to a repo co
 of the roadmap deck.
 
 Reads the ORIGINAL ~/Downloads/precision-roadmap-combined.pptx (never mutates it),
-appends two full-bleed chart slides, and writes the 5-slide result to
+appends the full-bleed chart slides, and writes the 7-slide result to
 data/output/precision-roadmap-combined.pptx.
 
   slide 4: migration timeline (the thesis)
   slide 5: today-anchor composition (the evidence)
+  slide 6: decode bandwidth-bound ladder + MoE footprint decoupling (llama.cpp Tier-2)
+  slide 7: INT4-vs-FP4 — a 4-bit memory format is not a compute format (vLLM breadth)
 
 Run:  python3 scripts/build_precision_roadmap_deck.py
 """
@@ -28,6 +30,8 @@ SLIDES = [
      "Edge AI Use Cases on NPU Silicon", "5 · Today's measured INT/FP composition · Jun 2026"),
     ("data/output/precision_5090_ladder.png",
      "Edge AI Use Cases on NPU Silicon", "6 · Decode is bandwidth-bound — measured ladder + MoE decoupling · Jun 2026"),
+    ("data/output/precision_5090_breadth.png",
+     "Edge AI Use Cases on NPU Silicon", "7 · INT4 vs FP4 — a 4-bit memory format is not a compute format · Jun 2026"),
 ]
 
 
