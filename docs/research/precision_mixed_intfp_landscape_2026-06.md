@@ -178,6 +178,39 @@ PTQ-for-inference NVFP4 checkpoints above).
   kernels are tuned for the RTX 5090** — the one local-reproducible FP4-native-training
   artifact.
 
+### ⚑ MEASURED on this box (2026-06-03): FP4 training GEMMs run ~5.5× BF16 / ~2.9× FP8 on the 5090
+
+We built the Quartet FP4-training kernels ([IST-DASLab/qutlass](https://github.com/IST-DASLab/qutlass)
+v0.2.0, sm_120a) on the 5090 and measured the **forward-pass GEMM** speedup — the training-side
+twin of the inference asymmetry. Same MXFP4/NVFP4 kernels Quartet trains in; weight pre-quantized,
+activation quantized on-the-fly (cost included), output bf16. Real transformer layer shapes,
+high-arithmetic-intensity token counts (M=4k–16k). Harness: `scripts/bench_fp4_training_gemm_5090.py`
+→ `data/output/fp4_training_gemm_5090.json`.
+
+| dtype | TFLOP/s (5090) | × BF16 | × FP8 |
+|---|---|---|---|
+| BF16 | ~230 | 1.0× | — |
+| FP8 (torch `_scaled_mm` e4m3) | ~440 | ~1.9× | 1.0× |
+| **MXFP4** (qutlass, block-32/E8M0) | **~1300** | **~5.5×** | **~2.9×** |
+| **NVFP4** (qutlass, block-16/E4M3) | **~1270** | **~5.4×** | **~2.85×** |
+
+Findings:
+- **FP4 wins the *training* compute, not just inference** — ~5.5× BF16 / ~2.9× FP8 on the
+  forward GEMM. This *exceeds* Quartet's headline (~4× BF16 / ~2.4× FP8) because our shapes are
+  high-AI (the speedup grows with M/N/K, exactly as the paper predicts). Physically sane: tracks
+  the 5090's tensor-core ratios (FP8 ~2× BF16 peak; FP4 ~1300 of ~1676 dense-FP4 peak).
+- **MXFP4 ≈ NVFP4 in speed** → NVFP4's better numerics (the slide-7 spine) are **~free on
+  throughput**. Clean "use NVFP4" conclusion for training too.
+- Honest unit: this is the *forward-GEMM* number (cleanest kernel-level win, analogous to our
+  inference prefill-GEMM result). A full training step (fwd + 2× bwd + non-GEMM) lands lower
+  (~1.8× FP8 end-to-end per Quartet).
+- 🚨 **qutlass MXFP8 is sm_100-only** (raises "Unsupported CUDA arch" on sm_120) — another
+  consumer-Blackwell gap; we used torch-native FP8 as the baseline instead.
+- 🚨 Toolchain: torch **cu128** (NOT cu130) so its major matches the CUDA 12.9 toolkit the
+  `sm_120a` build needs; uv-managed Python 3.12 (system python3.12 ensurepip is broken);
+  clone qutlass `--recursive` (CUTLASS submodule); `CUDA_HOME=/home/kyle/cuda-12.9`. Env
+  `~/.virtualenvs/quartet_fp4`.
+
 ## 4. INT4-vs-FP4 head-to-head (same base, both formats) — bake-off candidates
 
 Same base in both INT4 and NVFP4, **dense** (so sm_120 FP4 tensor cores actually engage),
