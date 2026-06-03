@@ -64,6 +64,42 @@ INT8/FP8 tensor cores**, partially escaping the W4A16 prefill floor.
   independent knobs, so INT4/NVFP4 weights + FP8 KV is a valid mixed config now.
   ([vllm docs](https://docs.vllm.ai/en/latest/features/quantization/quantized_kvcache/))
 
+### ⚑ MEASURED on this box (2026-06-03): W4A8 does NOT run on sm_120 — the mixed-INT/FP "escape hatch" is Hopper-only
+
+W4A8 is the textbook proof that splitting weight-memory (4-bit) from the compute path
+(8-bit tensor cores) escapes the bf16 prefill floor. We tried to put a real W4A8 point on
+the 5090 to sit *between* the INT4 floor and the FP4 high. **It cannot be done on consumer
+Blackwell + current vLLM.** Probe: `scripts/probe_w4a8_5090.sh` attempted to load 4
+downloadable W4A8 checkpoints (1B–8B) on vLLM 0.22.0 (torch 2.11+cu130, cap 12.0).
+**Result: 0/4 loaded**, two distinct failure modes:
+
+1. **W4A8-int** (int4 weight + int8 activation, e.g. `zera09/Llama-3.2-1B-Instruct-W4A8-GPTQ`):
+   the compressed-tensors parser *accepts* the scheme, but **every one of vLLM's
+   mixed-precision kernels rejects sm_120** (verbatim from the engine-init log):
+   - `CutlassW4A8LinearKernel … CUTLASS W4A8 requires compute capability of 90 (Hopper)`
+   - `MacheteLinearKernel … Machete requires compute capability of 90 (Hopper)`
+   - `AllSparkLinearKernel … AllSpark currently does not support device_capability = 120`
+   - `MarlinLinearKernel … Quant type (int4) not supported by Marlin, supported types are: [uint4b8, uint8b128, float8_e4m3fn, float4_e2m1f]`
+   - `ConchLinearKernel … Weight type (int4) not supported`
+   - `ExllamaLinearKernel … Exllama only supports float16 activations`
+   → `ValueError` in `compressed_tensors_w4a8_int.py` → engine init fails. **No int4-weight +
+   int8-activation kernel exists for cap 120.**
+2. **W4A8-fp8 / W4AFP8** (int4 weight + fp8 activation, e.g.
+   `czhu-cohere/Meta-Llama-3-8B-Instruct-W4A8-compressed-tensors-test`): vLLM 0.22.0
+   doesn't even *register* the scheme — `NotImplementedError: No compressed-tensors
+   compatible scheme was found` (the fp8-activation W4A8 path is unimplemented in this
+   build; the CUTLASS kernel it would need is SM90-only anyway).
+
+**The one-line takeaway (Marlin's own supported-types list):** Blackwell's sub-8-bit
+compute path is **`float4_e2m1f` (NVFP4), not int4×int8**. The mixed-INT/FP escape hatch
+that works on Hopper (QServe/QoQ, CUTLASS-W4A8, Machete) has **no sm_120 kernel** — so on
+consumer Blackwell the *only* 4-bit-weight format that clears the bf16 prefill floor is
+one with a native low-precision **compute** kernel: FP4/MXFP4. This is the same family of
+sm_120-coverage gap as the broken FP4-MoE path (vllm#31085) and strengthens the slide-7
+thesis: INT4 is memory-only here **and so is W4A8** — there's no INT-mixed way out, only FP4.
+(Would-run-elsewhere caveat: TensorRT-LLM's `W4A8_AWQ` runs on Blackwell, and QServe runs
+on Hopper — so this is a vLLM-on-sm_120 limitation, not a claim that W4A8 is dead everywhere.)
+
 ## 2. Microscaling formats (MXFP4 / MXFP6 / MXFP8 / NVFP4)
 
 The technical spine of slide 7. **Same E2M1 element; the entire difference is the scale:**
