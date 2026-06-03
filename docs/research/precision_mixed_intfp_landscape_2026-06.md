@@ -97,8 +97,28 @@ consumer Blackwell the *only* 4-bit-weight format that clears the bf16 prefill f
 one with a native low-precision **compute** kernel: FP4/MXFP4. This is the same family of
 sm_120-coverage gap as the broken FP4-MoE path (vllm#31085) and strengthens the slide-7
 thesis: INT4 is memory-only here **and so is W4A8** — there's no INT-mixed way out, only FP4.
-(Would-run-elsewhere caveat: TensorRT-LLM's `W4A8_AWQ` runs on Blackwell, and QServe runs
-on Hopper — so this is a vLLM-on-sm_120 limitation, not a claim that W4A8 is dead everywhere.)
+**Which GPUs DO run W4A8 (verified 2026-06-03) — the counterintuitive part:**
+
+| GPU | cap | vLLM W4A8 | note |
+|---|---|---|---|
+| H100 / H200 (Hopper) | sm_90 | ✅ yes | CUTLASS-W4A8 + Machete; the supported tier |
+| B200 / GB200 (DC Blackwell) | sm_100 | ❌ no | issue #35439 open/unfixed Jun 2026 |
+| RTX 5090 (consumer Blackwell) | sm_120 | ❌ no | measured above |
+| A100 / L40S / 4090 (Ampere/Ada) | sm_80/89 | ❌ no | no working real-W4A8 path |
+
+**vLLM W4A8 is Hopper-only.** A $30–40k B200 is in the *same boat* as the 5090 — the
+Machete/CUTLASS kernels use Hopper `wgmma` PTX never ported to either Blackwell variant.
+More-expensive ≠ supported; it's the *previous* generation that has it. Two caveats:
+(1) even on Hopper only the **fp8-activation scheme (W4AFP8)** genuinely works — the
+int8-activation path is broken on *all* GPUs (vLLM #38064: silently runs as W4A16).
+(2) **TensorRT-LLM** (different runtime) *does* run `W4A8_AWQ` on B200/sm_100 — but its
+matrix is `Y` for sm_100/103 and `.` for **sm_120**, so the 5090 is excluded in *both*
+vLLM and TRT-LLM. Net: W4A8 is a Hopper-generation artifact; the whole Blackwell line
+(consumer + data-center) deprioritized INT4×INT8 for native FP4. To run W4A8 at all:
+H100/H200 + vLLM (W4A8-FP8), or B200 + TensorRT-LLM (W4A8_AWQ).
+([vLLM #35439](https://github.com/vllm-project/vllm/issues/35439),
+[#38064](https://github.com/vllm-project/vllm/issues/38064),
+[TRT-LLM quant matrix](https://nvidia.github.io/TensorRT-LLM/features/quantization.html))
 
 ## 2. Microscaling formats (MXFP4 / MXFP6 / MXFP8 / NVFP4)
 
