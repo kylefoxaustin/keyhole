@@ -46,13 +46,19 @@ def main():
     ap.add_argument("--dtype", default="bfloat16")
     ap.add_argument("--max-model-len", type=int, default=8192)
     ap.add_argument("--gpu-mem-util", type=float, default=0.9)
+    ap.add_argument("--hf-overrides", default=None,
+                    help='JSON passed to LLM(hf_overrides=...), e.g. force the text path: '
+                         '\'{"architectures": ["Gemma3ForCausalLM"]}\'')
     args = ap.parse_args()
 
     os.makedirs(OUTDIR, exist_ok=True)
     from vllm import LLM, SamplingParams
 
-    print(f"[{args.label}] loading {args.model} (quant={args.quantization}, dtype={args.dtype}) ...",
-          flush=True)
+    kw = {}
+    if args.hf_overrides:
+        kw["hf_overrides"] = json.loads(args.hf_overrides)
+    print(f"[{args.label}] loading {args.model} (quant={args.quantization}, dtype={args.dtype}"
+          f"{', hf_overrides='+args.hf_overrides if args.hf_overrides else ''}) ...", flush=True)
     llm = LLM(
         model=args.model,
         quantization=args.quantization,
@@ -63,6 +69,7 @@ def main():
         enable_prefix_caching=False,  # CRITICAL: else repeated prompts hit the cache and
                                       # "prefill" latency collapses to fixed overhead (invalid).
         trust_remote_code=True,
+        **kw,
     )
     tok = llm.get_tokenizer()
 

@@ -28,6 +28,7 @@ PAIRS = [
     ("Llama-3.1-8B",           "Llama",        "llama8b_awq_int4",   "llama8b_nvfp4",       8),
     ("DS-R1-Distill-Llama-8B", "Llama",        "dsllama8b_int4",     "dsllama8b_nvfp4",     8),
     ("Qwen3-8B",               "Qwen3",        "qwen3_8b_awq_int4",  "nvfp4",               8),
+    ("Nemotron-Nano-9B-v2",    "Nemotron-H",   "nemotron_9b_int4",   "nemotron_9b_nvfp4",   9),
     ("DS-R1-Distill-Qwen-14B", "Qwen2",        "dsqwen14b_int4",     "dsqwen14b_nvfp4",    14),
     ("Qwen3-14B",              "Qwen3",        "qwen3_14b_awq_int4", "qwen3_14b_nvfp4",    14),
     ("Phi-4-reasoning-plus",   "Phi-4",        "phi4rp_int4",        "phi4rp_nvfp4",       15),
@@ -37,7 +38,7 @@ PAIRS = [
 ]
 
 ARCH_C = {"Mistral": "#2b6cb0", "Llama": "#dd6b20", "Qwen3": "#2f855a",
-          "Qwen2": "#38a169", "Phi-4": "#805ad5"}
+          "Qwen2": "#38a169", "Phi-4": "#805ad5", "Nemotron-H": "#d69e2e"}
 
 
 def load(label):
@@ -107,7 +108,11 @@ def main():
             seen.append(r["arch"]); ax.scatter([], [], color=ARCH_C.get(r["arch"], "#718096"),
                                                 s=70, label=r["arch"])
     ax.legend(frameon=False, fontsize=8, loc="lower right", title="architecture")
-    fig.tight_layout(); fig.savefig(OUTPNG, dpi=130)
+    fig.text(0.5, 0.012,
+             "Nemotron-Nano-9B (Nemotron-H, amber) splits less than pure transformers — it is hybrid "
+             "Mamba, and its NVFP4 keeps the Mamba layers in BF16 (partial FP4).",
+             ha="center", fontsize=7.6, color="#888", style="italic")
+    fig.tight_layout(rect=[0, 0.03, 1, 1]); fig.savefig(OUTPNG, dpi=130)
     print("wrote", OUTPNG)
     print(f"n={len(rows)} archs={doc['__meta__']['n_archs']} split {min(splits)}-{max(splits)} med {med} "
           f"decode {min(decs)}-{max(decs)}")
