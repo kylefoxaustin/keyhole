@@ -32,10 +32,12 @@ SLIDES = [
      "Edge AI Use Cases on NPU Silicon", "6 · Decode is bandwidth-bound — measured ladder + MoE decoupling · Jun 2026"),
     ("data/output/precision_5090_breadth.png",
      "Edge AI Use Cases on NPU Silicon", "7 · INT4 vs FP4 — a 4-bit memory format is not a compute format · Jun 2026"),
+    ("data/output/precision_5090_breadth_v2.png",
+     "Edge AI Use Cases on NPU Silicon", "8 · The asymmetry is architecture-general — 9 models, 5 architectures · Jun 2026"),
     ("data/output/precision_5090_fp4_lifecycle.png",
-     "Edge AI Use Cases on NPU Silicon", "8 · FP4 wins inference AND training — the win grows with compute · Jun 2026"),
+     "Edge AI Use Cases on NPU Silicon", "9 · FP4 wins inference AND training — the win grows with compute · Jun 2026"),
     ("data/output/precision_5090_fp4_convergence.png",
-     "Edge AI Use Cases on NPU Silicon", "9 · FP4 training converges to BF16 quality — fast AND accurate · Jun 2026"),
+     "Edge AI Use Cases on NPU Silicon", "10 · FP4 training converges to BF16 quality — fast AND accurate · Jun 2026"),
 ]
 
 
