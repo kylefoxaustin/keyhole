@@ -23,6 +23,7 @@ OUTPNG = os.path.join(REPO, "data/output/precision_5090_breadth_v2.png")
 
 # display | arch | int4_label | nvfp4_label  (params for sort)
 PAIRS = [
+    ("Llama-3.2-1B",           "Llama",        "llama32_1b_int4",    "llama32_1b_nvfp4",    1),
     ("Mistral-7B-v0.3",        "Mistral",      "mistral7b_v03_int4", "mistral7b_v03_nvfp4", 7),
     ("Llama-3.1-8B",           "Llama",        "llama8b_awq_int4",   "llama8b_nvfp4",       8),
     ("DS-R1-Distill-Llama-8B", "Llama",        "dsllama8b_int4",     "dsllama8b_nvfp4",     8),
@@ -32,6 +33,7 @@ PAIRS = [
     ("Phi-4-reasoning-plus",   "Phi-4",        "phi4rp_int4",        "phi4rp_nvfp4",       15),
     ("Mistral-Small-24B",      "Mistral",      "mistral24b_int4",    "mistral24b_nvfp4",   24),
     ("Qwen3-32B",              "Qwen3",        "qwen3_32b_awq_int4", "qwen3_32b_nvfp4",    32),
+    ("DS-R1-Distill-Qwen-32B", "Qwen2",        "dsqwen32b_int4",     "dsqwen32b_nvfp4",    32),
 ]
 
 ARCH_C = {"Mistral": "#2b6cb0", "Llama": "#dd6b20", "Qwen3": "#2f855a",
@@ -92,9 +94,10 @@ def main():
     ax.set_yticklabels([f"{r['model']}  ({r['arch']}, {r['params_b']}B)" for r in rows], fontsize=9)
     ax.set_xlabel("prefill speedup  =  NVFP4 ÷ INT4  (same weights, RTX 5090)")
     ax.set_xlim(0.5, 5.3)
+    lo, hi = min(splits), max(splits)
     ax.set_title("The INT4-vs-FP4 asymmetry is ARCHITECTURE-GENERAL\n"
                  f"{len(rows)} same-base pairs · {doc['__meta__']['n_archs']} architectures · "
-                 "every one ties on decode, splits 3.2–4.5× on prefill",
+                 f"every one ties on decode; prefill split {lo:.1f}× (1B) → {hi:.1f}× (32B)",
                  fontsize=11.5)
     ax.grid(True, axis="x", alpha=0.3)
     # legend by arch
