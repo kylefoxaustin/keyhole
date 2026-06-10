@@ -33,10 +33,16 @@ OUT_DEFAULT = REPO / "data" / "output" / "keyhole-exec-combined.pptx"
 
 # Part 2 — the LLM/precision chart slides (PNGs already produced by the precision scripts).
 PRECISION_CHARTS = [
+    ("data/output/precision_blue_overtime.png",
+     "INT vs FP over time — and the FP half grows",
+     "deploy-precision mix per workload, 2026→2033 · grey stays INT, blue is FP (light = optional, dark = mandatory)"),
     ("data/output/precision_migration.png",
      "The 7-year precision roadmap", "INT8 holds the floor; FP becomes mandatory sub-8-bit"),
     ("data/output/precision_composition.png",
      "Today's measured INT-vs-FP composition", "where the bits actually go, per workload axis"),
+    ("data/output/precision_blue_weights.png",
+     "The weights question: do they stay INT4, or go FP4?",
+     "INT4 & FP4 TIE on decode (4-bit memory) but FP4 alone wins prefill 3.6× & training 5.5× — measured"),
     ("data/output/precision_5090_ladder.png",
      "Decode is bandwidth-bound", "MoE decouples footprint from speed — measured ladder"),
     ("data/output/precision_5090_breadth.png",
