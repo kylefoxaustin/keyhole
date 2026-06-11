@@ -73,46 +73,71 @@ def main():
     json.dump(doc, open(OUTJSON, "w"), indent=2)
     print("wrote", OUTJSON)
 
-    fig, ax = plt.subplots(figsize=(10.5, 6.4))
-    y = range(len(rows))
-    # plateau band (the FP4/bf16 tensor-core asymptote zone)
-    ax.axvspan(3.4, 4.6, color="#2f855a", alpha=0.07, zorder=0)
-    ax.axvline(1.0, ls=":", color="#cbd5e0", lw=1.1, zorder=1)
-    ax.text(1.0, -0.95, "1× = parity", fontsize=7.5, color="#a0aec0", ha="center")
-    for i, r in enumerate(rows):
-        c = ARCH_C.get(r["arch"], "#718096")
-        ax.plot([1.0, r["prefill_split_nvfp4_int4"]], [i, i], color=c, lw=2.0, alpha=0.5, zorder=2)
-        ax.scatter(r["prefill_split_nvfp4_int4"], i, s=95, color=c, zorder=3,
-                   edgecolor="white", linewidth=0.7)
-        ax.annotate(f"{r['prefill_split_nvfp4_int4']:.1f}×", (r["prefill_split_nvfp4_int4"], i),
-                    textcoords="offset points", xytext=(8, 0), va="center", fontsize=8.5,
-                    fontweight="bold", color=c)
-        ax.annotate(f"decode {r['decode_ratio_nvfp4_int4']:.2f}×", (1.0, i),
-                    textcoords="offset points", xytext=(6, 9), va="center", fontsize=6.8, color="#888")
-    ax.axvline(med, ls="--", color="#9b2c2c", lw=1.3, zorder=2)
-    ax.text(med, -0.9, f"median {med:.1f}×", color="#9b2c2c", fontsize=8.5, ha="center", fontweight="bold")
-    ax.set_yticks(list(y))
-    ax.set_yticklabels([f"{r['model']}  ({r['arch']}, {r['params_b']}B)" for r in rows], fontsize=9)
-    ax.set_xlabel("prefill speedup  =  NVFP4 ÷ INT4  (same weights, RTX 5090)")
-    ax.set_xlim(0.5, 5.3)
+    # ---- Slopegraph: one line per model, decode (left) → prefill (right). ----
+    # The message IS the shape: every line is flat at parity on decode and shoots
+    # up on prefill, regardless of architecture (colour) or size.
     lo, hi = min(splits), max(splits)
-    ax.set_title("The INT4-vs-FP4 asymmetry is ARCHITECTURE-GENERAL\n"
-                 f"{len(rows)} same-base pairs · {doc['__meta__']['n_archs']} architectures · "
-                 f"every one ties on decode; prefill split {lo:.1f}× (1B) → {hi:.1f}× (32B)",
-                 fontsize=11.5)
-    ax.grid(True, axis="x", alpha=0.3)
-    # legend by arch
+    dmed = sorted(decs)[len(decs) // 2]
+    fig, ax = plt.subplots(figsize=(11.0, 6.8))
+    x0, x1 = 0.0, 1.0
+
+    # "tie" band around parity on the decode side; parity reference line
+    ax.axhspan(0.78, 1.05, xmin=0.0, xmax=0.5, color="#cbd5e0", alpha=0.35, zorder=0)
+    ax.axhline(1.0, ls=":", color="#a0aec0", lw=1.0, zorder=1)
+
+    for r in rows:
+        c = ARCH_C.get(r["arch"], "#718096")
+        d, p = r["decode_ratio_nvfp4_int4"], r["prefill_split_nvfp4_int4"]
+        ax.plot([x0, x1], [d, p], color=c, lw=1.7, alpha=0.6, zorder=2,
+                solid_capstyle="round")
+        ax.scatter([x0, x1], [d, p], s=66, color=c, edgecolor="white",
+                   linewidth=0.7, zorder=3)
+
+    # median ticks per column
+    ax.plot([x0 - 0.07, x0 + 0.07], [dmed, dmed], color="#1a202c", lw=3, zorder=4)
+    ax.plot([x1 - 0.07, x1 + 0.07], [med, med], color="#9b2c2c", lw=3, zorder=4)
+    ax.text(x0, dmed - 0.22, f"median {dmed:.2f}×", ha="center", fontsize=8.5,
+            fontweight="bold", color="#1a202c")
+    ax.text(x1, med + 0.012 * 0 + 0.24, f"median {med:.1f}×", ha="center", fontsize=8.5,
+            fontweight="bold", color="#9b2c2c")
+
+    # cluster captions — the takeaway, in plain words
+    ax.text(x0 - 0.02, 1.95, "DECODE\nmemory-bound", ha="center", va="bottom",
+            fontsize=12, fontweight="bold", color="#2d3748")
+    ax.text(x0 - 0.02, 0.52, "INT4 = FP4  →  TIE\nboth are just 4-bit memory\n(same bytes to stream)",
+            ha="center", va="top", fontsize=9, color="#4a5568")
+    ax.text(x1 + 0.02, 4.75, "PREFILL\ncompute-bound", ha="center", va="bottom",
+            fontsize=12, fontweight="bold", color="#9b2c2c")
+    ax.text(x1 + 0.18, 3.6, f"FP4 wins\n{lo:.1f}–{hi:.1f}×\nnative tensor cores\n(INT4 stuck on\nthe BF16 floor)",
+            ha="left", va="center", fontsize=9, color="#9b2c2c", fontweight="bold")
+
+    ax.set_xticks([x0, x1])
+    ax.set_xticklabels(["Decode", "Prefill"], fontsize=13, fontweight="bold")
+    ax.set_ylabel("NVFP4 speed ÷ INT4 speed  (same weights, RTX 5090)", fontsize=10)
+    ax.set_xlim(-0.32, 1.42)
+    ax.set_ylim(0.3, 5.2)
+    for s in ("top", "right"):
+        ax.spines[s].set_visible(False)
+    ax.set_title("Same weights, every architecture: 4-bit INT and 4-bit FP are identical on decode —\n"
+                 f"but only FP4 also accelerates prefill.  {len(rows)} models · "
+                 f"{doc['__meta__']['n_archs']} architectures · all behave the same way",
+                 fontsize=12)
+    ax.grid(True, axis="y", alpha=0.25)
+
+    # legend by arch (shows the breadth: 6 distinct architectures)
     seen = []
     for r in rows:
         if r["arch"] not in seen:
-            seen.append(r["arch"]); ax.scatter([], [], color=ARCH_C.get(r["arch"], "#718096"),
-                                                s=70, label=r["arch"])
-    ax.legend(frameon=False, fontsize=8, loc="lower right", title="architecture")
+            seen.append(r["arch"])
+            ax.scatter([], [], color=ARCH_C.get(r["arch"], "#718096"), s=70, label=r["arch"])
+    ax.legend(frameon=False, fontsize=8.5, loc="upper left", title="architecture (6)",
+              title_fontsize=9, ncol=2)
     fig.text(0.5, 0.012,
-             "Nemotron-Nano-9B (Nemotron-H, amber) splits less than pure transformers — it is hybrid "
-             "Mamba, and its NVFP4 keeps the Mamba layers in BF16 (partial FP4).",
+             "Each line is one model (same weights, quantized both ways). Nemotron-Nano-9B (amber, lowest) "
+             "is hybrid Mamba — its NVFP4 keeps the Mamba layers BF16 (partial FP4), so it splits less.",
              ha="center", fontsize=7.6, color="#888", style="italic")
-    fig.tight_layout(rect=[0, 0.03, 1, 1]); fig.savefig(OUTPNG, dpi=130)
+    fig.tight_layout(rect=[0, 0.03, 1, 1])
+    fig.savefig(OUTPNG, dpi=130)
     print("wrote", OUTPNG)
     print(f"n={len(rows)} archs={doc['__meta__']['n_archs']} split {min(splits)}-{max(splits)} med {med} "
           f"decode {min(decs)}-{max(decs)}")
