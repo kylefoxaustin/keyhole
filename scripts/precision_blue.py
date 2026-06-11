@@ -112,13 +112,17 @@ WEIGHTS = {
     "measured_multipliers_vs_bf16": {
         "axes": ["decode\n(memory-bound)", "prefill\n(compute-bound)", "training GEMM\n(compute-bound)"],
         "int4": [2.35, 1.04, 1.00],
+        "fp8":  [1.55, 1.71, 1.90],
         "fp4":  [2.24, 3.59, 5.50],
         "int4_note": "INT4 dequantises to BF16 to compute → a MEMORY-only format. "
                      "Wins decode (fewer bytes to stream) but pinned to the BF16 floor "
                      "for prefill, and not a training format at all.",
+        "fp8_note": "FP8 (E4M3) is the mid anchor — a real compute format, but 8-bit: "
+                    "~1.6×/1.7× inference, ~1.9× training. The stepping-stone, not the "
+                    "destination.",
         "fp4_note": "FP4 (NVFP4/MXFP4) runs on native Blackwell tensor cores → a "
-                    "MEMORY + COMPUTE format. Same decode win, plus 3.6× prefill and "
-                    "5.5× training-GEMM. The win grows with compute intensity.",
+                    "MEMORY + COMPUTE format. Same decode win as INT4, plus 3.6× prefill "
+                    "and 5.5× training-GEMM. The win grows with compute intensity.",
         "source": "same-base Qwen3-8B, RTX 5090 sm_120a, vLLM 0.22 single-stream; "
                    "training GEMM from qutlass/Quartet. prefill split is architecture-"
                    "general (median 3.86× across 12 models / 6 archs).",

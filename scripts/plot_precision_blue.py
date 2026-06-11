@@ -81,10 +81,15 @@ def plot_overtime(doc, out):
         # workload label + verdict, left of the bars
         ax.set_title(f"{w['display_name']}   —   {w['verdict']}",
                      fontsize=12, fontweight="bold", loc="left", color="#222", pad=6)
-        # blue-growth arrow annotation on the LLM panel (the headline)
+        # blue-growth callout on the LLM panel (the headline): point at the 2030
+        # crossover (INT shrinks to 18% → FP is the majority), in a white pill so
+        # the red text reads on any segment behind it.
         if wk == "llm":
-            ax.annotate("FP overtakes INT by 2030", xy=(60, 0.0), xytext=(60, -0.05),
-                        ha="center", fontsize=9, color=RED, fontweight="bold")
+            ax.annotate("FP overtakes INT by 2030", xy=(18, 1), xytext=(30, 1.6),
+                        ha="left", va="center", fontsize=9, color=RED, fontweight="bold",
+                        zorder=10,
+                        bbox=dict(boxstyle="round,pad=0.25", fc="white", ec="none", alpha=0.88),
+                        arrowprops=dict(arrowstyle="-|>", color=RED, lw=1.4))
 
     axes[-1].set_xlabel("share of deployed model (%)", fontsize=10)
 
@@ -141,20 +146,23 @@ def plot_weights(doc, out):
     # ---- RIGHT: the measured WHY — INT4 vs FP4 across the three regimes ----
     axR = fig.add_axes([0.55, 0.30, 0.42, 0.52])
     axes_lbl = mm["axes"]
-    int4 = mm["int4"]; fp4 = mm["fp4"]
+    int4 = mm["int4"]; fp8 = mm["fp8"]; fp4 = mm["fp4"]
     x = range(len(axes_lbl))
-    bw = 0.38
-    b1 = axR.bar([i - bw / 2 for i in x], int4, bw, label="INT4 (memory-only)",
+    bw = 0.26
+    FP8_C = "#3d7cc0"
+    b1 = axR.bar([i - bw for i in x], int4, bw, label="INT4 (memory-only)",
                  color=INT_C, edgecolor="white")
-    b2 = axR.bar([i + bw / 2 for i in x], fp4, bw, label="FP4 / NVFP4 (memory + compute)",
+    b3 = axR.bar([i for i in x], fp8, bw, label="FP8 / E4M3 (mid anchor)",
+                 color=FP8_C, edgecolor="white")
+    b2 = axR.bar([i + bw for i in x], fp4, bw, label="FP4 / NVFP4 (memory + compute)",
                  color=MAND_C, edgecolor="white")
     axR.axhline(1.0, color="#aaa", lw=1, ls="--")
     axR.text(len(axes_lbl) - 0.5, 1.05, "BF16 = 1×", fontsize=8, color="#888", ha="right")
-    for bars in (b1, b2):
+    for bars in (b1, b3, b2):
         for b in bars:
             h = b.get_height()
             axR.text(b.get_x() + b.get_width() / 2, h + 0.12, f"{h:.2f}×",
-                     ha="center", va="bottom", fontsize=9, fontweight="bold",
+                     ha="center", va="bottom", fontsize=8, fontweight="bold",
                      color="#222")
     axR.set_xticks(list(x))
     axR.set_xticklabels(axes_lbl, fontsize=9.5)
@@ -169,7 +177,7 @@ def plot_weights(doc, out):
     axR.annotate("TIE\n(both 4-bit memory)", xy=(0, 2.3), xytext=(0, 3.5),
                  ha="center", fontsize=8, color="#555",
                  arrowprops=dict(arrowstyle="-", color="#bbb", lw=1))
-    axR.annotate("INT4 stuck on\nthe BF16 floor", xy=(1 - bw / 2, 1.04), xytext=(0.75, 4.6),
+    axR.annotate("INT4 stuck on\nthe BF16 floor", xy=(1 - bw, 1.04), xytext=(0.55, 4.6),
                  ha="center", fontsize=8, color=RED, fontweight="bold",
                  arrowprops=dict(arrowstyle="-|>", color=RED, lw=1.3))
 
