@@ -99,12 +99,12 @@ def plot_overtime(doc, out):
         Patch(facecolor=MAND_C, label="FP, mandatory — cannot be INT (outliers, softmax/norm, action heads)"),
     ]
     fig.legend(handles=legend, loc="lower center", ncol=1, fontsize=9.6, frameon=False,
-               bbox_to_anchor=(0.5, 0.005))
-    fig.text(0.5, 0.072,
+               bbox_to_anchor=(0.5, 0.012))
+    fig.text(0.5, 0.10,
              "2026 anchored to measured INT/FP composition + 5090 bake-offs; 2028–2033 are a directional forecast "
              "(adoption precedent + shipping FP silicon).",
              ha="center", fontsize=8, color="#888", style="italic")
-    fig.tight_layout(rect=[0.02, 0.10, 1, 0.925])
+    fig.tight_layout(rect=[0.02, 0.15, 1, 0.925])
     fig.savefig(out + ".png", dpi=150, bbox_inches="tight")
     fig.savefig(out + ".svg", bbox_inches="tight")
     print("wrote", out + ".png")
@@ -114,13 +114,13 @@ def plot_weights(doc, out):
     w = doc["weights"]
     mm = w["measured_multipliers_vs_bf16"]
 
-    fig = plt.figure(figsize=(13.4, 7.4))
+    fig = plt.figure(figsize=(13.4, 8.2))
     fig.suptitle("The weights question:  do they stay INT4/INT8, or does FP4 take over?",
-                 fontsize=16.5, fontweight="bold", y=0.975)
-    fig.text(0.5, 0.918, w["headline"], ha="center", fontsize=11, color=RED, fontweight="bold")
+                 fontsize=16.5, fontweight="bold", y=0.972)
+    fig.text(0.5, 0.928, w["headline"], ha="center", fontsize=11, color=RED, fontweight="bold")
 
     # ---- LEFT: weight-format trajectory over time -------------------------
-    axL = fig.add_axes([0.045, 0.13, 0.40, 0.70])
+    axL = fig.add_axes([0.045, 0.40, 0.40, 0.47])
     axL.axis("off")
     axL.set_xlim(0, 1); axL.set_ylim(0, 1)
     axL.text(0.5, 1.02, "LLM / VLA weight format over time", ha="center",
@@ -140,11 +140,12 @@ def plot_weights(doc, out):
         if i < n - 1:
             axL.annotate("", xy=(0.5, y - 0.088), xytext=(0.5, y - 0.137),
                          arrowprops=dict(arrowstyle="-|>", color="#666", lw=1.6))
-    axL.text(0.5, 0.86 - n * 0.225 + 0.04, w["vision_caveat"], ha="center", va="top",
+    # vision caveat sits in the gap below the trajectory panel (fig coords)
+    fig.text(0.245, 0.355, w["vision_caveat"], ha="center", va="top",
              fontsize=8.2, color=GREEN, style="italic", wrap=True)
 
     # ---- RIGHT: the measured WHY — INT4 vs FP4 across the three regimes ----
-    axR = fig.add_axes([0.55, 0.30, 0.42, 0.52])
+    axR = fig.add_axes([0.55, 0.46, 0.42, 0.40])
     axes_lbl = mm["axes"]
     int4 = mm["int4"]; fp8 = mm["fp8"]; fp4 = mm["fp4"]
     x = range(len(axes_lbl))
@@ -181,15 +182,21 @@ def plot_weights(doc, out):
                  ha="center", fontsize=8, color=RED, fontweight="bold",
                  arrowprops=dict(arrowstyle="-|>", color=RED, lw=1.3))
 
-    # ---- bottom: the why bullets ------------------------------------------
-    bullets = w["why_fp_wins_below_8bit"]
-    fig.text(0.55, 0.225, "Why:", fontsize=9.5, fontweight="bold", color="#222")
-    by = 0.205
-    for b in bullets:
-        fig.text(0.555, by, "• " + b, fontsize=7.9, color="#444", wrap=True,
-                 ha="left", va="top")
+    # ---- bottom: the "why" — concise full-width one-liners (own clean band) ----
+    why = [
+        "Decode ties because INT4 and FP4 stream the same 4 bits (bandwidth-bound); prefill & training "
+        "split because only FP4 has a 4-bit compute path — INT4 dequantizes to BF16 and inherits its floor.",
+        "Below 8 bits, FP's exponent (E4M3 / E2M1) preserves the heavy-tail activation outliers that INT "
+        "clipping loses — DeepSeek-R1: <1% loss FP8→FP4 PTQ.",
+        "Silicon already bet on FP4: Blackwell (FP4/FP6/FP8), Qualcomm Hexagon (FP8), TI ADAS — the roadmap "
+        "is FP, not INT-mixed.",
+    ]
+    fig.text(0.06, 0.235, "Why FP4 takes the weights:", fontsize=10, fontweight="bold", color="#222")
+    by = 0.195
+    for b in why:
+        fig.text(0.06, by, "•  " + b, fontsize=8.4, color="#444", ha="left", va="top")
         by -= 0.052
-    fig.text(0.5, 0.012, "Source: " + mm["source"], ha="center", fontsize=7.2,
+    fig.text(0.5, 0.018, "Source: " + mm["source"], ha="center", fontsize=7.2,
              color="#999", style="italic")
 
     fig.savefig(out + ".png", dpi=150, bbox_inches="tight")

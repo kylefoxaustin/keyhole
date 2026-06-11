@@ -142,13 +142,13 @@ def plot_horizon(models, horizon, out):
         Patch(facecolor=OPT_C, label="FP-optional — FP4-native weights (could be INT, lose compute/accuracy)"),
         Patch(facecolor=MAND_C, label="FP-mandatory — cannot be INT (FP tail / flow-matching head / sub-4-bit outliers)"),
     ]
-    fig.legend(handles=legend, loc="lower center", ncol=1, fontsize=8.8, frameon=False,
-               bbox_to_anchor=(0.5, -0.02))
-    fig.text(0.5, 0.04,
+    fig.legend(handles=legend, loc="lower center", ncol=1, fontsize=8.6, frameon=False,
+               bbox_to_anchor=(0.5, 0.075))
+    fig.text(0.5, 0.028,
              "Vision stays all-INT. Edge LLMs hold INT longest; flagships lead to FP4. "
              "By 2033 sub-4-bit outlier handling turns part of even the FP4 engine FP-mandatory (dark grows).",
              ha="center", fontsize=8, color="#666", style="italic")
-    fig.tight_layout(rect=[0, 0.08, 1, 0.93])
+    fig.tight_layout(rect=[0, 0.17, 1, 0.93])
     fig.savefig(out + ".png", dpi=150, bbox_inches="tight")
     fig.savefig(out + ".svg", bbox_inches="tight")
     print("wrote", out + ".png")

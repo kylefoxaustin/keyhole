@@ -132,19 +132,15 @@ def main():
     legend = [
         Patch(facecolor=INT_C, label="INT — deployed integer today"),
         Patch(facecolor=FP_C, label="FP-mandatory — cannot be INT (FP tail / flow-matching head / hi-precision residual)"),
-        Patch(facecolor=NA_C, hatch="///", label="not measured for this axis"),
     ]
-    fig.legend(handles=legend, loc="lower center", ncol=1, fontsize=9,
-               frameon=False, bbox_to_anchor=(0.5, -0.01))
-    fig.text(0.5, 0.05,
-             "Grey = INT works for this model TODAY — it does NOT mean FP is unneeded. The FP-mandatory tail is tiny by FLOPs "
-             "yet dominates latency (memory-/launch-bound);",
-             ha="center", fontsize=8, color="#666", style="italic")
+    fig.legend(handles=legend, loc="lower center", ncol=2, fontsize=8.5,
+               frameon=False, bbox_to_anchor=(0.5, 0.072))
     fig.text(0.5, 0.028,
-             "flow-matching heads (π0.5, NORA-1.5) already require FP; and below 8-bit (FP8 '28 / FP4 '30) the grey itself migrates to FP4.",
+             "Grey = INT works for this model TODAY — not that FP is unneeded: flow-matching heads (π0.5, NORA-1.5) already "
+             "require FP, and below 8-bit (FP8 '28 / FP4 '30) the grey itself migrates to FP4.",
              ha="center", fontsize=8, color="#666", style="italic")
 
-    fig.tight_layout(rect=[0, 0.09, 1, 0.93])
+    fig.tight_layout(rect=[0, 0.13, 1, 0.93])
     fig.savefig(OUT + ".png", dpi=150, bbox_inches="tight")
     fig.savefig(OUT + ".svg", bbox_inches="tight")
     print("wrote", OUT + ".png", "and", OUT + ".svg")
