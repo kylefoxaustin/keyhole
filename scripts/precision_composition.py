@@ -205,6 +205,16 @@ VLA_FILES = {
 }
 
 
+# Params-proportional FLOP proxy for VLAs (arch_analytic): GEMM ∝ params×tokens;
+# the softmax/norm/act tail is ~1.5% of backbone GEMM (matches the LLM analytic
+# result that the FP tail is <2% of FLOPs). Flow-matching action experts run an
+# N-step denoise loop and are FP-MANDATORY; AR / regression heads are INT-capable.
+VLA_CTX_TOKENS = 512          # one VLM forward: ~256 vision tokens + text prompt
+ACTION_CHUNK_TOKENS = 64      # action tokens processed per head pass
+DENOISE_STEPS = {"pi_0p5": 10, "nora_1p5": 10}   # published / representative
+TAIL_FRAC = 0.015             # FP tail as a fraction of backbone GEMM FLOPs
+
+
 def build_vla(spec, dtype_label):
     total = spec["total_params_b"]
     vlm = spec.get("vlm_params_b", 0.0)
@@ -235,6 +245,38 @@ def build_vla(spec, dtype_label):
         head_note = "single-loop autoregressive; INT8-friendly throughout"
         tier = "INT8-only OK"
 
+    # --- by_flops (arch_analytic, params-proportional proxy) ---
+    steps = DENOISE_STEPS.get(spec["vla_key"], 1)
+    vlm_gemm = 2 * vlm * VLA_CTX_TOKENS
+    vlm_tail = TAIL_FRAC * vlm_gemm
+    head_flops = 2 * action_b * ACTION_CHUNK_TOKENS * steps
+    if ternary:
+        ic_f, fp_f = vlm_gemm + head_flops, vlm_tail
+        flops_note = "ternary backbone + regression head are INT-capable GEMMs; only the FP tail is FP."
+    elif fp_mandatory_head:
+        ic_f, fp_f = vlm_gemm, vlm_tail + head_flops
+        flops_note = (f"VLM-backbone GEMM is INT-capable; the flow-matching expert ({action_m:.0f}M) "
+                      f"runs {steps}-step denoise and is FP-MANDATORY. Small by FLOPs but FP-locked, "
+                      f"and it dominates LATENCY (the dual-loop denoise).")
+    else:
+        ic_f, fp_f = vlm_gemm + head_flops, vlm_tail
+        flops_note = "single-loop AR: backbone + action tokens are INT-capable GEMMs; only the FP tail is FP."
+    tot_f = ic_f + fp_f
+
+    # --- by_bytes int/fp split at the INT8 deploy point (arch_analytic) ---
+    # backbone quantizes to int8 (1 byte/param); a flow-matching head stays bf16 (2 bytes/param).
+    bb_int = vlm * 1.0
+    if ternary:
+        b_int, b_fp = bb_int + action_b * 1.0, 0.0
+        bytes_note = "ternary weights + INT8 head — no FP-kept weights."
+    elif fp_mandatory_head:
+        b_int, b_fp = bb_int, action_b * 2.0
+        bytes_note = f"INT8 backbone ({vlm:.1f}B) + bf16 flow-matching head ({action_b:.2f}B kept FP)."
+    else:
+        b_int, b_fp = bb_int + action_b * 1.0, 0.0
+        bytes_note = "whole stack INT8 — no FP-kept weights."
+    b_tot = b_int + b_fp
+
     return {
         "family": "vla",
         "display_name": spec["display_name"],
@@ -253,14 +295,16 @@ def build_vla(spec, dtype_label):
             "note": head_note,
         },
         "by_flops": {
-            "provenance": "not_computed",
-            "note": "per-component FLOP decomposition not derived; the precision "
-                    "REQUIREMENT (dtype_path + FP-mandatory head) is the load-bearing "
-                    "fact for these models, not a FLOP %.",
+            "provenance": "arch_analytic",
+            "int_capable_pct": pct(ic_f, tot_f),
+            "fp_tail_pct": pct(fp_f, tot_f),
+            "note": flops_note,
         },
         "by_bytes": {
-            "provenance": "measured",
-            "note": "inference DRAM projections at three weight precisions (paper/spec).",
+            "provenance": "arch_analytic",
+            "int_capable_pct": pct(b_int, b_tot),
+            "fp_required_pct": pct(b_fp, b_tot),
+            "note": "INT/FP split of stored weight bytes at the INT8 deploy point. " + bytes_note,
             "inference_dram_gb": {
                 "bf16": spec["inference_dram_gb_bf16"],
                 "int8": spec["inference_dram_gb_int8"],
@@ -325,9 +369,14 @@ def build_sam3():
             "fp_tail_breakdown_pct": {k: pct(v, total_f) for k, v in fp_tail.items()},
             "note": "attention category split into GEMM (2*MACs, INT-capable) vs softmax (FP).",
         },
+        # bytes at the deploy point: matmul body int8 (1 B/param), norm kept fp16 (2 B/param).
+        # (Computed from param counts — the dump's per-category memory_bytes are unreliable.)
         "by_bytes": {
             "provenance": "reference_arch",
-            "note": "param bytes at bf16; int8 halves matmul-weight bytes.",
+            "int_capable_pct": pct(matmul_p * 1, matmul_p * 1 + cats["norm"]["params"] * 2),
+            "fp_required_pct": pct(cats["norm"]["params"] * 2, matmul_p * 1 + cats["norm"]["params"] * 2),
+            "note": "INT/FP split of stored weight bytes: matmul body (conv/attention/linear/embedding) "
+                    "quantizes to int8 (1 B/param); norm weights kept fp16 (2 B/param).",
             "param_bytes_bf16_mb": round(arch["model_summary"]["total_param_bytes_bf16"] / 1e6, 2),
         },
     }
@@ -354,9 +403,20 @@ def build_vision_quantizable():
             "yolo_params_m": int8["yolo_params_m"],
             "clip_params_m": int8["clip_params_m"],
         },
-        "by_flops": {"provenance": "not_computed",
-                     "note": "per-layer FLOP export not available for this recipe."},
-        "by_bytes": {"provenance": "not_computed"},
+        "by_flops": {
+            "provenance": "arch_analytic",
+            "int_capable_pct": pct(n_q, n_lin),
+            "fp_tail_pct": pct(n_lin - n_q, n_lin),
+            "note": "FLOP proxy from the recipe: quantized linear/conv layers are INT-capable GEMMs; "
+                    "the un-quantized detect/seg heads + norms run FP. (layer-count proxy)",
+        },
+        "by_bytes": {
+            "provenance": "arch_analytic",
+            "int_capable_pct": pct(n_q, n_lin),
+            "fp_required_pct": pct(n_lin - n_q, n_lin),
+            "note": "stored-byte split proxy: int8/fp8-quantized layers vs the FP-kept heads/norms "
+                    "(layer-count proxy; per-tensor byte export not available for this recipe).",
+        },
     }
 
 

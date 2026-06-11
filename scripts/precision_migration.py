@@ -52,7 +52,7 @@ WORKLOADS = {
         },
     },
     "llm": {
-        "display_name": "LLM (Skippy)",
+        "display_name": "LLM",
         "drivers": "outlier activations break INT clipping",
         "verdict": "the strong migration: INT8 → FP8 → FP4",
         "cells": {

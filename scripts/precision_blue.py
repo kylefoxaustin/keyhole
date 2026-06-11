@@ -43,18 +43,19 @@ HORIZONS = ["2026", "2028", "2030", "2033"]
 OVER_TIME = {
     "vision": {
         "display_name": "Vision  (CNN / SAM / YOLO)",
-        "verdict": "stays integer — bounded activations, no outlier problem",
+        "verdict": "all-integer engine — bounded activations, no outlier problem",
         "cells": {
-            "2026": (92, 0, 8),
-            "2028": (91, 1, 8),
-            "2030": (88, 4, 8),
-            "2033": (85, 7, 8),
+            "2026": (100, 0, 0),
+            "2028": (100, 0, 0),
+            "2030": (100, 0, 0),
+            "2033": (100, 0, 0),
         },
-        "note": "INT8 (→INT4 weights) holds throughout. The only FP is the small "
-                "softmax/norm tail that every transformer keeps FP.",
+        "note": "The matmul/conv engine is INT throughout (INT8 → INT4 weights). "
+                "Vision needs no FP path on the accelerator — it is the all-integer "
+                "baseline the other workloads migrate away from.",
     },
     "llm": {
-        "display_name": "LLM  (Skippy / chat / reasoning)",
+        "display_name": "LLM  (chat / reasoning)",
         "verdict": "the strong migration: INT8 → FP8 → FP4",
         "cells": {
             "2026": (90, 3, 7),

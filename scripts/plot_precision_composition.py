@@ -25,8 +25,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA = os.path.join(REPO, "data", "output", "precision_composition.json")
 OUT = os.path.join(REPO, "data", "output", "precision_composition")
 
-INT_C = "#2a9d8f"
-FP_C = "#e76f51"
+INT_C = "#9aa3b0"   # grey  — INT, deployed integer today
+FP_C = "#10325f"    # dark blue — FP-required / FP tail / hi-precision residual (cannot be INT)
 NA_C = "#dcdcdc"
 
 # Display order (top -> bottom on the chart we reverse), grouped by family.
@@ -62,16 +62,18 @@ def flops_split(m):
 
 
 def bytes_split(m):
-    """INT/FP byte split. Only LLM GGUF quants decompose into low-precision body
-    vs high-precision residual; pick the lowest-bit quant available."""
+    """INT/FP byte split. LLM GGUF quants decompose into low-precision body vs
+    high-precision residual (pick the lowest-bit quant); other families carry an
+    explicit int_capable_pct/fp_required_pct split in by_bytes."""
     bb = m.get("by_bytes", {})
     quants = bb.get("quants")
-    if not quants:
-        return None
-    for q in ("Q4_K_M", "Q5_K_M", "Q8_0"):
-        if q in quants and quants[q].get("high_precision_residual_pct") is not None:
-            resid = quants[q]["high_precision_residual_pct"]
-            return (100 - resid, resid, q)
+    if quants:
+        for q in ("Q4_K_M", "Q5_K_M", "Q8_0"):
+            if q in quants and quants[q].get("high_precision_residual_pct") is not None:
+                resid = quants[q]["high_precision_residual_pct"]
+                return (100 - resid, resid, q)
+    if "int_capable_pct" in bb:
+        return (bb["int_capable_pct"], bb.get("fp_required_pct", 100 - bb["int_capable_pct"]), "")
     return None
 
 
@@ -82,12 +84,12 @@ def main():
     y = range(len(rows))
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 6.4), sharey=True)
-    fig.suptitle("TODAY (2026): measured INT-vs-FP composition — the roadmap's anchor, not its conclusion",
-                 fontsize=14, fontweight="bold", y=0.99)
+    fig.suptitle("2026 — per-model INT vs FP composition (deployed today): the per-model breakout behind the over-time summary",
+                 fontsize=13.5, fontweight="bold", y=0.99)
     fig.text(0.5, 0.945,
-             "INT-capable @ 8-bit ≠ INT-sufficient below 8-bit.  As models descend to FP8 (~2028) / FP4 (~2030), "
-             "this green migrates to FP — see precision_migration.",
-             ha="center", fontsize=9.5, color="#c1121f")
+             "Grey = deployed INT today.  Dark blue = FP-mandatory (cannot be INT).  "
+             "By 2030/2033 the grey migrates to FP4 (light blue) — see the 2030 / 2033 panels.",
+             ha="center", fontsize=9.5, color="#10325f")
 
     panels = [
         ("By parameters\n(quantizable weights vs FP-only)", params_split, "params"),
@@ -128,18 +130,18 @@ def main():
         ax.axhline(6.5, color="#eee", lw=1)  # llm | vision
 
     legend = [
-        Patch(facecolor=INT_C, label="INT8-sufficient TODAY (at 8-bit)"),
-        Patch(facecolor=FP_C, label="FP-required / FP tail / hi-precision residual"),
+        Patch(facecolor=INT_C, label="INT — deployed integer today"),
+        Patch(facecolor=FP_C, label="FP-mandatory — cannot be INT (FP tail / flow-matching head / hi-precision residual)"),
         Patch(facecolor=NA_C, hatch="///", label="not measured for this axis"),
     ]
-    fig.legend(handles=legend, loc="lower center", ncol=3, fontsize=9,
+    fig.legend(handles=legend, loc="lower center", ncol=1, fontsize=9,
                frameon=False, bbox_to_anchor=(0.5, -0.01))
     fig.text(0.5, 0.05,
-             "Green = INT8 works for this model TODAY — it does NOT mean FP is unneeded. The FP tail is <0.1% by FLOPs "
+             "Grey = INT works for this model TODAY — it does NOT mean FP is unneeded. The FP-mandatory tail is tiny by FLOPs "
              "yet dominates latency (memory-/launch-bound);",
              ha="center", fontsize=8, color="#666", style="italic")
     fig.text(0.5, 0.028,
-             "flow-matching heads (π0.5, NORA-1.5) already require FP; and below 8-bit (FP8 '28 / FP4 '30) the green itself migrates to FP.",
+             "flow-matching heads (π0.5, NORA-1.5) already require FP; and below 8-bit (FP8 '28 / FP4 '30) the grey itself migrates to FP4.",
              ha="center", fontsize=8, color="#666", style="italic")
 
     fig.tight_layout(rect=[0, 0.09, 1, 0.93])
