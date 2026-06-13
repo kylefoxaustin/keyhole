@@ -36,3 +36,8 @@ data/trt_engines/
 .streamlit/secrets.toml
 # Private deck variant built with --include-private flag — contains secret values.
 data/output/keyhole_results_PRIVATE.pptx
+
+# Skippy personal-data bake-off artifacts — NEVER commit
+skippy_pixelrag/
+*_skippy_*.png
+data/output/skippy_*
