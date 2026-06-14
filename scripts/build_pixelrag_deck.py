@@ -134,10 +134,13 @@ def main():
         ("Caveat: the 'documents' class had recall@1 ≈ 0.", C.ACCENT_ORANGE, True),
         "  Cause: podcast transcripts — pages within one doc are near-duplicates, so exact-page R@1 is "
         "unwinnable. At DOCUMENT granularity it's healthy: pixel doc-recall@5 0.83 vs text 0.78.",
+        ("We used PixelRAG's ACTUAL retriever — verified by running their own code.", C.ACCENT_GREEN, True),
+        "  PixelRAG's retriever IS Qwen3-VL-Embedding-2B (their default) = the model we used. Their "
+        "4B 'screenshot-LoRA' is a READER/VQA adapter (task=CAUSAL_LM), not a retriever — run faithfully "
+        "as an embedder it scores far below the 2B (page R@5 0.05–0.15 vs 0.69). So our study is faithful.",
         ("Open / honest limits.", C.ACCENT_PURPLE, True),
         "  Synthetic queries (local-generated); modest absolute recall (1,218-page pool); NVFP4 answer-"
-        "match 62%; PixelRAG's own tuned 4B+LoRA embedder not faithfully reproduced (we used the "
-        "off-the-shelf 2B base — a conservative lower bound). All reproducible.",
+        "match 62%. All reproducible, all aggregate, no personal content.",
     ])
 
     # final — the edge recipe + takeaways
