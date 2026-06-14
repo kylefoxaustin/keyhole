@@ -82,7 +82,12 @@ def main():
                 "Reader precision — measured directly on vLLM",
                 "BF16 / FP8 / NVFP4 at the knee; NVFP4 prefill diluted by the un-quantized vision encoder")
 
-    # 5 — the edge recipe + takeaways
+    # 5 — edge projection chart
+    chart_slide(prs, "data/output/skippy_edge_projection.png",
+                "Projected to the edge NPU — bandwidth-starved",
+                "~same compute (prefill ×1.2) but ~15× less bandwidth (decode ×15): BF16 won't fit 8GB; NVFP4 is the enabler")
+
+    # 6 — the edge recipe + takeaways
     s = new_slide(prs)
     add_text_box(s, Inches(CONTENT_LEFT), Inches(0.42), Inches(CONTENT_W), Inches(0.55),
                  "The edge recipe", font_size=22, color=C.ACCENT_BLUE, bold=True)
