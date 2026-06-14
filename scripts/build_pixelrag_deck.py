@@ -54,7 +54,43 @@ def main():
                  "Source: github.com/StarTrail-org/PixelRAG (arXiv 2506.05209) · keyhole bake-off harness",
                  font_size=11, color=C.TEXT_DIM)
 
-    # 2 — the five findings
+    # 2 — WHAT IS IT (explainer): what / why / promise / how
+    s = new_slide(prs)
+    add_text_box(s, Inches(CONTENT_LEFT), Inches(0.42), Inches(CONTENT_W), Inches(0.55),
+                 "What is visual-RAG (PixelRAG)?", font_size=22, color=C.ACCENT_BLUE, bold=True)
+    add_bullet_box(s, CONTENT_LEFT, 1.4, CONTENT_W, 5.6, [
+        ("What it is — RAG that reads documents as PICTURES, not parsed text.", C.ACCENT_GREEN, True),
+        "  Render each page to an image, retrieve over the images, and feed the page image straight to a "
+        "vision-language model that reads layout + text together. (Berkeley/Princeton/EPFL/Databricks, "
+        "arXiv 2506.05209; lineage: ColPali → DeepSeek-OCR optical compression.)",
+        ("Why it exists — text parsing throws away structure.", C.ACCENT_GREEN, True),
+        "  OCR / HTML-to-text flattens tables, pinout diagrams, charts and reading order — so the reader "
+        "literally can't find answers that live in the layout. Pixels keep it intact.",
+        ("What it promises — higher retrieval accuracy + (claimed) ~10× fewer tokens.", C.ACCENT_GREEN, True),
+        "  vs legacy text-RAG, across document QA. The token claim is the contentious part — we measured it.",
+        ("How it works — two VL models, one pixel pipeline.", C.ACCENT_BLUE, True),
+        "  render page→image · embed images (Qwen3-VL-Embedding-2B) → FAISS · retrieve top-k · "
+        "read the page image with a VL reader (Qwen3-VL-4B) → answer. No OCR anywhere.",
+    ])
+
+    # 3 — RESULTS AT A GLANCE
+    s = new_slide(prs)
+    add_text_box(s, Inches(CONTENT_LEFT), Inches(0.42), Inches(CONTENT_W), Inches(0.55),
+                 "Results at a glance — measured on Skippy's corpus", font_size=22, color=C.ACCENT_BLUE, bold=True)
+    add_bullet_box(s, CONTENT_LEFT, 1.4, CONTENT_W, 5.6, [
+        ("Retrieval: pixel beats text — recall@5 0.70 vs 0.59 (and survives every control).", C.ACCENT_GREEN, True),
+        ("Token cost: the '10×' is a KNOB — at the ~768px knee, pixel is CHEAPER than text "
+         "(423 vs 538 reader tokens); at full res it's 3× MORE.", C.ACCENT_GREEN, True),
+        ("Precision: NVFP4 reader = 1.9× decode / 1.4× prefill (vision-diluted), 62% answer-match.",
+         C.ACCENT_GREEN, True),
+        ("Fusion: pixel-only wins — adding text just dilutes it.", C.ACCENT_BLUE, True),
+        ("Edge: ~15× less bandwidth → BF16 won't fit 8GB; NVFP4 is the enabler (fits + halves decode).",
+         C.ACCENT_BLUE, True),
+        ("Bottom line: visual-RAG works on Skippy's own knowledge, and FP4 makes it edge-viable.",
+         C.ACCENT_ORANGE, True),
+    ])
+
+    # 4 — the five findings (detail)
     s = new_slide(prs)
     add_text_box(s, Inches(CONTENT_LEFT), Inches(0.42), Inches(CONTENT_W), Inches(0.55),
                  "Five measured findings", font_size=22, color=C.ACCENT_BLUE, bold=True)
@@ -87,7 +123,24 @@ def main():
                 "Projected to the edge NPU — bandwidth-starved",
                 "~same compute (prefill ×1.2) but ~15× less bandwidth (decode ×15): BF16 won't fit 8GB; NVFP4 is the enabler")
 
-    # 6 — the edge recipe + takeaways
+    # rigor & controls (the polish follow-ups)
+    s = new_slide(prs)
+    add_text_box(s, Inches(CONTENT_LEFT), Inches(0.42), Inches(CONTENT_W), Inches(0.55),
+                 "Rigor — we tried to break the result", font_size=22, color=C.ACCENT_BLUE, bold=True)
+    add_bullet_box(s, CONTENT_LEFT, 1.4, CONTENT_W, 5.6, [
+        ("Confound: is it just that the VL embedder is better at images than text?", C.ACCENT_ORANGE, True),
+        "  Control with a DEDICATED text retriever (BGE) + chunking to fix truncation: BGE-chunked rises "
+        "to recall@5 0.59 (beats the VL-text arm) — but pixel still wins 0.69. The advantage is REAL.",
+        ("Caveat: the 'documents' class had recall@1 ≈ 0.", C.ACCENT_ORANGE, True),
+        "  Cause: podcast transcripts — pages within one doc are near-duplicates, so exact-page R@1 is "
+        "unwinnable. At DOCUMENT granularity it's healthy: pixel doc-recall@5 0.83 vs text 0.78.",
+        ("Open / honest limits.", C.ACCENT_PURPLE, True),
+        "  Synthetic queries (local-generated); modest absolute recall (1,218-page pool); NVFP4 answer-"
+        "match 62%; PixelRAG's own tuned 4B+LoRA embedder not faithfully reproduced (we used the "
+        "off-the-shelf 2B base — a conservative lower bound). All reproducible.",
+    ])
+
+    # final — the edge recipe + takeaways
     s = new_slide(prs)
     add_text_box(s, Inches(CONTENT_LEFT), Inches(0.42), Inches(CONTENT_W), Inches(0.55),
                  "The edge recipe", font_size=22, color=C.ACCENT_BLUE, bold=True)
