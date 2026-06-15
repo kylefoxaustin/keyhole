@@ -79,6 +79,9 @@ def main():
     chart_slide(prs, "data/output/vision_quant_combined.png",
                 "Mixed precision in practice: the LM is the lever, vision is a sliver",
                 "Measured (RTX 5090): FP4 on the language model ~doubles the prefill win vs FP8; quantize the LM, keep the vision tower INT8")
+    chart_slide(prs, "data/output/accuracy_study.png",
+                "Answer accuracy — visual-RAG vs text-RAG, and the FP4 cost",
+                "DocVQA ANLS: reading the page image beats OCR-text by +18 pts; FP4 costs only ~2 pts vs BF16 — quantization is accuracy-safe")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(OUT))

@@ -127,6 +127,10 @@ def main():
                 "Mixed precision: the LM is the lever, the vision tower is a sliver",
                 "Measured: FP4 on the language model ~doubles the prefill win vs FP8; quantizing the vision tower is minor (1–8%) — keep it INT8")
 
+    chart_slide(prs, "data/output/accuracy_study.png",
+                "Answer accuracy — visual-RAG vs text-RAG, and the FP4 cost",
+                "DocVQA ANLS: reading the page IMAGE beats OCR-text by +18 pts on answering; FP4 costs only ~2 pts vs BF16 — quantization is accuracy-safe")
+
     # rigor & controls (the polish follow-ups)
     s = new_slide(prs)
     add_text_box(s, Inches(CONTENT_LEFT), Inches(0.42), Inches(CONTENT_W), Inches(0.55),
