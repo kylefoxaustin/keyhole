@@ -41,3 +41,6 @@ data/output/keyhole_results_PRIVATE.pptx
 skippy_pixelrag/
 *_skippy_*.png
 data/output/skippy_*
+
+# generated answer/frame dumps
+data/frames/
