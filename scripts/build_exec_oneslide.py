@@ -39,8 +39,7 @@ CARDS = [
 ]
 
 
-def main():
-    prs = Presentation(); set_deck_size(prs)
+def add_exec_slide(prs):
     s = new_slide(prs, bg_color=C.BG_DARK)
 
     add_text_box(s, Inches(0.45), Inches(0.40), Inches(12.45), Inches(0.6),
@@ -87,6 +86,12 @@ def main():
                "and it unlocks a better edge-AI product. Measured, not modeled.")
     r2.font.size = Pt(12.5); r2.font.color.rgb = RGBColor(0xEE, 0xEE, 0xFF)
 
+    return s
+
+
+def main():
+    prs = Presentation(); set_deck_size(prs)
+    add_exec_slide(prs)
     OUT.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(OUT))
     print(f"wrote {OUT} (1 slide)")

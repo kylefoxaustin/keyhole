@@ -19,6 +19,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "scripts"))
 from build_deck import (C, new_slide, add_text_box, add_bullet_box,
                         SLIDE_W_IN, SLIDE_H_IN, CONTENT_LEFT, CONTENT_W)
+from build_exec_oneslide import add_exec_slide
 
 SRC = REPO / "data" / "output" / "precision-roadmap-combined.pptx"
 OUT = REPO / "data" / "output" / "precision-roadmap-with-pixelrag.pptx"
@@ -82,6 +83,12 @@ def main():
     chart_slide(prs, "data/output/accuracy_study.png",
                 "Answer accuracy — visual-RAG vs text-RAG, and the FP4 cost",
                 "DocVQA ANLS: reading the page image beats OCR-text by +18 pts; FP4 costs only ~2 pts vs BF16 — quantization is accuracy-safe")
+
+    # CEO 'why do I care' cold-open: build it, then move it to slide 1
+    add_exec_slide(prs)
+    sld = prs.slides._sldIdLst
+    ids = list(sld)
+    sld.remove(ids[-1]); sld.insert(0, ids[-1])
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(OUT))
