@@ -123,6 +123,10 @@ def main():
                 "Projected to the edge NPU — bandwidth-starved",
                 "~same compute (prefill ×1.2) but ~15× less bandwidth (decode ×15): BF16 won't fit 8GB; NVFP4 is the enabler")
 
+    chart_slide(prs, "data/output/vision_quant_combined.png",
+                "Mixed precision: the LM is the lever, the vision tower is a sliver",
+                "Measured: FP4 on the language model ~doubles the prefill win vs FP8; quantizing the vision tower is minor (1–8%) — keep it INT8")
+
     # rigor & controls (the polish follow-ups)
     s = new_slide(prs)
     add_text_box(s, Inches(CONTENT_LEFT), Inches(0.42), Inches(CONTENT_W), Inches(0.55),

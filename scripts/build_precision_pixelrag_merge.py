@@ -76,6 +76,9 @@ def main():
     chart_slide(prs, "data/output/skippy_edge_projection.png",
                 "Projected to the edge NPU — FP4 is the enabler",
                 "~15× less bandwidth → BF16 won't fit 8GB; NVFP4 fits (2.2GB) + halves decode")
+    chart_slide(prs, "data/output/vision_quant_combined.png",
+                "Mixed precision in practice: the LM is the lever, vision is a sliver",
+                "Measured (RTX 5090): FP4 on the language model ~doubles the prefill win vs FP8; quantize the LM, keep the vision tower INT8")
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     prs.save(str(OUT))
