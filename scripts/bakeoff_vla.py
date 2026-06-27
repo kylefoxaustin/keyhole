@@ -1184,6 +1184,9 @@ def validate_dual_loop_action_path(model, image, prompt: str,
             "action_dim": 7,
             "num_denoise_steps": num_steps,
             "action_chunk_sample": [round(float(x), 5) for x in np.ravel(arr)[:7]],
+            # Full [H,7] fp16 reference chunk (drone-sizer / qualcomm mixed-precision diff).
+            "action_chunk_full": [[round(float(x), 5) for x in row]
+                                  for row in np.ravel(arr).reshape(-1, 7)],
         }
     except Exception as e:  # noqa: BLE001 — validation must never abort timing
         return {"token_level_ok": False, "error": f"{type(e).__name__}: {str(e)[:200]}"}
@@ -1604,6 +1607,9 @@ def run_pi05_dual_loop(args, spec, hf_repo: str, image) -> None:
             "action_chunk_shape": list(a.shape), "action_chunk_length": L,
             "num_denoise_steps": num_steps,
             "action_chunk_sample": [round(float(x), 5) for x in np.ravel(a)[:7]],
+            # Full [H,7] fp16 reference chunk (drone-sizer / qualcomm mixed-precision diff).
+            "action_chunk_full": [[round(float(x), 5) for x in row]
+                                  for row in np.ravel(a).reshape(-1, 7)],
         }
         log.info("Action validation %s: chunk %s sample %s",
                  "PASSED" if ok else "FAILED", list(a.shape),
@@ -2256,6 +2262,9 @@ def run_bitvla(args, spec, hf_repo: str, image) -> None:
             "action_chunk_shape": list(a.shape), "action_chunk_length": NUM_ACTIONS_CHUNK,
             "action_dim": ACTION_DIM,
             "action_chunk_sample": [round(float(x), 5) for x in np.ravel(a)[:7]],
+            # Full [H,7] fp16 reference chunk (drone-sizer / qualcomm mixed-precision diff).
+            "action_chunk_full": [[round(float(x), 5) for x in row]
+                                  for row in np.ravel(a).reshape(-1, 7)],
         }
         log.info("Action validation %s: chunk %s", "PASSED" if ok else "FAILED", list(a.shape))
     except Exception as e:  # noqa: BLE001
