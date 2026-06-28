@@ -1,0 +1,41 @@
+{
+  "__meta__": {
+    "description": "MEASURED-ACCURACY validation of keyhole's 7-year precision-migration thesis. This is the QUALITY half that precision_migration.json only ASSERTED and precision_5090_fp4_vs_int.json measured SPEED for (its does_not_establish explicitly excluded accuracy). Cross-silicon collaboration anchor.",
+    "source": "[qualcomm] bus session, 2026-06-28. 4 LLM families x 6 numeric formats + NORA-1.5 VLA closed-loop, all on RTX 5090. Reusable fake-quant harness: qualcomm/scratchpad/llm_lowbit_test.py + quant_lowbit.py (int8/fp8/int4/fp4/mxint4/mxfp4 on any HF model).",
+    "validates": "data/output/precision_migration.json (the asserted 7-year roadmap)",
+    "fills_gap_in": "data/output/precision_5090_fp4_vs_int.json (speed-only; does_not_establish excluded accuracy)",
+    "figures": ["qualcomm/results/llm_fp8_vs_int8.png", "qualcomm/results/llm_lowbit_crossfamily.png", "qualcomm/results/vla_lowbit_int_vs_fp.png"],
+    "writeup": "qualcomm/VLA_FP_VS_INT_FRAMEWORK.md (sec 7-11)",
+    "schema_version": 1
+  },
+  "verdict": "VALIDATED end-to-end, with one refinement to the 'FP > INT below 8-bit' framing (see refinement).",
+  "by_horizon": {
+    "2026_int8_floor": {
+      "thesis_cell": "INT8 deployment floor / 'OpenVLA works on INT8 today'",
+      "result": "CONFIRMED robust",
+      "evidence": "NORA-1.5 VLA: int8 single-chunk action MSE ~1e-5 + closed-loop LIBERO eef-drift ~1cm (int8 does NOT compound). All 4 LLM families int8-usable."
+    },
+    "2028_fp8": {
+      "thesis_cell": "FP8 needed ~2028 (FP stops being optional)",
+      "result": "STRONGLY VALIDATED (measured accuracy, not just asserted)",
+      "evidence": "Next-token KL vs fp16 (decoder weights+acts): FP8(e4m3) is 17-210x CLOSER to fp16 than INT8 at the 8-bit level. Per family: Mistral 210x, Qwen3 85x, Llama 50x, Gemma 17x. Mechanism: FP8's exponent represents the outlier activations INT8 clips."
+    },
+    "2030_sub8bit": {
+      "thesis_cell": "FP4/NVFP4 by ~2030; layer-adaptive / per-block; INT-capable@8b != INT-sufficient below 8b",
+      "result": "VALIDATED with nuance",
+      "evidence": "Naive int4 SHATTERS every family (int4/int8 = 6-150x; Gemma worst 150x). Microscaling (per-block-16) is MANDATORY and rescues all. NORA-1.5 VLA 6-format action MSE vs fp16: int8 1.7e-4 | int4-naive 0.135 (771x, gripper collapses) | fp4-naive 0.118 | mxint4 0.0050 | mxfp4 0.0028 (best)."
+    }
+  },
+  "refinement_to_thesis": {
+    "old_framing": "FP > INT below 8-bit",
+    "measured_correction": "The NON-NEGOTIABLE below 8-bit is MICROSCALING (per-block-16), not FP per se. Naive fp4 > naive int4 always (~35%), but once MICROSCALED, mxfp4 ~= mxint4 on 3 of 4 families; FP wins big only on Qwen3 (2.4x). So: microscaling is mandatory; FP is a smaller, model-dependent edge on top.",
+    "deck_followup": "precision-roadmap deck 'FP>INT below 8-bit' slide may warrant a 'microscaling-first, FP-edge-model-dependent' tweak."
+  },
+  "iq9075_position_per_horizon": {
+    "datatypes": "INT8 + FP16 native; NO fp8/fp4 compute (fp8 = v79+)",
+    "2026": "fine (at the INT8 floor)",
+    "2028": "NOT an accuracy wall (fp16 fallback) but an EFFICIENCY gap: can't get fp8's fast-AND-accurate sweet spot (~2x fp16 throughput/mem @ ~fp16 quality); must pick int8 (fast, breaks outlier models) OR fp16 (accurate, 2x fp8 cost).",
+    "2030": "mostly DODGEABLE: does 4-bit-weight-storage -> fp16-compute (sidesteps the activation break); mxint4 competitive with mxfp4 on most families."
+  },
+  "next": "Confirm at VLA-action level on OpenVLA-7B / BitVLA / pi0.5 (qualcomm; BitVLA needs keyhole's OFT env rebuild)."
+}
