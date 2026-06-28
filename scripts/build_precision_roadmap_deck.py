@@ -157,8 +157,14 @@ def slide_takeaways(prs):
         "trains to BF16 quality.",
         ("The silicon ask, by horizon:", C.ACCENT_BLUE, True),
         "  Vision stays INT8 throughout. NPU Mid needs FP8 (E4M3) by ~2028; NPU High "
-        "needs FP4/NVFP4 by ~2030. Shipping INT8-only past 2028 is a competitive "
-        "feature gap, not a silicon-area win.",
+        "needs microscaled 4-bit (NVFP4/MXFP4) by ~2030. Shipping INT8-only past 2028 "
+        "is a competitive feature gap, not a silicon-area win.",
+        ("Accuracy now measured too, not just speed — and it sharpens the ask:",
+         C.ACCENT_GREEN, True),
+        "  At 8-bit, FP8 sits 17–210× closer to FP16 than INT8 (it keeps the outlier "
+        "activations INT8 clips). Below 8-bit, per-block MICROSCALING is mandatory — "
+        "naive INT4 collapses across every family — so the 4-bit weight format must be "
+        "microscaled, and FP4 is the one that ALSO accelerates compute.",
         ("All anchors measured on one RTX 5090 (Blackwell sm_120) — reproducible.",
          C.ACCENT_BLUE, True),
     ])
