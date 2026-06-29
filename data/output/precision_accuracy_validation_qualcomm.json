@@ -37,5 +37,15 @@
     "2028": "NOT an accuracy wall (fp16 fallback) but an EFFICIENCY gap: can't get fp8's fast-AND-accurate sweet spot (~2x fp16 throughput/mem @ ~fp16 quality); must pick int8 (fast, breaks outlier models) OR fp16 (accurate, 2x fp8 cost).",
     "2030": "mostly DODGEABLE: does 4-bit-weight-storage -> fp16-compute (sidesteps the activation break); mxint4 competitive with mxfp4 on most families."
   },
-  "next": "Confirm at VLA-action level on OpenVLA-7B / BitVLA / pi0.5 (qualcomm; BitVLA needs keyhole's OFT env rebuild)."
+  "head_type_dimension": {
+    "description": "VLA-action-level sub-8-bit fragility is NOT uniform across action-head types (qualcomm, 2026-06-28, vs keyhole's fp16 reference bundle vla_fp16_reference_bundle.json — gate reproduced a0 to 5e-6). Refines the microscaling rule: microscaling (e2m1/mxfp4) helps outlier-heavy tensors but HURTS narrow non-redundant projections. So the per-block format must be chosen per-LAYER, not globally.",
+    "ladder_flow_gt_regression_gt_discrete": {
+      "flow (NORA-1.5)": "diffusion/flow-matching head: naive int4 SHATTERS (771x); microscaling RESCUES. Most int-fragile.",
+      "regression (BitVLA)": "bounded L1-regression head: int4-ROBUST (int8 MAE 0.0156, int4 0.0236 = only 1.5x). Microscaling HURTS (mxfp4 0.0632, 2.7x int4) — ablation localizes the e2m1 penalty ENTIRELY to fc2, the final 2560->7 action projection (int4 0.0247 vs mxfp4 0.0614); the wide MLP tolerates/prefers mxfp4.",
+      "discrete (OpenVLA-7B)": "argmax-over-bins head: MOST int8-robust (1/7 bins flip, MAE 0.0041 — argmax deadband snaps sub-bin noise). Naive int4 still shatters the backbone (7/7 flip, gripper bin inverts 1.0->0); mxfp4 rescues + argmax absorbs residual."
+    },
+    "universal_rule": "Keep the final low-dim action projection OUT of e2m1 (uniform-int or fp16). e2m1 is the wrong format for a narrow non-redundant output layer; it pays only on outlier-heavy tensors.",
+    "source": "qualcomm/results/VLA_FP_VS_INT_FRAMEWORK.md sections 12-13; scripts scratchpad/bitvla_lowbit.py + bitvla_ablate.py (reuse keyhole's bitvla venv + /tmp/BitVLA OFT env)."
+  },
+  "next": "Head-type ladder COMPLETE (flow/regression/discrete measured end-to-end). Open: pi0.5 full-chunk (lerobot pin) for a 2nd flow-head datapoint."
 }
