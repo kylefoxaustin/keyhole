@@ -1,0 +1,31 @@
+{
+  "__meta__": {
+    "description": "MEASURED-ACCURACY precision validation on AUTONOMOUS-DRIVING VLAs — the driving-domain companion to precision_accuracy_validation_qualcomm.json (manipulation VLAs + LLM backbones). Backbone-weight quantization, next-token KL-divergence vs fp16, RTX 5090. Extends the two-regime / head-type precision story to a new VLA family.",
+    "source": "[qualcomm] bus session 2026-07-07/08 + qualcomm/results/driving_vla_precision_benchmark.md. Hand-off routed by Kyle (drone-sizer): backend owns the 5090 truth-source + precision lane. Harness: qualcomm scratchpad/driving_vla_proxy{2,3}.py + quant_lowbit.py.",
+    "validates": "data/output/precision_migration.json (asserted 7-yr roadmap)",
+    "companion_to": "data/output/precision_accuracy_validation_qualcomm.json (manipulation VLAs + head_type_dimension)",
+    "schema_version": 1,
+    "metric": "next-token KL vs fp16 (backbone weights+acts). Lower = closer to fp16. Schemes: INT8 sym/asym, INT4, FP8-E4M3/E5M2, MXFP4 (block-32 E8M0), Mixed (int8 body + fp16 top-2)."
+  },
+  "driving_vla_kl_vs_fp16": [
+    {"model": "OpenEMMA",         "backbone": "Qwen2-VL-7B", "int8": 0.0018, "int4": 0.413, "fp8_e4m3": 0.0050, "mxfp4": 0.033,  "mixed": 0.001,  "int4_to_mxfp4": "13x", "regime": "outlier-heavy"},
+    {"model": "AutoVLA",          "backbone": "Qwen3-VL-4B", "int8": 0.0019, "int4": 0.185, "fp8_e4m3": 0.0017, "mxfp4": 0.027,  "mixed": 0.002,  "int4_to_mxfp4": "7x",  "regime": "outlier-heavy"},
+    {"model": "Alpamayo-R1-10B",  "backbone": "Cosmos(Qwen3)","int8": 0.007, "int4": 1.154, "fp8_e4m3": 0.005,  "mxfp4": 0.070,  "mixed": 0.003,  "int4_to_mxfp4": "16x", "regime": "outlier-heavy", "note": "backbone KL; its flow-matching diffusion action head is separately fp16-only (head-type taxonomy)"},
+    {"model": "DriveVLM",         "backbone": "Phi-4-mm",    "int8": 0.0005, "int4": 0.145, "fp8_e4m3": 0.0012, "mxfp4": 0.037,  "mixed": 0.0004, "int4_to_mxfp4": "4x",  "regime": "outlier-heavy"},
+    {"model": "OpenVLA-7b",       "backbone": "Llama-2-7B",  "int8": 0.0005, "int4": 0.018, "fp8_e4m3": 0.0152, "mxfp4": 2.00,   "mixed": 0.0004, "int4_to_mxfp4": "mxfp4 HURTS", "regime": "benign"},
+    {"model": "OpenDriveVLA-0.5B","backbone": "Qwen2-0.5B",  "int8": 0.0,    "int4": 3e-5,  "fp8_e4m3": 1e-5,   "mxfp4": 1.5e-4, "mixed": 0.0,    "int4_to_mxfp4": "int4 fine; mxfp4 no help", "regime": "benign"}
+  ],
+  "cross_family_llm_context": [
+    {"backbone": "Gemma-2-9B",   "int8": 0.115, "int4": 17.2, "mxfp4": 0.052, "int4_to_mxfp4": "328x"},
+    {"backbone": "Mistral-7B",   "int8": 1.33,  "int4": 7.85, "mxfp4": 0.052, "int4_to_mxfp4": "151x"},
+    {"backbone": "Llama-3.1-8B", "int8": 1.20,  "int4": 10.1, "mxfp4": 0.082, "int4_to_mxfp4": "123x"},
+    {"backbone": "Qwen3-8B",     "int8": 0.79,  "int4": 14.2, "mxfp4": 0.127, "int4_to_mxfp4": "112x"}
+  ],
+  "two_regimes": {
+    "outlier_heavy": "4 driving (OpenEMMA 13x, AutoVLA 7x, Alpamayo 16x, DriveVLM 4x) + 4 cross-family LLMs: INT4 SHATTERS (KL 0.18-17), MXFP4 RESCUES 7-328x (per-block E8M0 scales preserve the activation outliers a uniform int4 grid clips). The general case for large LLM backbones.",
+    "benign": "OpenDriveVLA-0.5B, OpenVLA-7b: INT4 already fine (KL<=0.02); MXFP4 does NOT help and can HURT (OpenVLA 2.0 — coarse 8-level e2m1 loses to uniform int4's 16 levels absent outliers). Matches the BitVLA regression-head result (head_type_dimension in the companion anchor).",
+    "per_scheme": "INT8-sym ~= lossless everywhere. FP8-E4M3 ~= lossless (exponent handles outliers) > E5M2. Mixed (int8 body + fp16 head) ~= lossless. MXFP4 is a RESCUE for outlier-heavy sub-8-bit, NOT a free win."
+  },
+  "consistency_with_thesis": "Reinforces the microscaling refinement (precision_accuracy_validation_qualcomm.json): microscaling is the non-negotiable below 8-bit for OUTLIER-HEAVY tensors, and its value is model-dependent (hurts benign/narrow tensors). Driving VLAs split the same two ways as manipulation VLAs + LLM families.",
+  "iq9075_deploy_read": "v73 natively runs INT8 + FP16 (+ INT4 weight-storage). INT8/mixed lossless -> safe deploy floor for all 6. Outlier-heavy backbones needing sub-8-bit want MXFP4 -> exactly the mxfp4-on-v73 capability (hw-ready, producer-gated per qualcomm's silicon work)."
+}
