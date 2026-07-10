@@ -107,6 +107,57 @@
       }
     }
   },
+  "int8_bandwidth_pressure_finding": {
+    "thesis": "INT8 is a memory-BANDWIDTH format. Its speedup appears under bus pressure and vanishes without it \u2014 confirmed from BOTH directions.",
+    "iq9_bandwidth_bound_HTP": "INT8 pays 1.4-3.4x on the 6 bandwidth-heavy models.",
+    "5090_launch_bound_batch1": "INT8 gains at most ~1.2x and is often SLOWER (yolov8n-seg 0.86x, esam-enc 0.72x) \u2014 no bandwidth to relieve.",
+    "control": "clip_vit (low-res 224^2 attention, no bandwidth pressure) gains on NEITHER board (iq9 1.07x, 5090 1.09x). The exception proves the rule.",
+    "iq9_int8_caveat": "LATENCY-VALID, ACCURACY-N/A. INT8 quantized with RANDOM calibration data (qai_hub submit_quantize_job, INT8 w+a). Quant params do NOT change timing so these latencies are representative real-INT8-kernel numbers; but the model outputs are meaningless (no real calibration). Do NOT read any accuracy/quality from this column. Same principle as the eIQ-Neutron r3 latency finding.",
+    "per_model": {
+      "resnet50v1": {
+        "iq9_int8_over_fp16_x": 3.39,
+        "5090_int8_over_fp16_x": 1.04,
+        "5090_int8_status": "MEASURED",
+        "qnn_built_where_trt_couldnt": false
+      },
+      "yolov8n-seg": {
+        "iq9_int8_over_fp16_x": 2.31,
+        "5090_int8_over_fp16_x": 0.857,
+        "5090_int8_status": "MEASURED",
+        "qnn_built_where_trt_couldnt": false
+      },
+      "efficient_sam_vitt_decoder": {
+        "iq9_int8_over_fp16_x": 2.5,
+        "5090_int8_over_fp16_x": 1.205,
+        "5090_int8_status": "MEASURED",
+        "qnn_built_where_trt_couldnt": false
+      },
+      "efficient_sam_vitt_encoder": {
+        "iq9_int8_over_fp16_x": 2.67,
+        "5090_int8_over_fp16_x": 0.716,
+        "5090_int8_status": "MEASURED",
+        "qnn_built_where_trt_couldnt": false
+      },
+      "yolo11s-seg": {
+        "iq9_int8_over_fp16_x": 2.7,
+        "5090_int8_over_fp16_x": null,
+        "5090_int8_status": "TRT Myelin bug \u2014 would not build",
+        "qnn_built_where_trt_couldnt": true
+      },
+      "yoloe-26s-seg-pf": {
+        "iq9_int8_over_fp16_x": 1.41,
+        "5090_int8_over_fp16_x": null,
+        "5090_int8_status": "TRT Myelin bug \u2014 would not build",
+        "qnn_built_where_trt_couldnt": true
+      },
+      "clip_vit_b32_visual": {
+        "iq9_int8_over_fp16_x": 1.07,
+        "5090_int8_over_fp16_x": 1.092,
+        "5090_int8_status": "MEASURED",
+        "qnn_built_where_trt_couldnt": false
+      }
+    }
+  },
   "matrix": {
     "resnet50v1": {
       "fp16": {
@@ -169,7 +220,7 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "N/A"
         },
         "ratios": {
           "5090_faster_than_orin_x": 2.53,
@@ -189,7 +240,11 @@
           "perf_per_watt_basis": "MEASURED power under sustained load"
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "MEASURED (latency); ACCURACY N/A (random calibration)",
+          "int8_ms": 0.846,
+          "metric": "AI Hub on-device estimated_inference_time, calibrated-QNN-INT8",
+          "int8_over_fp16_x": 3.39,
+          "qnn_built_where_trt_couldnt": false
         }
       }
     },
@@ -252,7 +307,7 @@
           ]
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "N/A"
         }
       },
       "int8_qdq": {
@@ -268,7 +323,11 @@
           "perf_per_watt_basis": "MEASURED power under sustained load"
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "MEASURED (latency); ACCURACY N/A (random calibration)",
+          "int8_ms": 3.501,
+          "metric": "AI Hub on-device estimated_inference_time, calibrated-QNN-INT8",
+          "int8_over_fp16_x": 2.31,
+          "qnn_built_where_trt_couldnt": false
         }
       }
     },
@@ -327,7 +386,7 @@
           ]
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "N/A"
         }
       },
       "int8_qdq": {
@@ -343,7 +402,11 @@
           "perf_per_watt_basis": "MEASURED power under sustained load"
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "MEASURED (latency); ACCURACY N/A (random calibration)",
+          "int8_ms": 7.894,
+          "metric": "AI Hub on-device estimated_inference_time, calibrated-QNN-INT8",
+          "int8_over_fp16_x": 2.5,
+          "qnn_built_where_trt_couldnt": false
         }
       }
     },
@@ -408,7 +471,7 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "N/A"
         },
         "ratios": {
           "5090_faster_than_orin_x": 4.38,
@@ -428,7 +491,11 @@
           "perf_per_watt_basis": "MEASURED power under sustained load"
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "MEASURED (latency); ACCURACY N/A (random calibration)",
+          "int8_ms": 68.905,
+          "metric": "AI Hub on-device estimated_inference_time, calibrated-QNN-INT8",
+          "int8_over_fp16_x": 2.67,
+          "qnn_built_where_trt_couldnt": false
         }
       }
     },
@@ -486,7 +553,7 @@
           ]
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "N/A"
         }
       },
       "int8_qdq": {
@@ -497,7 +564,11 @@
           ]
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "MEASURED (latency); ACCURACY N/A (random calibration)",
+          "int8_ms": 4.806,
+          "metric": "AI Hub on-device estimated_inference_time, calibrated-QNN-INT8",
+          "int8_over_fp16_x": 2.7,
+          "qnn_built_where_trt_couldnt": true
         }
       }
     },
@@ -555,7 +626,7 @@
           ]
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "N/A"
         }
       },
       "int8_qdq": {
@@ -566,7 +637,11 @@
           ]
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "MEASURED (latency); ACCURACY N/A (random calibration)",
+          "int8_ms": 153.983,
+          "metric": "AI Hub on-device estimated_inference_time, calibrated-QNN-INT8",
+          "int8_over_fp16_x": 1.41,
+          "qnn_built_where_trt_couldnt": true
         }
       }
     },
@@ -631,7 +706,7 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "N/A"
         },
         "ratios": {
           "5090_faster_than_orin_x": 3.76,
@@ -651,7 +726,11 @@
           "perf_per_watt_basis": "MEASURED power under sustained load"
         },
         "iq9075": {
-          "status": "N/A \u2014 iq9 column is FP16-only"
+          "status": "MEASURED (latency); ACCURACY N/A (random calibration)",
+          "int8_ms": 4.014,
+          "metric": "AI Hub on-device estimated_inference_time, calibrated-QNN-INT8",
+          "int8_over_fp16_x": 1.07,
+          "qnn_built_where_trt_couldnt": false
         }
       }
     }

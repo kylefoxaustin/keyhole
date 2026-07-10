@@ -58,6 +58,8 @@ def main():
     ap.add_argument("--power-5090", default="data/output/rtx5090_power_by_model.json")
     ap.add_argument("--iq9-column", default="data/output/qualcomm_iq9_column.json",
                     help="qualcomm's FP16 IQ-9075 column (AI Hub estimated_inference_time)")
+    ap.add_argument("--iq9-int8-column", default="data/output/qualcomm_iq9_int8_column.json",
+                    help="qualcomm's calibrated-QNN-INT8 IQ-9075 column (latency-valid, accuracy-N/A)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -66,6 +68,12 @@ def main():
     iq9 = {}
     if args.iq9_column and Path(args.iq9_column).exists():
         iq9 = json.loads(Path(args.iq9_column).read_text()).get("fp16", {})
+    iq9_int8 = {}
+    iq9_int8_caveat = None
+    if args.iq9_int8_column and Path(args.iq9_int8_column).exists():
+        _int8 = json.loads(Path(args.iq9_int8_column).read_text())
+        iq9_int8 = _int8.get("int8", {})
+        iq9_int8_caveat = _int8.get("__meta__", {}).get("caveat")
     models, precisions = [], []
     for d in hosts.values():
         for r in d["results"]:
@@ -126,10 +134,23 @@ def main():
                     "iq9_over_orin_x": iq_rec.get("iq9_over_orin_x"),
                     "note": iq_rec.get("note"),
                 }
+            elif precision == "int8_qdq" and iq9_int8.get(model):
+                # iq9's calibrated-QNN-INT8 latency. Real INT8 kernels (latency valid) but
+                # RANDOM calibration (accuracy N/A). Sits in the int8_qdq row because both
+                # are genuine-INT8-kernel latencies — but the accuracy status differs and
+                # is stated per-cell so the two are never conflated.
+                r = iq9_int8[model]
+                cell["iq9075"] = {
+                    "status": "MEASURED (latency); ACCURACY N/A (random calibration)",
+                    "int8_ms": r.get("int8_ms"),
+                    "metric": "AI Hub on-device estimated_inference_time, calibrated-QNN-INT8",
+                    "int8_over_fp16_x": r.get("iq9_int8_speedup"),
+                    "qnn_built_where_trt_couldnt": r.get("qnn_built_where_trt_couldnt"),
+                }
             elif precision == "fp16":
                 cell["iq9075"] = {"status": "PENDING — qualcomm QNN/HTP, same ONNX"}
             else:
-                cell["iq9075"] = {"status": "N/A — iq9 column is FP16-only"}
+                cell["iq9075"] = {"status": "N/A"}
 
             # Cross-platform ratios only where both sides actually measured.
             a = cell.get("rtx-5090", {})
@@ -169,6 +190,37 @@ def main():
         "int8_implicit_PERF_ARTIFACT": gain_table("int8"),
         "int8_qdq_calibrated_REAL": gain_table("int8_qdq"),
     }
+
+    # The confirmed prediction: INT8 is a memory-BANDWIDTH format. It pays under bus
+    # pressure (the bandwidth-bound Hexagon HTP) and does nothing under launch-bound
+    # batch-1 (the 5090). Per-model INT8/FP16 speedup, both platforms, side by side.
+    bandwidth_pressure = None
+    if iq9_int8:
+        rows = {}
+        for model in models:
+            r = iq9_int8.get(model)
+            q = matrix[model].get("int8_qdq", {}).get("rtx-5090", {})
+            f = matrix[model].get("fp16", {}).get("rtx-5090", {})
+            rows[model] = {
+                "iq9_int8_over_fp16_x": r.get("iq9_int8_speedup") if r else None,
+                "5090_int8_over_fp16_x": (round(f["compute_p50_ms"] / q["compute_p50_ms"], 3)
+                                          if q.get("status") == "MEASURED"
+                                          and f.get("status") == "MEASURED" else None),
+                "5090_int8_status": ("MEASURED" if q.get("status") == "MEASURED"
+                                     else "TRT Myelin bug — would not build"),
+                "qnn_built_where_trt_couldnt": r.get("qnn_built_where_trt_couldnt") if r else None,
+            }
+        bandwidth_pressure = {
+            "thesis": "INT8 is a memory-BANDWIDTH format. Its speedup appears under bus "
+                      "pressure and vanishes without it — confirmed from BOTH directions.",
+            "iq9_bandwidth_bound_HTP": "INT8 pays 1.4-3.4x on the 6 bandwidth-heavy models.",
+            "5090_launch_bound_batch1": "INT8 gains at most ~1.2x and is often SLOWER "
+                                        "(yolov8n-seg 0.86x, esam-enc 0.72x) — no bandwidth to relieve.",
+            "control": "clip_vit (low-res 224^2 attention, no bandwidth pressure) gains on "
+                       "NEITHER board (iq9 1.07x, 5090 1.09x). The exception proves the rule.",
+            "iq9_int8_caveat": iq9_int8_caveat,
+            "per_model": rows,
+        }
 
     out = {
         "__meta__": {
@@ -236,6 +288,7 @@ def main():
             },
         },
         "int8_speedup_over_fp16": int8_gain,
+        "int8_bandwidth_pressure_finding": bandwidth_pressure,
         "matrix": matrix,
     }
     Path(args.out).write_text(json.dumps(out, indent=2))

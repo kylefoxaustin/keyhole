@@ -1,0 +1,75 @@
+{
+  "__meta__": {
+    "description": "IQ-9075 (Hexagon v73 HTP) CALIBRATED QNN-INT8 column for the three-platform vision corpus. Companion to backend's vision_corpus_three_platform.json.",
+    "caveat": "LATENCY-VALID, ACCURACY-N/A. INT8 quantized with RANDOM calibration data (qai_hub submit_quantize_job, INT8 w+a). Quant params do NOT change timing so these latencies are representative real-INT8-kernel numbers; but the model outputs are meaningless (no real calibration). Do NOT read any accuracy/quality from this column. Same principle as the eIQ-Neutron r3 latency finding.",
+    "toolchain": "Qualcomm AI Hub: submit_quantize_job(INT8 w+a, random calib) -> compile qnn_context_binary -> profile on-device",
+    "metric": "estimated_inference_time (AI Hub on-device) in ms",
+    "finding": "INT8 pays on the bandwidth-bound HTP (1.4-3.4x) where the launch-bound 5090 batch-1 gets 0.7-1.2x (nothing/slower). clip_vit (low-res, no bandwidth pressure) the control: ~1.07x iq9 ~= 1.09x 5090. Confirms INT8 is a bandwidth format. BONUS: QNN INT8-built yolo11s-seg + yoloe which TRT's INT8 (Myelin bug) could not.",
+    "date": "2026-07-10"
+  },
+  "int8": {
+    "resnet50v1": {
+      "int8_ms": 0.846,
+      "fp16_ms": 2.87,
+      "iq9_int8_speedup": 3.39,
+      "5090_int8_over_fp16": 1.04,
+      "compile_job": null,
+      "profile_job": null,
+      "qnn_built_where_trt_couldnt": false
+    },
+    "yolov8n-seg": {
+      "int8_ms": 3.501,
+      "fp16_ms": 8.09,
+      "iq9_int8_speedup": 2.31,
+      "5090_int8_over_fp16": 0.86,
+      "compile_job": null,
+      "profile_job": null,
+      "qnn_built_where_trt_couldnt": false
+    },
+    "yolo11s-seg": {
+      "int8_ms": 4.806,
+      "fp16_ms": 13.0,
+      "iq9_int8_speedup": 2.7,
+      "5090_int8_over_fp16": "TRT-INT8-unbuildable",
+      "compile_job": null,
+      "profile_job": null,
+      "qnn_built_where_trt_couldnt": true
+    },
+    "yoloe-26s-seg-pf": {
+      "int8_ms": 153.983,
+      "fp16_ms": 216.6,
+      "iq9_int8_speedup": 1.41,
+      "5090_int8_over_fp16": "TRT-INT8-unbuildable",
+      "compile_job": null,
+      "profile_job": null,
+      "qnn_built_where_trt_couldnt": true
+    },
+    "clip_vit_b32_visual": {
+      "int8_ms": 4.014,
+      "fp16_ms": 4.29,
+      "iq9_int8_speedup": 1.07,
+      "5090_int8_over_fp16": 1.09,
+      "compile_job": null,
+      "profile_job": null,
+      "qnn_built_where_trt_couldnt": false
+    },
+    "efficient_sam_vitt_encoder": {
+      "int8_ms": 68.905,
+      "fp16_ms": 184.2,
+      "iq9_int8_speedup": 2.67,
+      "5090_int8_over_fp16": 0.72,
+      "compile_job": null,
+      "profile_job": null,
+      "qnn_built_where_trt_couldnt": false
+    },
+    "efficient_sam_vitt_decoder": {
+      "int8_ms": 7.894,
+      "fp16_ms": 19.7,
+      "iq9_int8_speedup": 2.5,
+      "5090_int8_over_fp16": 1.21,
+      "compile_job": null,
+      "profile_job": null,
+      "qnn_built_where_trt_couldnt": false
+    }
+  }
+}
