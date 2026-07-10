@@ -1,0 +1,110 @@
+{
+  "__meta__": {
+    "description": "qualcomm IQ-9075 (Hexagon v73 HTP) FP16 column for the three-platform vision corpus. Companion to backend's vision_corpus_three_platform.json \u2014 DO NOT merge blindly; iq9 metric is AI Hub on-device estimated_inference_time (single value), mapped to the compute_p50_ms slot.",
+    "platform": "iq9075 / SA8775P / Hexagon v73 HTP",
+    "toolchain": "Qualcomm AI Hub, --target_runtime qnn_context_binary --quantize_full_type float16",
+    "metric": "estimated_inference_time (on-device, AI Hub) in ms; ~ compute time, no explicit p50/p99",
+    "date": "2026-07-09",
+    "author": "Kyle Fox / Claude Code Opus v4.8",
+    "corpus_rev": "rev2 (+ 2 local packaging patches, see corpus_packaging_issues)",
+    "headline": "Every model 100% on HTP \u2014 no CPU spill, no op-cliff, incl efficientsam_decoder which Orin's TRT 10.3 fails to build. iq9/Orin ratio 2.3-3.4x on CNN/low-res-ViT, widening to 16-18x on high-resolution attention (efficientsam-enc 1024^2, yoloe open-vocab) \u2014 compute scaling, not a datapath cliff.",
+    "corpus_packaging_issues": [
+      "resnet50v1.onnx: qai_hub upload did not include the external-weights .data sidecar -> 'missing external weights'. Fixed locally by inlining weights (onnx.save save_as_external_data=False).",
+      "yolov8n-seg / yolo11s-seg / yoloe-26s-seg-pf: output0/output1 present in BOTH value_info and graph IO -> AI Hub ONNX validation reject. Fixed locally by stripping the duplicate value_info entries."
+    ],
+    "int8_note": "FP16 only this pass (the honest cross-platform axis per backend). Calibrated QNN-INT8 iq9-only column is a follow-up."
+  },
+  "fp16": {
+    "resnet50v1": {
+      "compute_p50_ms": 2.87,
+      "metric_note": "AI Hub on-device estimated_inference_time",
+      "compute_unit_layer_counts": {
+        "NPU": 127
+      },
+      "npu_fraction": 1.0,
+      "status": "MEASURED",
+      "compile_job": "jprn17q95",
+      "profile_job": "jgk9rkn25",
+      "iq9_over_orin_x": 2.77,
+      "note": null
+    },
+    "yolov8n-seg": {
+      "compute_p50_ms": 8.086,
+      "metric_note": "AI Hub on-device estimated_inference_time",
+      "compute_unit_layer_counts": {
+        "NPU": 287
+      },
+      "npu_fraction": 1.0,
+      "status": "MEASURED",
+      "compile_job": "jp2v3z645",
+      "profile_job": "j5w1mrn6g",
+      "iq9_over_orin_x": 3.4,
+      "note": null
+    },
+    "yolo11s-seg": {
+      "compute_p50_ms": 12.999,
+      "metric_note": "AI Hub on-device estimated_inference_time",
+      "compute_unit_layer_counts": {
+        "NPU": 380
+      },
+      "npu_fraction": 1.0,
+      "status": "MEASURED",
+      "compile_job": "jpy7vyw7p",
+      "profile_job": "jgn7rw8rp",
+      "iq9_over_orin_x": 3.23,
+      "note": null
+    },
+    "yoloe-26s-seg-pf": {
+      "compute_p50_ms": 216.566,
+      "metric_note": "AI Hub on-device estimated_inference_time",
+      "compute_unit_layer_counts": {
+        "NPU": 494
+      },
+      "npu_fraction": 1.0,
+      "status": "MEASURED",
+      "compile_job": "jp0vexq6g",
+      "profile_job": "jpel4n31g",
+      "iq9_over_orin_x": 17.87,
+      "note": null
+    },
+    "clip_vit_b32_visual": {
+      "compute_p50_ms": 4.287,
+      "metric_note": "AI Hub on-device estimated_inference_time",
+      "compute_unit_layer_counts": {
+        "NPU": 398
+      },
+      "npu_fraction": 1.0,
+      "status": "MEASURED",
+      "compile_job": "jgdz7mwe5",
+      "profile_job": "j5mdvlrw5",
+      "iq9_over_orin_x": 2.34,
+      "note": null
+    },
+    "efficient_sam_vitt_encoder": {
+      "compute_p50_ms": 184.162,
+      "metric_note": "AI Hub on-device estimated_inference_time",
+      "compute_unit_layer_counts": {
+        "NPU": 383
+      },
+      "npu_fraction": 1.0,
+      "status": "MEASURED",
+      "compile_job": "j577v8zl5",
+      "profile_job": "jgl1eqn85",
+      "iq9_over_orin_x": 16.09,
+      "note": null
+    },
+    "efficient_sam_vitt_decoder": {
+      "compute_p50_ms": 19.667,
+      "metric_note": "AI Hub on-device estimated_inference_time",
+      "compute_unit_layer_counts": {
+        "NPU": 300
+      },
+      "npu_fraction": 1.0,
+      "status": "MEASURED",
+      "compile_job": "jp49j2qv5",
+      "profile_job": "j577v8wl5",
+      "iq9_over_orin_x": null,
+      "note": "Orin BUILD FAILS (TRT 10.3 OneHot->shape-tensor) \u2014 iq9 runs it 100% NPU"
+    }
+  }
+}

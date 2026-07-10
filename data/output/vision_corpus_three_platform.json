@@ -69,23 +69,42 @@
     }
   },
   "int8_speedup_over_fp16": {
-    "resnet50v1": {
-      "rtx-5090": 1.072,
-      "orin-agx-64gb": 1.397
+    "int8_implicit_PERF_ARTIFACT": {
+      "resnet50v1": {
+        "rtx-5090": 1.072,
+        "orin-agx-64gb": 1.397
+      },
+      "yolov8n-seg": {
+        "rtx-5090": 0.761
+      },
+      "efficient_sam_vitt_decoder": {
+        "rtx-5090": 1.086
+      },
+      "efficient_sam_vitt_encoder": {
+        "rtx-5090": 0.506,
+        "orin-agx-64gb": 0.985
+      },
+      "clip_vit_b32_visual": {
+        "rtx-5090": 0.998,
+        "orin-agx-64gb": 1.002
+      }
     },
-    "yolov8n-seg": {
-      "rtx-5090": 0.761
-    },
-    "efficient_sam_vitt_decoder": {
-      "rtx-5090": 1.086
-    },
-    "efficient_sam_vitt_encoder": {
-      "rtx-5090": 0.506,
-      "orin-agx-64gb": 0.985
-    },
-    "clip_vit_b32_visual": {
-      "rtx-5090": 0.998,
-      "orin-agx-64gb": 1.002
+    "int8_qdq_calibrated_REAL": {
+      "resnet50v1": {
+        "rtx-5090": 1.04
+      },
+      "yolov8n-seg": {
+        "rtx-5090": 0.857
+      },
+      "efficient_sam_vitt_decoder": {
+        "rtx-5090": 1.205
+      },
+      "efficient_sam_vitt_encoder": {
+        "rtx-5090": 0.716
+      },
+      "clip_vit_b32_visual": {
+        "rtx-5090": 1.092
+      }
     }
   },
   "matrix": {
@@ -114,7 +133,12 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "MEASURED",
+          "est_inference_ms": 2.87,
+          "metric": "AI Hub on-device estimated_inference_time (NOT a CUDA-event p50)",
+          "npu_fraction": 1.0,
+          "iq9_over_orin_x": 2.77,
+          "note": null
         },
         "ratios": {
           "5090_faster_than_orin_x": 3.3,
@@ -145,11 +169,27 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "N/A \u2014 iq9 column is FP16-only"
         },
         "ratios": {
           "5090_faster_than_orin_x": 2.53,
           "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8_qdq": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.3025,
+          "compute_p99_ms": 0.6743,
+          "e2e_p50_ms": 0.3519,
+          "fps": 3305.8,
+          "engine_size_mb": 26.88,
+          "power_w_measured": 227.0,
+          "inferences_per_joule": 14.56,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "iq9075": {
+          "status": "N/A \u2014 iq9 column is FP16-only"
         }
       }
     },
@@ -178,7 +218,12 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "MEASURED",
+          "est_inference_ms": 8.086,
+          "metric": "AI Hub on-device estimated_inference_time (NOT a CUDA-event p50)",
+          "npu_fraction": 1.0,
+          "iq9_over_orin_x": 3.4,
+          "note": null
         },
         "ratios": {
           "5090_faster_than_orin_x": 5.52,
@@ -207,7 +252,23 @@
           ]
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "N/A \u2014 iq9 column is FP16-only"
+        }
+      },
+      "int8_qdq": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.503,
+          "compute_p99_ms": 0.668,
+          "e2e_p50_ms": 1.2572,
+          "fps": 1988.2,
+          "engine_size_mb": 6.18,
+          "power_w_measured": 252.1,
+          "inferences_per_joule": 7.89,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "iq9075": {
+          "status": "N/A \u2014 iq9 column is FP16-only"
         }
       }
     },
@@ -235,7 +296,12 @@
           ]
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "MEASURED",
+          "est_inference_ms": 19.667,
+          "metric": "AI Hub on-device estimated_inference_time (NOT a CUDA-event p50)",
+          "npu_fraction": 1.0,
+          "iq9_over_orin_x": null,
+          "note": "Orin BUILD FAILS (TRT 10.3 OneHot->shape-tensor) \u2014 iq9 runs it 100% NPU"
         }
       },
       "int8": {
@@ -261,7 +327,23 @@
           ]
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "N/A \u2014 iq9 column is FP16-only"
+        }
+      },
+      "int8_qdq": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.279,
+          "compute_p99_ms": 0.2994,
+          "e2e_p50_ms": 1.3748,
+          "fps": 3584.1,
+          "engine_size_mb": 7.95,
+          "power_w_measured": 204.9,
+          "inferences_per_joule": 17.49,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "iq9075": {
+          "status": "N/A \u2014 iq9 column is FP16-only"
         }
       }
     },
@@ -290,7 +372,12 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "MEASURED",
+          "est_inference_ms": 184.162,
+          "metric": "AI Hub on-device estimated_inference_time (NOT a CUDA-event p50)",
+          "npu_fraction": 1.0,
+          "iq9_over_orin_x": 16.09,
+          "note": null
         },
         "ratios": {
           "5090_faster_than_orin_x": 8.52,
@@ -321,11 +408,27 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "N/A \u2014 iq9 column is FP16-only"
         },
         "ratios": {
           "5090_faster_than_orin_x": 4.38,
           "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8_qdq": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 1.8757,
+          "compute_p99_ms": 2.2818,
+          "e2e_p50_ms": 2.7831,
+          "fps": 533.1,
+          "engine_size_mb": 10.63,
+          "power_w_measured": 554.1,
+          "inferences_per_joule": 0.96,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "iq9075": {
+          "status": "N/A \u2014 iq9 column is FP16-only"
         }
       }
     },
@@ -354,7 +457,12 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "MEASURED",
+          "est_inference_ms": 12.999,
+          "metric": "AI Hub on-device estimated_inference_time (NOT a CUDA-event p50)",
+          "npu_fraction": 1.0,
+          "iq9_over_orin_x": 3.23,
+          "note": null
         },
         "ratios": {
           "5090_faster_than_orin_x": 6.84,
@@ -378,7 +486,18 @@
           ]
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "N/A \u2014 iq9 column is FP16-only"
+        }
+      },
+      "int8_qdq": {
+        "rtx-5090": {
+          "status": "FAILED",
+          "error": [
+            "RuntimeError: engine build returned None"
+          ]
+        },
+        "iq9075": {
+          "status": "N/A \u2014 iq9 column is FP16-only"
         }
       }
     },
@@ -407,7 +526,12 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "MEASURED",
+          "est_inference_ms": 216.566,
+          "metric": "AI Hub on-device estimated_inference_time (NOT a CUDA-event p50)",
+          "npu_fraction": 1.0,
+          "iq9_over_orin_x": 17.87,
+          "note": null
         },
         "ratios": {
           "5090_faster_than_orin_x": 3.84,
@@ -431,7 +555,18 @@
           ]
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "N/A \u2014 iq9 column is FP16-only"
+        }
+      },
+      "int8_qdq": {
+        "rtx-5090": {
+          "status": "FAILED",
+          "error": [
+            "RuntimeError: engine build returned None"
+          ]
+        },
+        "iq9075": {
+          "status": "N/A \u2014 iq9 column is FP16-only"
         }
       }
     },
@@ -460,7 +595,12 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "MEASURED",
+          "est_inference_ms": 4.287,
+          "metric": "AI Hub on-device estimated_inference_time (NOT a CUDA-event p50)",
+          "npu_fraction": 1.0,
+          "iq9_over_orin_x": 2.34,
+          "note": null
         },
         "ratios": {
           "5090_faster_than_orin_x": 3.78,
@@ -491,11 +631,27 @@
           "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
         },
         "iq9075": {
-          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+          "status": "N/A \u2014 iq9 column is FP16-only"
         },
         "ratios": {
           "5090_faster_than_orin_x": 3.76,
           "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8_qdq": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.4445,
+          "compute_p99_ms": 0.8725,
+          "e2e_p50_ms": 0.4972,
+          "fps": 2249.5,
+          "engine_size_mb": 90.78,
+          "power_w_measured": 278.0,
+          "inferences_per_joule": 8.09,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "iq9075": {
+          "status": "N/A \u2014 iq9 column is FP16-only"
         }
       }
     }

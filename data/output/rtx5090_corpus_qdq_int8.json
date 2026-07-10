@@ -1,0 +1,171 @@
+{
+  "__meta__": {
+    "description": "keyhole vision corpus, same ONNX, TensorRT on one host.",
+    "harness": "TensorRT Python API; semantics matched to trtexec (see scripts/bench_corpus_trt_py.py docstring)",
+    "int8_caveat": "PERF-ONLY: no calibration cache, arbitrary dynamic ranges. Latency representative, numerics are NOT.",
+    "compute_ms": "pure GPU kernel time (no H2D/D2H) \u2014 the cross-platform number",
+    "latency_ms": "end-to-end incl. host transfers \u2014 flatters unified memory",
+    "schema_version": 1
+  },
+  "host": {
+    "host_label": "rtx-5090",
+    "machine": "x86_64",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "tensorrt": "10.16.1.11",
+    "torch": "2.11.0+cu130"
+  },
+  "config": {
+    "duration_s": 10,
+    "warmup_ms": 3000
+  },
+  "results": [
+    {
+      "model": "resnet50v1",
+      "precision": "int8_qdq",
+      "ok": true,
+      "engine_size_mb": 26.88,
+      "compute_ms": {
+        "median": 0.3024959862232208,
+        "mean": 0.327141806932917,
+        "p95": 0.4469760060310364,
+        "p99": 0.6742720007896423,
+        "min": 0.3007040023803711,
+        "max": 1.580415964126587
+      },
+      "latency_ms": {
+        "median": 0.3519040048122406,
+        "mean": 0.37684553934999726,
+        "p95": 0.4992319941520691,
+        "p99": 0.725600004196167,
+        "min": 0.3440000116825104,
+        "max": 1.6331839561462402
+      },
+      "n_iterations": 26114,
+      "throughput_qps": 3305.828987965712,
+      "peak_vram_mb": 0.6,
+      "build_plus_run_wall_s": 21.4
+    },
+    {
+      "model": "yolov8n-seg",
+      "precision": "int8_qdq",
+      "ok": true,
+      "engine_size_mb": 6.18,
+      "compute_ms": {
+        "median": 0.5029760003089905,
+        "mean": 0.5126879142755557,
+        "p95": 0.5576000213623047,
+        "p99": 0.6679999828338623,
+        "min": 0.47884801030158997,
+        "max": 1.6828160285949707
+      },
+      "latency_ms": {
+        "median": 1.2571840286254883,
+        "mean": 1.2727619405900688,
+        "p95": 1.3689919710159302,
+        "p99": 1.5124800205230713,
+        "min": 1.2059839963912964,
+        "max": 2.4636480808258057
+      },
+      "n_iterations": 7816,
+      "throughput_qps": 1988.1664321670926,
+      "peak_vram_mb": 12.1,
+      "build_plus_run_wall_s": 26.2
+    },
+    {
+      "model": "efficient_sam_vitt_decoder",
+      "precision": "int8_qdq",
+      "ok": true,
+      "engine_size_mb": 7.95,
+      "compute_ms": {
+        "median": 0.27900800108909607,
+        "mean": 0.2791149357946306,
+        "p95": 0.2850559949874878,
+        "p99": 0.2993600070476532,
+        "min": 0.26422399282455444,
+        "max": 0.6245120167732239
+      },
+      "latency_ms": {
+        "median": 1.3748159408569336,
+        "mean": 1.3949483865143573,
+        "p95": 1.51254403591156,
+        "p99": 1.6983360052108765,
+        "min": 1.3105920553207397,
+        "max": 2.9891200065612793
+      },
+      "n_iterations": 7134,
+      "throughput_qps": 3584.126606034744,
+      "peak_vram_mb": 17.6,
+      "build_plus_run_wall_s": 20.9
+    },
+    {
+      "model": "efficient_sam_vitt_encoder",
+      "precision": "int8_qdq",
+      "ok": true,
+      "engine_size_mb": 10.63,
+      "compute_ms": {
+        "median": 1.8757439851760864,
+        "mean": 1.90487954319788,
+        "p95": 1.9875199794769287,
+        "p99": 2.2818241119384766,
+        "min": 1.8510080575942993,
+        "max": 2.8858559131622314
+      },
+      "latency_ms": {
+        "median": 2.7831358909606934,
+        "mean": 2.8220945659756156,
+        "p95": 3.076575994491577,
+        "p99": 3.39136004447937,
+        "min": 2.672640085220337,
+        "max": 4.354976177215576
+      },
+      "n_iterations": 3535,
+      "throughput_qps": 533.1217948200562,
+      "peak_vram_mb": 16.8,
+      "build_plus_run_wall_s": 18.6
+    },
+    {
+      "model": "yolo11s-seg",
+      "precision": "int8_qdq",
+      "ok": false,
+      "error_tail": [
+        "RuntimeError: engine build returned None"
+      ],
+      "build_plus_run_wall_s": 11.8
+    },
+    {
+      "model": "yoloe-26s-seg-pf",
+      "precision": "int8_qdq",
+      "ok": false,
+      "error_tail": [
+        "RuntimeError: engine build returned None"
+      ],
+      "build_plus_run_wall_s": 13.0
+    },
+    {
+      "model": "clip_vit_b32_visual",
+      "precision": "int8_qdq",
+      "ok": true,
+      "engine_size_mb": 90.78,
+      "compute_ms": {
+        "median": 0.4445439875125885,
+        "mean": 0.4830981301857395,
+        "p95": 0.6568959951400757,
+        "p99": 0.87254399061203,
+        "min": 0.438975989818573,
+        "max": 1.814527988433838
+      },
+      "latency_ms": {
+        "median": 0.4971520006656647,
+        "mean": 0.5345667277192037,
+        "p95": 0.7115520238876343,
+        "p99": 0.9249600172042847,
+        "min": 0.4833280146121979,
+        "max": 1.8650879859924316
+      },
+      "n_iterations": 18503,
+      "throughput_qps": 2249.4961760599276,
+      "peak_vram_mb": 0.6,
+      "build_plus_run_wall_s": 20.1
+    }
+  ]
+}

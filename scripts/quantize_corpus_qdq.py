@@ -127,6 +127,12 @@ def main():
                 activation_type=QuantType.QInt8,
                 weight_type=QuantType.QInt8,
                 per_channel=True,
+                # Quantize only the ops with INT8 tensor-core kernels. Left unrestricted,
+                # ORT also wraps rank-0 scalar constants (attention scales, GELU consts) in
+                # a PER-AXIS DequantizeLinear, and TensorRT rejects axis=1 on a 0-D tensor:
+                #   "Axis must be in the range [0, nbDims (0)]".
+                # That killed 5 of 7 models. These four op types are where INT8 pays anyway.
+                op_types_to_quantize=["Conv", "ConvTranspose", "MatMul", "Gemm"],
                 calibrate_method=CalibrationMethod.MinMax,
                 extra_options={
                     # TensorRT needs zero-point 0 on both sides or it leaves the fast path.

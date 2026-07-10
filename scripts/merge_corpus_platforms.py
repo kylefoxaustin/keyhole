@@ -39,11 +39,16 @@ def load_measured_power(path):
 
 
 def load(paths):
+    """Multiple files may share a host_label (e.g. the 5090's fp16/implicit-int8 sweep
+    and its separate QDQ-int8 sweep) — merge their result lists under one host."""
     hosts = {}
     for p in paths:
         d = json.loads(Path(p).read_text())
         label = d["host"]["host_label"]
-        hosts[label] = d
+        if label in hosts:
+            hosts[label]["results"].extend(d["results"])
+        else:
+            hosts[label] = d
     return hosts
 
 
@@ -51,11 +56,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", action="append", required=True)
     ap.add_argument("--power-5090", default="data/output/rtx5090_power_by_model.json")
+    ap.add_argument("--iq9-column", default="data/output/qualcomm_iq9_column.json",
+                    help="qualcomm's FP16 IQ-9075 column (AI Hub estimated_inference_time)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
     hosts = load(args.host)
     measured_power = {"rtx-5090": load_measured_power(args.power_5090)}
+    iq9 = {}
+    if args.iq9_column and Path(args.iq9_column).exists():
+        iq9 = json.loads(Path(args.iq9_column).read_text()).get("fp16", {})
     models, precisions = [], []
     for d in hosts.values():
         for r in d["results"]:
@@ -101,7 +111,25 @@ def main():
                     entry["perf_per_watt_basis"] = ("UNMEASURED — nameplate ceiling only; "
                                                     "this is a lower bound, not a value")
                 cell[label] = entry
-            cell["iq9075"] = {"status": "PENDING — qualcomm QNN/HTP, same ONNX"}
+
+            # iq9075: qualcomm's FP16-only column. Its metric is AI Hub on-device
+            # estimated_inference_time (a single value, not a CUDA-event p50), so it is
+            # NOT identical to our compute_p50_ms — kept in its own slot with the caveat
+            # attached rather than silently equated. INT8 is deliberately absent here.
+            iq_rec = iq9.get(model) if precision == "fp16" else None
+            if iq_rec and iq_rec.get("status") == "MEASURED":
+                cell["iq9075"] = {
+                    "status": "MEASURED",
+                    "est_inference_ms": iq_rec["compute_p50_ms"],
+                    "metric": "AI Hub on-device estimated_inference_time (NOT a CUDA-event p50)",
+                    "npu_fraction": iq_rec.get("npu_fraction"),
+                    "iq9_over_orin_x": iq_rec.get("iq9_over_orin_x"),
+                    "note": iq_rec.get("note"),
+                }
+            elif precision == "fp16":
+                cell["iq9075"] = {"status": "PENDING — qualcomm QNN/HTP, same ONNX"}
+            else:
+                cell["iq9075"] = {"status": "N/A — iq9 column is FP16-only"}
 
             # Cross-platform ratios only where both sides actually measured.
             a = cell.get("rtx-5090", {})
@@ -122,16 +150,25 @@ def main():
             matrix[model][precision] = cell
 
     # INT8 speedup over FP16, per host — the "is INT8 a real compute win here" question.
-    int8_gain = {}
-    for model in models:
-        row = {}
-        for label in hosts:
-            f = matrix[model].get("fp16", {}).get(label, {})
-            i = matrix[model].get("int8", {}).get(label, {})
-            if f.get("status") == "MEASURED" and i.get("status") == "MEASURED":
-                row[label] = round(f["compute_p50_ms"] / i["compute_p50_ms"], 3)
-        if row:
-            int8_gain[model] = row
+    # Split by INT8 flavour: 'int8' = TRT implicit quant (perf artifact), 'int8_qdq' =
+    # calibrated explicit quant (the real number). Keeping both makes the artifact visible.
+    def gain_table(int8_key):
+        out = {}
+        for model in models:
+            row = {}
+            for label in hosts:
+                f = matrix[model].get("fp16", {}).get(label, {})
+                i = matrix[model].get(int8_key, {}).get(label, {})
+                if f.get("status") == "MEASURED" and i.get("status") == "MEASURED":
+                    row[label] = round(f["compute_p50_ms"] / i["compute_p50_ms"], 3)
+            if row:
+                out[model] = row
+        return out
+
+    int8_gain = {
+        "int8_implicit_PERF_ARTIFACT": gain_table("int8"),
+        "int8_qdq_calibrated_REAL": gain_table("int8_qdq"),
+    }
 
     out = {
         "__meta__": {
