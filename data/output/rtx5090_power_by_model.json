@@ -1,0 +1,40 @@
+{
+  "idle_w": 64.97,
+  "models": {
+    "resnet50v1": {
+      "power_w_median": 227.03,
+      "power_w_max": 227.7,
+      "n_samples": 102
+    },
+    "yolov8n-seg": {
+      "power_w_median": 252.11,
+      "power_w_max": 252.93,
+      "n_samples": 103
+    },
+    "efficient_sam_vitt_encoder": {
+      "power_w_median": 554.07,
+      "power_w_max": 561.01,
+      "n_samples": 103
+    },
+    "yolo11s-seg": {
+      "power_w_median": 348.48,
+      "power_w_max": 350.54,
+      "n_samples": 102
+    },
+    "yoloe-26s-seg-pf": {
+      "power_w_median": 176.1,
+      "power_w_max": 176.97,
+      "n_samples": 102
+    },
+    "clip_vit_b32_visual": {
+      "power_w_median": 277.99,
+      "power_w_max": 279.85,
+      "n_samples": 101
+    },
+    "efficient_sam_vitt_decoder": {
+      "power_w_median": 204.87,
+      "power_w_max": 206.25,
+      "n_samples": 103
+    }
+  }
+}

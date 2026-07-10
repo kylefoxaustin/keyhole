@@ -1,0 +1,353 @@
+{
+  "__meta__": {
+    "description": "keyhole vision corpus, same ONNX, TensorRT on one host.",
+    "harness": "TensorRT Python API; semantics matched to trtexec (see scripts/bench_corpus_trt_py.py docstring)",
+    "int8_caveat": "PERF-ONLY: no calibration cache, arbitrary dynamic ranges. Latency representative, numerics are NOT.",
+    "compute_ms": "pure GPU kernel time (no H2D/D2H) \u2014 the cross-platform number",
+    "latency_ms": "end-to-end incl. host transfers \u2014 flatters unified memory",
+    "schema_version": 1
+  },
+  "host": {
+    "host_label": "rtx-5090",
+    "machine": "x86_64",
+    "gpu": "NVIDIA GeForce RTX 5090",
+    "tensorrt": "10.16.1.11",
+    "torch": "2.11.0+cu130"
+  },
+  "config": {
+    "duration_s": 10,
+    "warmup_ms": 3000
+  },
+  "results": [
+    {
+      "model": "resnet50v1",
+      "precision": "fp16",
+      "ok": true,
+      "engine_size_mb": 51.56,
+      "compute_ms": {
+        "median": 0.3144960105419159,
+        "mean": 0.33558275113775227,
+        "p95": 0.43244799971580505,
+        "p99": 0.5973439812660217,
+        "min": 0.31145599484443665,
+        "max": 1.3681600093841553
+      },
+      "latency_ms": {
+        "median": 0.3649600148200989,
+        "mean": 0.38628653241387495,
+        "p95": 0.4816319942474365,
+        "p99": 0.6515200138092041,
+        "min": 0.3553920090198517,
+        "max": 1.417248010635376
+      },
+      "n_iterations": 25521,
+      "throughput_qps": 3179.6905731073507,
+      "peak_vram_mb": 0.6,
+      "build_plus_run_wall_s": 22.3
+    },
+    {
+      "model": "resnet50v1",
+      "precision": "int8",
+      "ok": true,
+      "engine_size_mb": 26.39,
+      "compute_ms": {
+        "median": 0.2934719920158386,
+        "mean": 0.3101517515234107,
+        "p95": 0.3758400082588196,
+        "p99": 0.4519680142402649,
+        "min": 0.2869440019130707,
+        "max": 1.2165119647979736
+      },
+      "latency_ms": {
+        "median": 0.3455359935760498,
+        "mean": 0.36124115404875384,
+        "p95": 0.4269759953022003,
+        "p99": 0.5042880177497864,
+        "min": 0.3319680094718933,
+        "max": 1.275231957435608
+      },
+      "n_iterations": 27255,
+      "throughput_qps": 3407.480193019681,
+      "peak_vram_mb": 0.6,
+      "build_plus_run_wall_s": 24.6
+    },
+    {
+      "model": "yolov8n-seg",
+      "precision": "fp16",
+      "ok": true,
+      "engine_size_mb": 8.87,
+      "compute_ms": {
+        "median": 0.43113601207733154,
+        "mean": 0.4410828371461873,
+        "p95": 0.49158400297164917,
+        "p99": 0.6090880036354065,
+        "min": 0.41116800904273987,
+        "max": 1.5063040256500244
+      },
+      "latency_ms": {
+        "median": 1.1862080097198486,
+        "mean": 1.206208201876604,
+        "p95": 1.3093119859695435,
+        "p99": 1.4425280094146729,
+        "min": 1.148352026939392,
+        "max": 2.2676479816436768
+      },
+      "n_iterations": 8243,
+      "throughput_qps": 2319.453657284915,
+      "peak_vram_mb": 12.1,
+      "build_plus_run_wall_s": 23.9
+    },
+    {
+      "model": "yolov8n-seg",
+      "precision": "int8",
+      "ok": true,
+      "engine_size_mb": 55.7,
+      "compute_ms": {
+        "median": 0.5667200088500977,
+        "mean": 0.5778375489673333,
+        "p95": 0.6311360001564026,
+        "p99": 0.7314559817314148,
+        "min": 0.5417600274085999,
+        "max": 1.534783959388733
+      },
+      "latency_ms": {
+        "median": 1.3261760473251343,
+        "mean": 1.3475042705078621,
+        "p95": 1.451807975769043,
+        "p99": 1.5783360004425049,
+        "min": 1.2878079414367676,
+        "max": 2.464031934738159
+      },
+      "n_iterations": 7383,
+      "throughput_qps": 1764.5397804623988,
+      "peak_vram_mb": 12.1,
+      "build_plus_run_wall_s": 26.3
+    },
+    {
+      "model": "efficient_sam_vitt_decoder",
+      "precision": "fp16",
+      "ok": true,
+      "engine_size_mb": 12.87,
+      "compute_ms": {
+        "median": 0.33606401085853577,
+        "mean": 0.3364177642073289,
+        "p95": 0.3402239978313446,
+        "p99": 0.342272013425827,
+        "min": 0.32784000039100647,
+        "max": 0.3702079951763153
+      },
+      "latency_ms": {
+        "median": 1.4304319620132446,
+        "mean": 1.4556193227427596,
+        "p95": 1.5901119709014893,
+        "p99": 1.6825599670410156,
+        "min": 1.3928639888763428,
+        "max": 2.6573760509490967
+      },
+      "n_iterations": 6837,
+      "throughput_qps": 2975.6235945804515,
+      "peak_vram_mb": 17.6,
+      "build_plus_run_wall_s": 31.0
+    },
+    {
+      "model": "efficient_sam_vitt_decoder",
+      "precision": "int8",
+      "ok": true,
+      "engine_size_mb": 6.45,
+      "compute_ms": {
+        "median": 0.3093760013580322,
+        "mean": 0.3094867150120104,
+        "p95": 0.3136320114135742,
+        "p99": 0.3211840093135834,
+        "min": 0.30035200715065,
+        "max": 0.5922240018844604
+      },
+      "latency_ms": {
+        "median": 1.4022400379180908,
+        "mean": 1.4293074395495264,
+        "p95": 1.5668480396270752,
+        "p99": 1.6649279594421387,
+        "min": 1.366047978401184,
+        "max": 2.2695999145507812
+      },
+      "n_iterations": 6961,
+      "throughput_qps": 3232.3127702550137,
+      "peak_vram_mb": 17.6,
+      "build_plus_run_wall_s": 29.9
+    },
+    {
+      "model": "efficient_sam_vitt_encoder",
+      "precision": "fp16",
+      "ok": true,
+      "engine_size_mb": 19.98,
+      "compute_ms": {
+        "median": 1.3425920009613037,
+        "mean": 1.3543039140143192,
+        "p95": 1.4087680578231812,
+        "p99": 1.4750720262527466,
+        "min": 1.3245439529418945,
+        "max": 1.9627200365066528
+      },
+      "latency_ms": {
+        "median": 2.199104070663452,
+        "mean": 2.2266630768003757,
+        "p95": 2.371903896331787,
+        "p99": 2.4335999488830566,
+        "min": 2.160223960876465,
+        "max": 2.8953919410705566
+      },
+      "n_iterations": 4477,
+      "throughput_qps": 744.8279144252268,
+      "peak_vram_mb": 16.8,
+      "build_plus_run_wall_s": 24.7
+    },
+    {
+      "model": "efficient_sam_vitt_encoder",
+      "precision": "int8",
+      "ok": true,
+      "engine_size_mb": 134.42,
+      "compute_ms": {
+        "median": 2.6556159257888794,
+        "mean": 2.7159551588821134,
+        "p95": 2.9543681144714355,
+        "p99": 3.3286080360412598,
+        "min": 2.5966079235076904,
+        "max": 3.516671895980835
+      },
+      "latency_ms": {
+        "median": 3.5729440450668335,
+        "mean": 3.6211799803596794,
+        "p95": 3.9151039123535156,
+        "p99": 4.237088203430176,
+        "min": 3.4377920627593994,
+        "max": 4.594624042510986
+      },
+      "n_iterations": 2756,
+      "throughput_qps": 376.5604770964533,
+      "peak_vram_mb": 16.8,
+      "build_plus_run_wall_s": 25.2
+    },
+    {
+      "model": "yolo11s-seg",
+      "precision": "fp16",
+      "ok": true,
+      "engine_size_mb": 22.63,
+      "compute_ms": {
+        "median": 0.5892800092697144,
+        "mean": 0.6015996300688666,
+        "p95": 0.6598719954490662,
+        "p99": 0.7403519749641418,
+        "min": 0.5730559825897217,
+        "max": 1.4292800426483154
+      },
+      "latency_ms": {
+        "median": 1.3471360206604004,
+        "mean": 1.3688114475239483,
+        "p95": 1.472607970237732,
+        "p99": 1.5587519407272339,
+        "min": 1.3097599744796753,
+        "max": 2.36246395111084
+      },
+      "n_iterations": 7268,
+      "throughput_qps": 1696.986125898424,
+      "peak_vram_mb": 12.1,
+      "build_plus_run_wall_s": 26.5
+    },
+    {
+      "model": "yolo11s-seg",
+      "precision": "int8",
+      "ok": false,
+      "error_tail": [
+        "RuntimeError: engine build returned None"
+      ],
+      "build_plus_run_wall_s": 13.2
+    },
+    {
+      "model": "yoloe-26s-seg-pf",
+      "precision": "fp16",
+      "ok": true,
+      "engine_size_mb": 26.96,
+      "compute_ms": {
+        "median": 3.156559944152832,
+        "mean": 3.1973705515985595,
+        "p95": 3.3963840007781982,
+        "p99": 3.7674560546875,
+        "min": 3.10262393951416,
+        "max": 3.9375360012054443
+      },
+      "latency_ms": {
+        "median": 3.661087989807129,
+        "mean": 3.7109305711483866,
+        "p95": 3.9105920791625977,
+        "p99": 4.263008117675781,
+        "min": 3.5774080753326416,
+        "max": 4.5548481941223145
+      },
+      "n_iterations": 2690,
+      "throughput_qps": 316.8005733115844,
+      "peak_vram_mb": 8.2,
+      "build_plus_run_wall_s": 27.6
+    },
+    {
+      "model": "yoloe-26s-seg-pf",
+      "precision": "int8",
+      "ok": false,
+      "error_tail": [
+        "RuntimeError: engine build returned None"
+      ],
+      "build_plus_run_wall_s": 18.9
+    },
+    {
+      "model": "clip_vit_b32_visual",
+      "precision": "fp16",
+      "ok": true,
+      "engine_size_mb": 179.99,
+      "compute_ms": {
+        "median": 0.48559999465942383,
+        "mean": 0.49109263415843996,
+        "p95": 0.6162559986114502,
+        "p99": 0.7845119833946228,
+        "min": 0.45318400859832764,
+        "max": 1.448415994644165
+      },
+      "latency_ms": {
+        "median": 0.5378239750862122,
+        "mean": 0.5441582911546197,
+        "p95": 0.6690880060195923,
+        "p99": 0.8415679931640625,
+        "min": 0.49958398938179016,
+        "max": 1.5030080080032349
+      },
+      "n_iterations": 18185,
+      "throughput_qps": 2059.3080951356915,
+      "peak_vram_mb": 0.6,
+      "build_plus_run_wall_s": 28.0
+    },
+    {
+      "model": "clip_vit_b32_visual",
+      "precision": "int8",
+      "ok": true,
+      "engine_size_mb": 120.34,
+      "compute_ms": {
+        "median": 0.48662400245666504,
+        "mean": 0.49163440264446173,
+        "p95": 0.5981760025024414,
+        "p99": 0.7632960081100464,
+        "min": 0.4591040015220642,
+        "max": 1.508031964302063
+      },
+      "latency_ms": {
+        "median": 0.5407040119171143,
+        "mean": 0.5445207992056854,
+        "p95": 0.6515840291976929,
+        "p99": 0.8176000118255615,
+        "min": 0.5039680004119873,
+        "max": 1.5591039657592773
+      },
+      "n_iterations": 18173,
+      "throughput_qps": 2054.974672337607,
+      "peak_vram_mb": 0.6,
+      "build_plus_run_wall_s": 25.8
+    }
+  ]
+}

@@ -1,0 +1,503 @@
+{
+  "__meta__": {
+    "description": "Three-platform vision-corpus anchor: identical ONNX, identical measurement protocol, one row per model x precision.",
+    "headline_metric": "compute_p50_ms \u2014 pure accelerator kernel time, no host transfers.",
+    "int8_caveat": "PERF-ONLY (no calibration cache; trtexec dynamic-range convention). Latency representative, numerics are NOT. Never quote accuracy from these.",
+    "harness_note": "Orin measured with trtexec; 5090 with the TensorRT Python API (no trtexec binary on that host). Semantics matched: same warmup, same duration, CUDA events isolating compute from transfers, same int8 dynamic-range constants. The one Orin build failure was reproduced through BOTH harnesses, so it is a property of the graph+TensorRT version, not of trtexec.",
+    "power_note": "5090 power is MEASURED per model under sustained load (nvidia-smi, 0.1s sampling, median): 176-554 W against a 575 W nameplate TGP. Orin power is NOT measured \u2014 only its 60 W SoC ceiling is known. Any perf/W comparison between them is therefore INCONCLUSIVE, and a nameplate-TDP-derived one would overstate the Orin's advantage by up to 3.3x. Do not quote perf/W from this file.",
+    "nameplate_ceiling_w": {
+      "rtx-5090": 575.0,
+      "orin-agx-64gb": 60.0,
+      "iq9075": 40.0
+    },
+    "schema_version": 2
+  },
+  "hosts": {
+    "rtx-5090": {
+      "host_label": "rtx-5090",
+      "machine": "x86_64",
+      "gpu": "NVIDIA GeForce RTX 5090",
+      "tensorrt": "10.16.1.11",
+      "torch": "2.11.0+cu130",
+      "config": {
+        "duration_s": 10,
+        "warmup_ms": 3000
+      }
+    },
+    "orin-agx-64gb": {
+      "host_label": "orin-agx-64gb",
+      "machine": "aarch64",
+      "node": "ubuntu",
+      "tensorrt": "10.3.0",
+      "gpu": "Orin (nvgpu)",
+      "power_mode": "NV Power Mode: MAXN",
+      "config": {
+        "duration_s": 10,
+        "warmup_ms": 3000,
+        "avg_runs": 100
+      }
+    }
+  },
+  "int8_is_a_toolchain_artifact_not_silicon": {
+    "verdict": "The INT8 column measures TensorRT's implicit-quantization path, NOT INT8 silicon throughput. Do not compare it against a calibrated INT8 result (e.g. QNN/HTP on the IQ-9075).",
+    "evidence": [
+      "TRT 10 implicit quantization (set_dynamic_range, deprecated in 10.1) with no calibration cache does not select INT8 kernels for most of this corpus; it inserts reformat / data-movement layers at every precision boundary.",
+      "yolov8n-seg 193 -> 272 layers under --int8, and 0.431 -> 0.567 ms (SLOWER).",
+      "efficient_sam_vitt_encoder 94 -> 139 layers, 1.343 -> 2.656 ms (2x SLOWER).",
+      "clip_vit_b32_visual 103 -> 105 layers, latency identical to fp16 on BOTH hosts (5090 0.486->0.487, Orin 1.834->1.830) \u2014 i.e. nothing ran in INT8.",
+      "Only resnet50v1 (pure conv, fused INT8 conv tactics exist) shows a real gain: Orin 1.037 -> 0.742 ms (1.40x)."
+    ],
+    "fix": "Emit QDQ-annotated ONNX from a real calibration set (explicit quantization) and rebuild. Then INT8 latency AND numerics are both meaningful, and cross-platform INT8 comparison becomes legitimate."
+  },
+  "build_failures": {
+    "conv_silu_no_int8_tactic": {
+      "models": [
+        "yolov8n-seg (Orin only)",
+        "yolo11s-seg (both hosts)",
+        "yoloe-26s-seg-pf (both hosts)"
+      ],
+      "error": "Could not find any implementation for node <...>/conv/Conv + PWN(PWN(Sigmoid), PWN(Mul))",
+      "reading": "A Conv fused with SiLU has no INT8 tactic in this TensorRT under implicit quantization. Same root cause as the artifact above; expected to disappear with QDQ."
+    },
+    "efficientsam_decoder_onehot": {
+      "models": [
+        "efficient_sam_vitt_decoder (Orin only, fp16 AND int8)"
+      ],
+      "error": "node /mask_decoder/Tile_1 (Tile): an IIOneHotLayer cannot be used to compute a shape tensor",
+      "reading": "TensorRT VERSION limitation, not silicon and not the harness. Fails at ONNX parse on TRT 10.3 (JetPack 6) through BOTH trtexec and the Python API; the identical graph parses and builds on TRT 10.16 (5090). Deployment fact: EfficientSAM's mask decoder does not build on JetPack 6's stock TensorRT.",
+      "control": "yolov8n-seg fp16 built successfully via the same Python-API path on the same box, so the failure is the graph, not the script."
+    }
+  },
+  "int8_speedup_over_fp16": {
+    "resnet50v1": {
+      "rtx-5090": 1.072,
+      "orin-agx-64gb": 1.397
+    },
+    "yolov8n-seg": {
+      "rtx-5090": 0.761
+    },
+    "efficient_sam_vitt_decoder": {
+      "rtx-5090": 1.086
+    },
+    "efficient_sam_vitt_encoder": {
+      "rtx-5090": 0.506,
+      "orin-agx-64gb": 0.985
+    },
+    "clip_vit_b32_visual": {
+      "rtx-5090": 0.998,
+      "orin-agx-64gb": 1.002
+    }
+  },
+  "matrix": {
+    "resnet50v1": {
+      "fp16": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.3145,
+          "compute_p99_ms": 0.5973,
+          "e2e_p50_ms": 0.365,
+          "fps": 3179.7,
+          "engine_size_mb": 51.56,
+          "power_w_measured": 227.0,
+          "inferences_per_joule": 14.01,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 1.0371,
+          "compute_p99_ms": 1.042,
+          "e2e_p50_ms": 1.0772,
+          "fps": 964.2,
+          "engine_size_mb": 51.7,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 16.07,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 3.3,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.2935,
+          "compute_p99_ms": 0.452,
+          "e2e_p50_ms": 0.3455,
+          "fps": 3407.5,
+          "engine_size_mb": 26.39,
+          "power_w_measured": 227.0,
+          "inferences_per_joule": 15.01,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.7422,
+          "compute_p99_ms": 0.7461,
+          "e2e_p50_ms": 0.7793,
+          "fps": 1347.4,
+          "engine_size_mb": 26.55,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 22.46,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 2.53,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      }
+    },
+    "yolov8n-seg": {
+      "fp16": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.4311,
+          "compute_p99_ms": 0.6091,
+          "e2e_p50_ms": 1.1862,
+          "fps": 2319.5,
+          "engine_size_mb": 8.87,
+          "power_w_measured": 252.1,
+          "inferences_per_joule": 9.2,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 2.3799,
+          "compute_p99_ms": 2.3887,
+          "e2e_p50_ms": 2.8779,
+          "fps": 420.2,
+          "engine_size_mb": 9.8,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 7.0,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 5.52,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.5667,
+          "compute_p99_ms": 0.7315,
+          "e2e_p50_ms": 1.3262,
+          "fps": 1764.5,
+          "engine_size_mb": 55.7,
+          "power_w_measured": 252.1,
+          "inferences_per_joule": 7.0,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "FAILED",
+          "error": [
+            "[07/09/2026-18:10:23] [I] errorOnTimingCacheMiss: Disabled",
+            "[07/09/2026-18:17:12] [E] Error[10]: IBuilder::buildSerializedNetwork: Error Code 10: Internal Error (Could not find any implementation for node /model.22/proto/cv3/conv/Conv + PWN(PWN(/model.22/proto/cv3/act/Sigmoid), PWN(/model.22/proto/cv3/act/Mul)).)",
+            "[07/09/2026-18:17:12] [E] Building engine failed",
+            "[07/09/2026-18:17:12] [E] Engine set up failed"
+          ]
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        }
+      }
+    },
+    "efficient_sam_vitt_decoder": {
+      "fp16": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.3361,
+          "compute_p99_ms": 0.3423,
+          "e2e_p50_ms": 1.4304,
+          "fps": 2975.6,
+          "engine_size_mb": 12.87,
+          "power_w_measured": 204.9,
+          "inferences_per_joule": 14.52,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "FAILED",
+          "error": [
+            "[07/09/2026-18:17:12] [I] errorOnTimingCacheMiss: Disabled",
+            "[07/09/2026-18:17:14] [E] Error[4]: ITensor::getDimensions: Error Code 4: Internal Error (/mask_decoder/OneHot: an IIOneHotLayer cannot be used to compute a shape tensor)",
+            "ITensor::getDimensions: Error Code 4: Internal Error (/mask_decoder/OneHot: an IIOneHotLayer cannot be used to compute a shape tensor)",
+            "[07/09/2026-18:17:14] [E] Parsing model failed",
+            "[07/09/2026-18:17:14] [E] Engine set up failed"
+          ]
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        }
+      },
+      "int8": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.3094,
+          "compute_p99_ms": 0.3212,
+          "e2e_p50_ms": 1.4022,
+          "fps": 3232.3,
+          "engine_size_mb": 6.45,
+          "power_w_measured": 204.9,
+          "inferences_per_joule": 15.78,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "FAILED",
+          "error": [
+            "[07/09/2026-18:17:15] [I] errorOnTimingCacheMiss: Disabled",
+            "[07/09/2026-18:17:16] [E] Error[4]: ITensor::getDimensions: Error Code 4: Internal Error (/mask_decoder/OneHot: an IIOneHotLayer cannot be used to compute a shape tensor)",
+            "ITensor::getDimensions: Error Code 4: Internal Error (/mask_decoder/OneHot: an IIOneHotLayer cannot be used to compute a shape tensor)",
+            "[07/09/2026-18:17:16] [E] Parsing model failed",
+            "[07/09/2026-18:17:16] [E] Engine set up failed"
+          ]
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        }
+      }
+    },
+    "efficient_sam_vitt_encoder": {
+      "fp16": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 1.3426,
+          "compute_p99_ms": 1.4751,
+          "e2e_p50_ms": 2.1991,
+          "fps": 744.8,
+          "engine_size_mb": 19.98,
+          "power_w_measured": 554.1,
+          "inferences_per_joule": 1.34,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 11.4443,
+          "compute_p99_ms": 11.4619,
+          "e2e_p50_ms": 12.0635,
+          "fps": 87.4,
+          "engine_size_mb": 17.06,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 1.46,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 8.52,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 2.6556,
+          "compute_p99_ms": 3.3286,
+          "e2e_p50_ms": 3.5729,
+          "fps": 376.6,
+          "engine_size_mb": 134.42,
+          "power_w_measured": 554.1,
+          "inferences_per_joule": 0.68,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 11.6211,
+          "compute_p99_ms": 11.6362,
+          "e2e_p50_ms": 12.1562,
+          "fps": 86.1,
+          "engine_size_mb": 17.33,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 1.43,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 4.38,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      }
+    },
+    "yolo11s-seg": {
+      "fp16": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.5893,
+          "compute_p99_ms": 0.7404,
+          "e2e_p50_ms": 1.3471,
+          "fps": 1697.0,
+          "engine_size_mb": 22.63,
+          "power_w_measured": 348.5,
+          "inferences_per_joule": 4.87,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 4.0283,
+          "compute_p99_ms": 4.0386,
+          "e2e_p50_ms": 4.626,
+          "fps": 248.2,
+          "engine_size_mb": 24.01,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 4.14,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 6.84,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8": {
+        "rtx-5090": {
+          "status": "FAILED",
+          "error": [
+            "RuntimeError: engine build returned None"
+          ]
+        },
+        "orin-agx-64gb": {
+          "status": "FAILED",
+          "error": [
+            "[07/09/2026-18:29:56] [I] errorOnTimingCacheMiss: Disabled",
+            "[07/09/2026-18:36:02] [E] Error[10]: IBuilder::buildSerializedNetwork: Error Code 10: Internal Error (Could not find any implementation for node /model.23/proto/cv3/conv/Conv + PWN(PWN(/model.23/proto/cv3/act/Sigmoid), PWN(/model.23/proto/cv3/act/Mul)).)",
+            "[07/09/2026-18:36:02] [E] Building engine failed",
+            "[07/09/2026-18:36:02] [E] Engine set up failed"
+          ]
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        }
+      }
+    },
+    "yoloe-26s-seg-pf": {
+      "fp16": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 3.1566,
+          "compute_p99_ms": 3.7675,
+          "e2e_p50_ms": 3.6611,
+          "fps": 316.8,
+          "engine_size_mb": 26.96,
+          "power_w_measured": 176.1,
+          "inferences_per_joule": 1.8,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 12.1201,
+          "compute_p99_ms": 12.1477,
+          "e2e_p50_ms": 12.6724,
+          "fps": 82.5,
+          "engine_size_mb": 28.68,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 1.38,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 3.84,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8": {
+        "rtx-5090": {
+          "status": "FAILED",
+          "error": [
+            "RuntimeError: engine build returned None"
+          ]
+        },
+        "orin-agx-64gb": {
+          "status": "FAILED",
+          "error": [
+            "[07/09/2026-18:45:36] [I] errorOnTimingCacheMiss: Disabled",
+            "[07/09/2026-18:51:17] [E] Error[10]: IBuilder::buildSerializedNetwork: Error Code 10: Internal Error (Could not find any implementation for node /model.23/one2one_cv3.1/one2one_cv3.1.1/one2one_cv3.1.1.1/conv/Conv + PWN(PWN(/model.23/one2one_cv3.1/one2one_cv3.1.1/one2one_cv3.1.1.1/act/Sigmoid), PWN(/model.23/one2one_cv3.1/one2one_cv3.1.1/one2one_cv3.1.1.1/act/Mul)).)",
+            "[07/09/2026-18:51:17] [E] Building engine failed",
+            "[07/09/2026-18:51:17] [E] Engine set up failed"
+          ]
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        }
+      }
+    },
+    "clip_vit_b32_visual": {
+      "fp16": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.4856,
+          "compute_p99_ms": 0.7845,
+          "e2e_p50_ms": 0.5378,
+          "fps": 2059.3,
+          "engine_size_mb": 179.99,
+          "power_w_measured": 278.0,
+          "inferences_per_joule": 7.41,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 1.8342,
+          "compute_p99_ms": 1.8413,
+          "e2e_p50_ms": 1.8784,
+          "fps": 545.2,
+          "engine_size_mb": 179.33,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 9.09,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 3.78,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      },
+      "int8": {
+        "rtx-5090": {
+          "status": "MEASURED",
+          "compute_p50_ms": 0.4866,
+          "compute_p99_ms": 0.7633,
+          "e2e_p50_ms": 0.5407,
+          "fps": 2055.0,
+          "engine_size_mb": 120.34,
+          "power_w_measured": 278.0,
+          "inferences_per_joule": 7.39,
+          "perf_per_watt_basis": "MEASURED power under sustained load"
+        },
+        "orin-agx-64gb": {
+          "status": "MEASURED",
+          "compute_p50_ms": 1.8298,
+          "compute_p99_ms": 1.8369,
+          "e2e_p50_ms": 1.8735,
+          "fps": 546.5,
+          "engine_size_mb": 179.21,
+          "power_w_nameplate_ceiling": 60.0,
+          "inferences_per_joule_lower_bound": 9.11,
+          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+        },
+        "iq9075": {
+          "status": "PENDING \u2014 qualcomm QNN/HTP, same ONNX"
+        },
+        "ratios": {
+          "5090_faster_than_orin_x": 3.76,
+          "perf_per_watt": "INCONCLUSIVE \u2014 5090 power measured, Orin power NOT measured. Orin's batch-1 draw is well under its 60 W SoC ceiling, so the sign of this comparison is undetermined. Needs a tegrastats pass."
+        }
+      }
+    }
+  }
+}

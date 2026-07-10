@@ -1,0 +1,334 @@
+{
+  "__meta__": {
+    "description": "keyhole vision corpus, same ONNX, TensorRT on one host.",
+    "int8_caveat": "PERF-ONLY: no calibration cache, arbitrary dynamic ranges. Latency representative, numerics are NOT.",
+    "compute_ms": "pure GPU kernel time (no H2D/D2H) \u2014 the cross-platform number",
+    "latency_ms": "end-to-end incl. host transfers \u2014 flatters unified memory",
+    "schema_version": 1
+  },
+  "host": {
+    "host_label": "orin-agx-64gb",
+    "machine": "aarch64",
+    "node": "ubuntu",
+    "tensorrt": "10.3.0",
+    "gpu": "Orin (nvgpu)",
+    "power_mode": "NV Power Mode: MAXN"
+  },
+  "config": {
+    "duration_s": 10,
+    "warmup_ms": 3000,
+    "avg_runs": 100
+  },
+  "results": [
+    {
+      "model": "resnet50v1",
+      "precision": "fp16",
+      "ok": true,
+      "build_plus_run_wall_s": 100.4,
+      "log": "out/_orin-agx-64gb_artifacts/resnet50v1.fp16.log",
+      "compute_ms": {
+        "median": 1.03711,
+        "mean": 1.0369243275826232,
+        "p95": 1.04053,
+        "p99": 1.04199,
+        "min": 1.0293,
+        "max": 1.04785
+      },
+      "latency_ms": {
+        "median": 1.07715,
+        "mean": 1.0772713344419038,
+        "p95": 1.08398,
+        "p99": 1.08838,
+        "min": 1.06543,
+        "max": 1.12598
+      },
+      "n_iterations": 9622,
+      "engine_size_mb": 51.7,
+      "throughput_qps": 961.87,
+      "n_fallback_warnings": 0
+    },
+    {
+      "model": "resnet50v1",
+      "precision": "int8",
+      "ok": true,
+      "build_plus_run_wall_s": 139.0,
+      "log": "out/_orin-agx-64gb_artifacts/resnet50v1.int8.log",
+      "compute_ms": {
+        "median": 0.742188,
+        "mean": 0.7420483421424849,
+        "p95": 0.745117,
+        "p99": 0.746094,
+        "min": 0.735352,
+        "max": 0.75
+      },
+      "latency_ms": {
+        "median": 0.779297,
+        "mean": 0.7790798322787167,
+        "p95": 0.783203,
+        "p99": 0.785156,
+        "min": 0.768555,
+        "max": 0.816895
+      },
+      "n_iterations": 13433,
+      "engine_size_mb": 26.55,
+      "throughput_qps": 1343.0,
+      "n_fallback_warnings": 0
+    },
+    {
+      "model": "yolov8n-seg",
+      "precision": "fp16",
+      "ok": true,
+      "build_plus_run_wall_s": 406.1,
+      "log": "out/_orin-agx-64gb_artifacts/yolov8n-seg.fp16.log",
+      "compute_ms": {
+        "median": 2.37988,
+        "mean": 2.380041095498928,
+        "p95": 2.38574,
+        "p99": 2.38867,
+        "min": 2.3623,
+        "max": 2.40137
+      },
+      "latency_ms": {
+        "median": 2.87793,
+        "mean": 2.8775807120743035,
+        "p95": 2.88672,
+        "p99": 2.89111,
+        "min": 2.75391,
+        "max": 2.90601
+      },
+      "n_iterations": 4199,
+      "engine_size_mb": 9.8,
+      "throughput_qps": 419.624,
+      "n_fallback_warnings": 0
+    },
+    {
+      "model": "yolov8n-seg",
+      "precision": "int8",
+      "ok": false,
+      "build_plus_run_wall_s": 409.6,
+      "log": "out/_orin-agx-64gb_artifacts/yolov8n-seg.int8.log",
+      "error_tail": [
+        "[07/09/2026-18:10:23] [I] errorOnTimingCacheMiss: Disabled",
+        "[07/09/2026-18:17:12] [E] Error[10]: IBuilder::buildSerializedNetwork: Error Code 10: Internal Error (Could not find any implementation for node /model.22/proto/cv3/conv/Conv + PWN(PWN(/model.22/proto/cv3/act/Sigmoid), PWN(/model.22/proto/cv3/act/Mul)).)",
+        "[07/09/2026-18:17:12] [E] Building engine failed",
+        "[07/09/2026-18:17:12] [E] Engine set up failed"
+      ]
+    },
+    {
+      "model": "efficient_sam_vitt_decoder",
+      "precision": "fp16",
+      "ok": false,
+      "build_plus_run_wall_s": 2.1,
+      "log": "out/_orin-agx-64gb_artifacts/efficient_sam_vitt_decoder.fp16.log",
+      "error_tail": [
+        "[07/09/2026-18:17:12] [I] errorOnTimingCacheMiss: Disabled",
+        "[07/09/2026-18:17:14] [E] Error[4]: ITensor::getDimensions: Error Code 4: Internal Error (/mask_decoder/OneHot: an IIOneHotLayer cannot be used to compute a shape tensor)",
+        "ITensor::getDimensions: Error Code 4: Internal Error (/mask_decoder/OneHot: an IIOneHotLayer cannot be used to compute a shape tensor)",
+        "[07/09/2026-18:17:14] [E] Parsing model failed",
+        "[07/09/2026-18:17:14] [E] Engine set up failed"
+      ]
+    },
+    {
+      "model": "efficient_sam_vitt_decoder",
+      "precision": "int8",
+      "ok": false,
+      "build_plus_run_wall_s": 2.1,
+      "log": "out/_orin-agx-64gb_artifacts/efficient_sam_vitt_decoder.int8.log",
+      "error_tail": [
+        "[07/09/2026-18:17:15] [I] errorOnTimingCacheMiss: Disabled",
+        "[07/09/2026-18:17:16] [E] Error[4]: ITensor::getDimensions: Error Code 4: Internal Error (/mask_decoder/OneHot: an IIOneHotLayer cannot be used to compute a shape tensor)",
+        "ITensor::getDimensions: Error Code 4: Internal Error (/mask_decoder/OneHot: an IIOneHotLayer cannot be used to compute a shape tensor)",
+        "[07/09/2026-18:17:16] [E] Parsing model failed",
+        "[07/09/2026-18:17:16] [E] Engine set up failed"
+      ]
+    },
+    {
+      "model": "efficient_sam_vitt_encoder",
+      "precision": "fp16",
+      "ok": true,
+      "build_plus_run_wall_s": 100.8,
+      "log": "out/_orin-agx-64gb_artifacts/efficient_sam_vitt_encoder.fp16.log",
+      "compute_ms": {
+        "median": 11.4443,
+        "mean": 11.444235657142858,
+        "p95": 11.457,
+        "p99": 11.4619,
+        "min": 11.4033,
+        "max": 11.4707
+      },
+      "latency_ms": {
+        "median": 12.0635,
+        "mean": 12.061293942857143,
+        "p95": 12.082,
+        "p99": 12.0894,
+        "min": 11.999,
+        "max": 12.0967
+      },
+      "n_iterations": 875,
+      "engine_size_mb": 17.06,
+      "throughput_qps": 87.2617,
+      "n_fallback_warnings": 0
+    },
+    {
+      "model": "efficient_sam_vitt_encoder",
+      "precision": "int8",
+      "ok": true,
+      "build_plus_run_wall_s": 135.3,
+      "log": "out/_orin-agx-64gb_artifacts/efficient_sam_vitt_encoder.int8.log",
+      "compute_ms": {
+        "median": 11.6211,
+        "mean": 11.621102433371957,
+        "p95": 11.6313,
+        "p99": 11.6362,
+        "min": 11.6006,
+        "max": 11.6497
+      },
+      "latency_ms": {
+        "median": 12.1562,
+        "mean": 12.158260486674392,
+        "p95": 12.1787,
+        "p99": 12.1851,
+        "min": 12.1279,
+        "max": 12.1929
+      },
+      "n_iterations": 863,
+      "engine_size_mb": 17.33,
+      "throughput_qps": 85.9338,
+      "n_fallback_warnings": 0
+    },
+    {
+      "model": "yolo11s-seg",
+      "precision": "fp16",
+      "ok": true,
+      "build_plus_run_wall_s": 522.3,
+      "log": "out/_orin-agx-64gb_artifacts/yolo11s-seg.fp16.log",
+      "compute_ms": {
+        "median": 4.02832,
+        "mean": 4.028053664921466,
+        "p95": 4.03516,
+        "p99": 4.03857,
+        "min": 4.00879,
+        "max": 4.06348
+      },
+      "latency_ms": {
+        "median": 4.62598,
+        "mean": 4.632182835279903,
+        "p95": 4.66113,
+        "p99": 4.66992,
+        "min": 4.4082,
+        "max": 5.17285
+      },
+      "n_iterations": 2483,
+      "engine_size_mb": 24.01,
+      "throughput_qps": 247.998,
+      "n_fallback_warnings": 0
+    },
+    {
+      "model": "yolo11s-seg",
+      "precision": "int8",
+      "ok": false,
+      "build_plus_run_wall_s": 365.8,
+      "log": "out/_orin-agx-64gb_artifacts/yolo11s-seg.int8.log",
+      "error_tail": [
+        "[07/09/2026-18:29:56] [I] errorOnTimingCacheMiss: Disabled",
+        "[07/09/2026-18:36:02] [E] Error[10]: IBuilder::buildSerializedNetwork: Error Code 10: Internal Error (Could not find any implementation for node /model.23/proto/cv3/conv/Conv + PWN(PWN(/model.23/proto/cv3/act/Sigmoid), PWN(/model.23/proto/cv3/act/Mul)).)",
+        "[07/09/2026-18:36:02] [E] Building engine failed",
+        "[07/09/2026-18:36:02] [E] Engine set up failed"
+      ]
+    },
+    {
+      "model": "yoloe-26s-seg-pf",
+      "precision": "fp16",
+      "ok": true,
+      "build_plus_run_wall_s": 573.0,
+      "log": "out/_orin-agx-64gb_artifacts/yoloe-26s-seg-pf.fp16.log",
+      "compute_ms": {
+        "median": 12.1201,
+        "mean": 12.119855864570738,
+        "p95": 12.1396,
+        "p99": 12.1477,
+        "min": 12.0835,
+        "max": 12.1592
+      },
+      "latency_ms": {
+        "median": 12.6724,
+        "mean": 12.66215453446191,
+        "p95": 12.7036,
+        "p99": 12.7139,
+        "min": 12.5039,
+        "max": 12.7461
+      },
+      "n_iterations": 827,
+      "engine_size_mb": 28.68,
+      "throughput_qps": 82.3826,
+      "n_fallback_warnings": 0
+    },
+    {
+      "model": "yoloe-26s-seg-pf",
+      "precision": "int8",
+      "ok": false,
+      "build_plus_run_wall_s": 342.2,
+      "log": "out/_orin-agx-64gb_artifacts/yoloe-26s-seg-pf.int8.log",
+      "error_tail": [
+        "[07/09/2026-18:45:36] [I] errorOnTimingCacheMiss: Disabled",
+        "[07/09/2026-18:51:17] [E] Error[10]: IBuilder::buildSerializedNetwork: Error Code 10: Internal Error (Could not find any implementation for node /model.23/one2one_cv3.1/one2one_cv3.1.1/one2one_cv3.1.1.1/conv/Conv + PWN(PWN(/model.23/one2one_cv3.1/one2one_cv3.1.1/one2one_cv3.1.1.1/act/Sigmoid), PWN(/model.23/one2one_cv3.1/one2one_cv3.1.1/one2one_cv3.1.1.1/act/Mul)).)",
+        "[07/09/2026-18:51:17] [E] Building engine failed",
+        "[07/09/2026-18:51:17] [E] Engine set up failed"
+      ]
+    },
+    {
+      "model": "clip_vit_b32_visual",
+      "precision": "fp16",
+      "ok": true,
+      "build_plus_run_wall_s": 71.3,
+      "log": "out/_orin-agx-64gb_artifacts/clip_vit_b32_visual.fp16.log",
+      "compute_ms": {
+        "median": 1.83423,
+        "mean": 1.8344641616161614,
+        "p95": 1.83936,
+        "p99": 1.84131,
+        "min": 1.82617,
+        "max": 1.84473
+      },
+      "latency_ms": {
+        "median": 1.87842,
+        "mean": 1.8804677116620752,
+        "p95": 1.89355,
+        "p99": 1.89844,
+        "min": 1.86523,
+        "max": 1.93604
+      },
+      "n_iterations": 5445,
+      "engine_size_mb": 179.33,
+      "throughput_qps": 544.281,
+      "n_fallback_warnings": 0
+    },
+    {
+      "model": "clip_vit_b32_visual",
+      "precision": "int8",
+      "ok": true,
+      "build_plus_run_wall_s": 74.0,
+      "log": "out/_orin-agx-64gb_artifacts/clip_vit_b32_visual.int8.log",
+      "compute_ms": {
+        "median": 1.82983,
+        "mean": 1.8298804799413813,
+        "p95": 1.83398,
+        "p99": 1.83691,
+        "min": 1.82129,
+        "max": 1.84766
+      },
+      "latency_ms": {
+        "median": 1.87354,
+        "mean": 1.8743226616596447,
+        "p95": 1.88379,
+        "p99": 1.8916,
+        "min": 1.8623,
+        "max": 1.91943
+      },
+      "n_iterations": 5459,
+      "engine_size_mb": 179.21,
+      "throughput_qps": 545.611,
+      "n_fallback_warnings": 0
+    }
+  ]
+}
