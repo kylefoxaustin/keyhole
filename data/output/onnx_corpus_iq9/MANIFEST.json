@@ -1,34 +1,85 @@
 {
   "__meta__": {
     "description": "keyhole 5090-measured vision corpus, clean ONNX for the three-platform sweep (backend=Orin+5090, qualcomm=iq9 QNN/HTP, same ONNX both sides vs 5090 baseline).",
-    "baseline_5090": "data/output/rtx5090_corpus_trt.json — same ONNX, TensorRT, compute_ms median. Legacy per-model anchors also in data/output/bakeoff/*_summary.json.",
-    "baseline_orin": "data/output/orin_corpus_trt.json — same ONNX, TensorRT 10.3, sm_87.",
+    "baseline_5090": "data/output/rtx5090_corpus_trt.json \u2014 same ONNX, TensorRT, compute_ms median. Legacy per-model anchors also in data/output/bakeoff/*_summary.json.",
+    "baseline_orin": "data/output/orin_corpus_trt.json \u2014 same ONNX, TensorRT 10.3, sm_87.",
     "note": "ALL SEVEN are now fully static: batch=1, fixed spatial size, no free shape tensors. Precision is a per-model axis: run FP16/INT8 at minimum; add INT4/MXFP4 where your harness supports it.",
-    "revision": 2,
+    "revision": 3,
     "revision_2_changes": [
-      "FIX (rev1 was BROKEN): resnet50v1.onnx stores 101/110 initializers as external data and the 97MB sidecar `resnet50v1.onnx.data` was missing from the rev1 bundle — the graph would not load in onnxruntime. The sidecar is now included and MUST be kept next to the .onnx.",
-      "FIX: three models carried dynamic dims despite rev1's 'fixed batch=1' claim. Frozen via scripts/freeze_onnx_static.py — clip_vit_b32_visual image->[1,3,224,224]; efficient_sam_vitt_encoder batched_images->[1,3,1024,1024]; efficient_sam_vitt_decoder image_embeddings->[1,256,64,64], point_coords->[1,1,1,2], point_labels->[1,1,1].",
+      "FIX (rev1 was BROKEN): resnet50v1.onnx stores 101/110 initializers as external data and the 97MB sidecar `resnet50v1.onnx.data` was missing from the rev1 bundle \u2014 the graph would not load in onnxruntime. The sidecar is now included and MUST be kept next to the .onnx.",
+      "FIX: three models carried dynamic dims despite rev1's 'fixed batch=1' claim. Frozen via scripts/freeze_onnx_static.py \u2014 clip_vit_b32_visual image->[1,3,224,224]; efficient_sam_vitt_encoder batched_images->[1,3,1024,1024]; efficient_sam_vitt_decoder image_embeddings->[1,256,64,64], point_coords->[1,1,1,2], point_labels->[1,1,1].",
       "FIX: efficient_sam_vitt_decoder's `orig_im_size` was an INT64 SHAPE TENSOR whose values drive Gather ops. Benchmark harnesses fill unbound inputs with random data, so this was a latent garbage-output/OOM trap on any platform. It is now frozen as a constant initializer [1024,1024]."
+    ],
+    "revision_3_changes": [
+      "PATCH1 (qualcomm AI Hub): inlined resnet50v1's external weights \u2014 rev2 kept them in resnet50v1.onnx.data, which qai_hub's uploader dropped ('missing external weights'). The bundle is now self-contained; there is NO .data sidecar and none is needed.",
+      "PATCH2 (qualcomm AI Hub): stripped output0/output1 from graph.value_info on yolov8n-seg / yolo11s-seg / yoloe-26s-seg-pf \u2014 they were listed in both value_info and graph.output, which AI Hub's ONNX validator rejects. Ops/weights/shapes unchanged."
     ]
   },
   "measurement_protocol": {
-    "headline_metric": "compute_ms median — pure accelerator kernel time, excluding host<->device transfers. This is the apples-to-apples number across a discrete GPU (5090), an integrated SoC (Orin), and an NPU (IQ-9075).",
+    "headline_metric": "compute_ms median \u2014 pure accelerator kernel time, excluding host<->device transfers. This is the apples-to-apples number across a discrete GPU (5090), an integrated SoC (Orin), and an NPU (IQ-9075).",
     "also_report": "end-to-end latency incl. transfers. Unified-memory parts look better on this; quote both so the difference is visible rather than argued about.",
     "warmup": ">=3s of untimed inference before the timed window, so DVFS has boosted.",
     "int8_caveat": "keyhole's INT8 numbers are PERF-ONLY: no calibration cache, arbitrary dynamic ranges (trtexec convention, inputs +/-2.0, layer outputs +/-4.0). Kernel selection and latency are representative; numerics are NOT. Do not compare accuracy against these.",
-    "partial_delegation": "If part of a graph falls back to CPU/GPU, say so and quote END-TO-END. (Per qualcomm's Neutron methodology note — a whole-graph number and a partially-delegated number are not the same measurement.)"
+    "partial_delegation": "If part of a graph falls back to CPU/GPU, say so and quote END-TO-END. (Per qualcomm's Neutron methodology note \u2014 a whole-graph number and a partially-delegated number are not the same measurement.)"
   },
   "models": [
-    {"name": "resnet50",        "onnx": "resnet50v1.onnx",              "aux": "resnet50v1.onnx.data (REQUIRED, external weights)", "input": "input[1,3,224,224]", "arch": "CNN baseline",        "op_cliff_interest": "low",  "dedup": "qualcomm already ran ResNet50 on iq9 — OPTIONAL same-ONNX cross-check only"},
-    {"name": "clip_vit_b32",    "onnx": "clip_vit_b32_visual.onnx",    "input": "image[1,3,224,224]", "arch": "pure transformer/attention", "op_cliff_interest": "HIGH — attention op-cliff test"},
-    {"name": "yolov8n_seg",     "onnx": "yolov8n-seg.onnx",            "input": "images[1,3,640,640]", "arch": "CNN detection+seg (NMS)", "op_cliff_interest": "medium", "dedup": "distinct from qualcomm's yolov8_DET — this is the SEG head"},
-    {"name": "yolo11s_seg",     "onnx": "yolo11s-seg.onnx",            "input": "images[1,3,640,640]", "arch": "CNN detection+seg (NMS)", "op_cliff_interest": "medium"},
-    {"name": "yoloe_26s_seg",   "onnx": "yoloe-26s-seg-pf.onnx",       "input": "images[1,3,640,640]", "arch": "open-vocab detect (CLIP text enc + det head)", "op_cliff_interest": "HIGH — fused text+vision"},
-    {"name": "efficientsam_encoder", "onnx": "efficient_sam_vitt_encoder.onnx", "input": "batched_images[1,3,1024,1024]", "output": "image_embeddings[1,256,64,64]", "arch": "SAM-family ViT image encoder", "op_cliff_interest": "HIGH — heavy attention encoder"},
-    {"name": "efficientsam_decoder", "onnx": "efficient_sam_vitt_decoder.onnx", "input": "image_embeddings[1,256,64,64] + point_coords[1,1,1,2] + point_labels[1,1,1]; orig_im_size frozen to [1024,1024]", "arch": "SAM-family mask decoder", "op_cliff_interest": "HIGH — gather/decoder ops (the SAM op-cliff)", "note": "encoder output feeds decoder input directly — the two chain into a full SAM pass"}
+    {
+      "name": "resnet50",
+      "onnx": "resnet50v1.onnx",
+      "aux": "self-contained as of rev3 (weights inlined; no .data sidecar)",
+      "input": "input[1,3,224,224]",
+      "arch": "CNN baseline",
+      "op_cliff_interest": "low",
+      "dedup": "qualcomm already ran ResNet50 on iq9 \u2014 OPTIONAL same-ONNX cross-check only"
+    },
+    {
+      "name": "clip_vit_b32",
+      "onnx": "clip_vit_b32_visual.onnx",
+      "input": "image[1,3,224,224]",
+      "arch": "pure transformer/attention",
+      "op_cliff_interest": "HIGH \u2014 attention op-cliff test"
+    },
+    {
+      "name": "yolov8n_seg",
+      "onnx": "yolov8n-seg.onnx",
+      "input": "images[1,3,640,640]",
+      "arch": "CNN detection+seg (NMS)",
+      "op_cliff_interest": "medium",
+      "dedup": "distinct from qualcomm's yolov8_DET \u2014 this is the SEG head"
+    },
+    {
+      "name": "yolo11s_seg",
+      "onnx": "yolo11s-seg.onnx",
+      "input": "images[1,3,640,640]",
+      "arch": "CNN detection+seg (NMS)",
+      "op_cliff_interest": "medium"
+    },
+    {
+      "name": "yoloe_26s_seg",
+      "onnx": "yoloe-26s-seg-pf.onnx",
+      "input": "images[1,3,640,640]",
+      "arch": "open-vocab detect (CLIP text enc + det head)",
+      "op_cliff_interest": "HIGH \u2014 fused text+vision"
+    },
+    {
+      "name": "efficientsam_encoder",
+      "onnx": "efficient_sam_vitt_encoder.onnx",
+      "input": "batched_images[1,3,1024,1024]",
+      "output": "image_embeddings[1,256,64,64]",
+      "arch": "SAM-family ViT image encoder",
+      "op_cliff_interest": "HIGH \u2014 heavy attention encoder"
+    },
+    {
+      "name": "efficientsam_decoder",
+      "onnx": "efficient_sam_vitt_decoder.onnx",
+      "input": "image_embeddings[1,256,64,64] + point_coords[1,1,1,2] + point_labels[1,1,1]; orig_im_size frozen to [1024,1024]",
+      "arch": "SAM-family mask decoder",
+      "op_cliff_interest": "HIGH \u2014 gather/decoder ops (the SAM op-cliff)",
+      "note": "encoder output feeds decoder input directly \u2014 the two chain into a full SAM pass"
+    }
   ],
   "gaps_to_export": [
-    "SAM3 (full, ~840M) — no ONNX yet; complex (text prompts). Heavy export, deferred as follow-up. EfficientSAM (above) is the lighter SAM-family cliff proxy in the meantime.",
-    "ViT-alternatives — torch path, no ONNX; export on request."
+    "SAM3 (full, ~840M) \u2014 no ONNX yet; complex (text prompts). Heavy export, deferred as follow-up. EfficientSAM (above) is the lighter SAM-family cliff proxy in the meantime.",
+    "ViT-alternatives \u2014 torch path, no ONNX; export on request."
   ]
 }
