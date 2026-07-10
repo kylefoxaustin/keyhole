@@ -94,11 +94,15 @@ def build_engine(onnx_path, precision, logger, workspace_gb=8):
 
     cfg = builder.create_builder_config()
     cfg.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, workspace_gb << 30)
-    if precision in ("fp16", "int8", "fp8"):
+    if precision in ("fp16", "int8", "int8_qdq", "fp8"):
         cfg.set_flag(trt.BuilderFlag.FP16)
     if precision == "int8":
         cfg.set_flag(trt.BuilderFlag.INT8)
-        set_tensor_scales(network)
+        set_tensor_scales(network)          # implicit quantization — perf-only, see docstring
+    if precision == "int8_qdq":
+        # Explicit quantization: the graph's own Q/DQ nodes carry calibrated scales.
+        # Assigning dynamic ranges here would OVERRIDE them — do not.
+        cfg.set_flag(trt.BuilderFlag.INT8)
     if precision == "fp8":
         cfg.set_flag(trt.BuilderFlag.FP8)
 
