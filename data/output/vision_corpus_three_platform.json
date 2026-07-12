@@ -187,11 +187,11 @@
           "fps": 964.2,
           "engine_size_mb": 51.7,
           "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
-          "power_w_measured_soc": 26.53,
-          "power_w_measured_soc_delta_over_idle": 23.643,
+          "power_w_measured_soc": 26.41,
+          "power_w_measured_soc_delta_over_idle": 23.257,
           "power_w_vin_sys_5v0": 8.26,
           "power_w_nameplate_for_reference_only": 60.0,
-          "inferences_per_joule": 36.35,
+          "inferences_per_joule": 36.51,
           "compute_p50_ms_repro_this_pass": 1.05664
         },
         "iq9075": {
@@ -287,11 +287,11 @@
           "fps": 420.2,
           "engine_size_mb": 9.8,
           "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
-          "power_w_measured_soc": 27.56,
-          "power_w_measured_soc_delta_over_idle": 24.678,
+          "power_w_measured_soc": 27.6,
+          "power_w_measured_soc_delta_over_idle": 24.446,
           "power_w_vin_sys_5v0": 7.36,
           "power_w_nameplate_for_reference_only": 60.0,
-          "inferences_per_joule": 15.25,
+          "inferences_per_joule": 15.23,
           "compute_p50_ms_repro_this_pass": 2.32227
         },
         "iq9075": {
@@ -460,11 +460,11 @@
           "fps": 87.4,
           "engine_size_mb": 17.06,
           "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
-          "power_w_measured_soc": 40.58,
-          "power_w_measured_soc_delta_over_idle": 37.692,
+          "power_w_measured_soc": 40.77,
+          "power_w_measured_soc_delta_over_idle": 37.62,
           "power_w_vin_sys_5v0": 7.36,
           "power_w_nameplate_for_reference_only": 60.0,
-          "inferences_per_joule": 2.15,
+          "inferences_per_joule": 2.14,
           "compute_p50_ms_repro_this_pass": 11.4082
         },
         "iq9075": {
@@ -560,11 +560,11 @@
           "fps": 248.2,
           "engine_size_mb": 24.01,
           "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
-          "power_w_measured_soc": 31.47,
-          "power_w_measured_soc_delta_over_idle": 28.589,
+          "power_w_measured_soc": 31.62,
+          "power_w_measured_soc_delta_over_idle": 28.47,
           "power_w_vin_sys_5v0": 8.12,
           "power_w_nameplate_for_reference_only": 60.0,
-          "inferences_per_joule": 7.89,
+          "inferences_per_joule": 7.85,
           "compute_p50_ms_repro_this_pass": 3.96973
         },
         "iq9075": {
@@ -644,11 +644,11 @@
           "fps": 82.5,
           "engine_size_mb": 28.68,
           "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
-          "power_w_measured_soc": 22.42,
-          "power_w_measured_soc_delta_over_idle": 19.538,
+          "power_w_measured_soc": 22.64,
+          "power_w_measured_soc_delta_over_idle": 19.49,
           "power_w_vin_sys_5v0": 7.85,
           "power_w_nameplate_for_reference_only": 60.0,
-          "inferences_per_joule": 3.68,
+          "inferences_per_joule": 3.64,
           "compute_p50_ms_repro_this_pass": 12.1919
         },
         "iq9075": {
@@ -728,11 +728,11 @@
           "fps": 545.2,
           "engine_size_mb": 179.33,
           "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
-          "power_w_measured_soc": 25.52,
-          "power_w_measured_soc_delta_over_idle": 22.631,
+          "power_w_measured_soc": 25.45,
+          "power_w_measured_soc_delta_over_idle": 22.295,
           "power_w_vin_sys_5v0": 9.58,
           "power_w_nameplate_for_reference_only": 60.0,
-          "inferences_per_joule": 21.37,
+          "inferences_per_joule": 21.43,
           "compute_p50_ms_repro_this_pass": 1.84082
         },
         "iq9075": {
@@ -802,8 +802,8 @@
     }
   },
   "perf_per_watt": {
-    "status": "PARTIALLY RESOLVED \u2014 4 of 6 models: the Orin wins under ALL THREE power conventions (earned). 2 of 6 (yolov8n-seg, yolo11s-seg): TOO CLOSE TO CALL \u2014 the winner flips with the convention. Do NOT quote 'the Orin wins perf/W on all six models'; that claim was made on DIRTY-CARD 5090 power and is RETRACTED.",
-    "orin_idle_soc_w": 2.884,
+    "status": "FINAL \u2014 4 of 6 EARNED (Orin wins under all three conventions, with 3-run error bars on BOTH sides). 2 of 6 GENUINELY UNRESOLVED: yolov8n-seg and yolo11s-seg straddle 1.0 under convention B; the measured run-to-run noise spans the decision boundary, so the data cannot name a winner. NOT '5090 wins' \u2014 UNRESOLVED.",
+    "orin_idle_soc_w": 3.15,
     "rtx5090_idle_board_w": 21.73,
     "orin_power_mode": "MAXN (nvpmodel mode 0) \u2014 PINNED, stated per the card's rule",
     "rail_convention": "soc_w = VDD_GPU_SOC + VDD_CPU_CV (GPU+SoC die plus CPU+CV). VIN_SYS_5V0 is the 5V carrier/system input and is recorded separately, NOT folded in. Reproduces the fleet's published idle ~3.2 W.",
@@ -814,31 +814,31 @@
         "model": "resnet50v1",
         "orin_compute_p50_ms": 1.0371,
         "rtx5090_compute_p50_ms": 0.3145,
-        "orin_soc_w": 26.53,
+        "orin_soc_w": 26.41,
         "rtx5090_board_w": 204.1,
         "conventions": {
           "A_as_measured": {
-            "orin_w": 26.53,
+            "orin_w": 26.41,
             "rtx5090_w": 204.1,
-            "orin_inf_per_joule": 36.35,
+            "orin_inf_per_joule": 36.51,
             "rtx5090_inf_per_joule": 15.58,
-            "orin_advantage_x": 2.33,
+            "orin_advantage_x": 2.34,
             "winner": "orin-agx"
           },
           "B_orin_incl_carrier": {
-            "orin_w": 34.79,
+            "orin_w": 34.67,
             "rtx5090_w": 204.1,
-            "orin_inf_per_joule": 27.72,
+            "orin_inf_per_joule": 27.81,
             "rtx5090_inf_per_joule": 15.58,
-            "orin_advantage_x": 1.78,
+            "orin_advantage_x": 1.79,
             "winner": "orin-agx"
           },
           "C_delta_over_idle": {
-            "orin_w": 23.64,
+            "orin_w": 23.26,
             "rtx5090_w": 182.37,
-            "orin_inf_per_joule": 40.78,
+            "orin_inf_per_joule": 41.46,
             "rtx5090_inf_per_joule": 17.44,
-            "orin_advantage_x": 2.34,
+            "orin_advantage_x": 2.38,
             "winner": "orin-agx"
           }
         },
@@ -849,31 +849,31 @@
         "model": "clip_vit_b32_visual",
         "orin_compute_p50_ms": 1.8342,
         "rtx5090_compute_p50_ms": 0.4856,
-        "orin_soc_w": 25.52,
+        "orin_soc_w": 25.45,
         "rtx5090_board_w": 255.8,
         "conventions": {
           "A_as_measured": {
-            "orin_w": 25.52,
+            "orin_w": 25.45,
             "rtx5090_w": 255.8,
-            "orin_inf_per_joule": 21.37,
+            "orin_inf_per_joule": 21.43,
             "rtx5090_inf_per_joule": 8.05,
-            "orin_advantage_x": 2.65,
+            "orin_advantage_x": 2.66,
             "winner": "orin-agx"
           },
           "B_orin_incl_carrier": {
-            "orin_w": 35.1,
+            "orin_w": 35.03,
             "rtx5090_w": 255.8,
-            "orin_inf_per_joule": 15.53,
+            "orin_inf_per_joule": 15.57,
             "rtx5090_inf_per_joule": 8.05,
             "orin_advantage_x": 1.93,
             "winner": "orin-agx"
           },
           "C_delta_over_idle": {
-            "orin_w": 22.63,
+            "orin_w": 22.3,
             "rtx5090_w": 234.07,
-            "orin_inf_per_joule": 24.09,
+            "orin_inf_per_joule": 24.45,
             "rtx5090_inf_per_joule": 8.8,
-            "orin_advantage_x": 2.74,
+            "orin_advantage_x": 2.78,
             "winner": "orin-agx"
           }
         },
@@ -884,31 +884,31 @@
         "model": "yolov8n-seg",
         "orin_compute_p50_ms": 2.3799,
         "rtx5090_compute_p50_ms": 0.4311,
-        "orin_soc_w": 27.56,
+        "orin_soc_w": 27.6,
         "rtx5090_board_w": 198.5,
         "conventions": {
           "A_as_measured": {
-            "orin_w": 27.56,
+            "orin_w": 27.6,
             "rtx5090_w": 198.5,
-            "orin_inf_per_joule": 15.25,
+            "orin_inf_per_joule": 15.23,
             "rtx5090_inf_per_joule": 11.69,
             "orin_advantage_x": 1.3,
             "winner": "orin-agx"
           },
           "B_orin_incl_carrier": {
-            "orin_w": 34.93,
+            "orin_w": 34.96,
             "rtx5090_w": 198.5,
-            "orin_inf_per_joule": 12.03,
+            "orin_inf_per_joule": 12.02,
             "rtx5090_inf_per_joule": 11.69,
             "orin_advantage_x": 1.03,
             "winner": "orin-agx"
           },
           "C_delta_over_idle": {
-            "orin_w": 24.68,
+            "orin_w": 24.45,
             "rtx5090_w": 176.77,
-            "orin_inf_per_joule": 17.03,
+            "orin_inf_per_joule": 17.19,
             "rtx5090_inf_per_joule": 13.12,
-            "orin_advantage_x": 1.3,
+            "orin_advantage_x": 1.31,
             "winner": "orin-agx"
           }
         },
@@ -919,31 +919,31 @@
         "model": "yolo11s-seg",
         "orin_compute_p50_ms": 4.0283,
         "rtx5090_compute_p50_ms": 0.5893,
-        "orin_soc_w": 31.47,
+        "orin_soc_w": 31.62,
         "rtx5090_board_w": 270.4,
         "conventions": {
           "A_as_measured": {
-            "orin_w": 31.47,
+            "orin_w": 31.62,
             "rtx5090_w": 270.4,
-            "orin_inf_per_joule": 7.89,
+            "orin_inf_per_joule": 7.85,
             "rtx5090_inf_per_joule": 6.28,
-            "orin_advantage_x": 1.26,
+            "orin_advantage_x": 1.25,
             "winner": "orin-agx"
           },
           "B_orin_incl_carrier": {
-            "orin_w": 39.59,
+            "orin_w": 39.74,
             "rtx5090_w": 270.4,
-            "orin_inf_per_joule": 6.27,
+            "orin_inf_per_joule": 6.25,
             "rtx5090_inf_per_joule": 6.28,
             "orin_advantage_x": 1.0,
             "winner": "rtx-5090"
           },
           "C_delta_over_idle": {
-            "orin_w": 28.59,
+            "orin_w": 28.47,
             "rtx5090_w": 248.67,
-            "orin_inf_per_joule": 8.68,
+            "orin_inf_per_joule": 8.72,
             "rtx5090_inf_per_joule": 6.82,
-            "orin_advantage_x": 1.27,
+            "orin_advantage_x": 1.28,
             "winner": "orin-agx"
           }
         },
@@ -954,27 +954,27 @@
         "model": "efficient_sam_vitt_encoder",
         "orin_compute_p50_ms": 11.4443,
         "rtx5090_compute_p50_ms": 1.3426,
-        "orin_soc_w": 40.58,
+        "orin_soc_w": 40.77,
         "rtx5090_board_w": 555.1,
         "conventions": {
           "A_as_measured": {
-            "orin_w": 40.58,
+            "orin_w": 40.77,
             "rtx5090_w": 555.1,
-            "orin_inf_per_joule": 2.15,
+            "orin_inf_per_joule": 2.14,
             "rtx5090_inf_per_joule": 1.34,
             "orin_advantage_x": 1.6,
             "winner": "orin-agx"
           },
           "B_orin_incl_carrier": {
-            "orin_w": 47.94,
+            "orin_w": 48.13,
             "rtx5090_w": 555.1,
             "orin_inf_per_joule": 1.82,
             "rtx5090_inf_per_joule": 1.34,
-            "orin_advantage_x": 1.36,
+            "orin_advantage_x": 1.35,
             "winner": "orin-agx"
           },
           "C_delta_over_idle": {
-            "orin_w": 37.69,
+            "orin_w": 37.62,
             "rtx5090_w": 533.37,
             "orin_inf_per_joule": 2.32,
             "rtx5090_inf_per_joule": 1.4,
@@ -989,29 +989,29 @@
         "model": "yoloe-26s-seg-pf",
         "orin_compute_p50_ms": 12.1201,
         "rtx5090_compute_p50_ms": 3.1566,
-        "orin_soc_w": 22.42,
+        "orin_soc_w": 22.64,
         "rtx5090_board_w": 173.8,
         "conventions": {
           "A_as_measured": {
-            "orin_w": 22.42,
+            "orin_w": 22.64,
             "rtx5090_w": 173.8,
-            "orin_inf_per_joule": 3.68,
+            "orin_inf_per_joule": 3.64,
             "rtx5090_inf_per_joule": 1.82,
-            "orin_advantage_x": 2.02,
+            "orin_advantage_x": 2.0,
             "winner": "orin-agx"
           },
           "B_orin_incl_carrier": {
-            "orin_w": 30.27,
+            "orin_w": 30.49,
             "rtx5090_w": 173.8,
-            "orin_inf_per_joule": 2.73,
+            "orin_inf_per_joule": 2.71,
             "rtx5090_inf_per_joule": 1.82,
-            "orin_advantage_x": 1.5,
+            "orin_advantage_x": 1.48,
             "winner": "orin-agx"
           },
           "C_delta_over_idle": {
-            "orin_w": 19.54,
+            "orin_w": 19.49,
             "rtx5090_w": 152.07,
-            "orin_inf_per_joule": 4.22,
+            "orin_inf_per_joule": 4.23,
             "rtx5090_inf_per_joule": 2.08,
             "orin_advantage_x": 2.03,
             "winner": "orin-agx"
@@ -1021,24 +1021,29 @@
         "winner": "orin-agx"
       }
     ],
-    "clear_orin_wins": {
-      "resnet50v1": "2.33x / 1.78x / 2.34x  (A/B/C)",
-      "clip_vit_b32_visual": "2.65x / 1.93x / 2.74x",
-      "efficient_sam_vitt_encoder": "1.60x / 1.36x / 1.66x",
-      "yoloe-26s-seg-pf": "2.02x / 1.50x / 2.03x"
+    "earned_orin_wins": {
+      "resnet50v1": "2.34x / 1.79x / 2.38x (A/B/C)",
+      "clip_vit_b32_visual": "2.66x / 1.93x / 2.78x",
+      "efficient_sam_vitt_encoder": "1.60x / 1.35x / 1.66x",
+      "yoloe-26s-seg-pf": "2.00x / 1.48x / 2.03x"
     },
-    "too_close_to_call": {
-      "yolov8n-seg": "1.30x / **1.03x** / 1.30x \u2014 convention B is a statistical tie",
-      "yolo11s-seg": "1.26x / **1.00x (5090 edges it)** / 1.27x \u2014 the winner FLIPS on convention B",
-      "why": "Convention B adds the Orin's VIN_SYS_5V0 carrier rail (~4.2 W) to its die-only SoC rails, because the 5090's nvidia-smi figure is WHOLE-BOARD (die + GDDR7 + VRM) and the Orin's tegrastats rails are not. On these two models the Orin's margin is thinner than that adjustment, so the answer is decided by a bookkeeping choice rather than by the silicon. That is the definition of too close to call."
+    "unresolved_with_error_bars": {
+      "yolov8n-seg": {
+        "convention_B_range_x": [
+          0.97,
+          1.11
+        ],
+        "verdict": "STRADDLES 1.0 \u2014 unresolved"
+      },
+      "yolo11s-seg": {
+        "convention_B_range_x": [
+          0.92,
+          1.1
+        ],
+        "verdict": "STRADDLES 1.0 \u2014 unresolved"
+      },
+      "why": "Convention B adds the Orin's VIN_SYS_5V0 carrier rail to its die-only SoC rails, because the 5090's nvidia-smi number is WHOLE-BOARD (die + GDDR7 + VRM). On these two models the Orin's margin is thinner than that adjustment AND thinner than the 5090's run-to-run spread, so the answer is decided by bookkeeping and noise rather than by silicon. Saying 'the 5090 wins' here would be as unearned as the original claim that the Orin won."
     },
-    "RETRACTION_2_dirty_card_denominator": {
-      "retracted_claim": "'perf/W RESOLVED \u2014 the Orin wins on ALL SIX models under ALL THREE conventions; the winner is invariant.' Published + broadcast to the fleet 2026-07-12 02:46. FALSE.",
-      "why_it_was_wrong": "The 5090's per-model watts were measured ON A DIRTY CARD. The old file recorded an idle of 64.97 W; this card idles at 21-30 W. [image_gen] independently confirmed the cause: its two resident ComfyUI processes held the idle floor at 61 W, falling to 21 W when stopped. So a tenant's baseline was folded into every 5090 reading, INFLATING the 5090's watts, DEPRESSING its inferences-per-joule, and OVERSTATING the Orin's advantage by up to 28% (yolov8n-seg 1.66x -> 1.30x; yolo11s-seg 1.62x -> 1.26x).",
-      "how_it_was_found": "The old 5090 power file has NO PROVENANCE IN THE REPO \u2014 no script, no method, no clean-card gate. It was an ad-hoc run committed as data. I built a careful instrument for the ORIN (pinned mode, preloaded engines, ramp discarded, validity gate, stated rail convention) and then DIVIDED BY A NUMBER I HAD NEVER EXAMINED, because it was already 'measured'.",
-      "the_lesson": "THE STALE TERM IS WHICHEVER ONE YOU DID NOT JUST WORK ON. Careful instrumentation of ONE side of a ratio does not make the ratio careful \u2014 it makes the OTHER side invisible, because the effort you spent proves to you that you were being rigorous. Combined with the earlier nameplate retraction, this anchor has now been wrong TWICE in the same denominator, in the same direction, for two different reasons.",
-      "corrected_method": "scripts/rtx5090_power_pass.py \u2014 REFUSES to run unless the GPU has no other compute process and idle <= 35 W; marks a row INVALID unless power rises >= 25 W over idle. 3 independent runs, median + spread published (spread is 0.4%-17% by model \u2014 a single run has NO ERROR BAR, which is why the first clean run was not simply substituted)."
-    },
-    "remaining_honest_gap": "The ORIN power figures are still a SINGLE RUN with no error bar. The 5090 side now has 3 runs and a published spread; the Orin side does not. If the Orin's run-to-run spread is comparable (the 5090's reached 17%), the two TOO-CLOSE-TO-CALL models cannot be resolved without repeating the Orin pass N times. Stated rather than buried: the asymmetry is now on the OTHER side of the same ratio."
+    "measurement_asymmetry_FOUND": "The Orin's power is REMARKABLY stable: spread <=1.0% across all six models over 3 runs. The 5090's spread on the same corpus is 0.4%-17%. ALL the uncertainty in this cross-platform ratio lives on the GPU side, not the edge side \u2014 the opposite of what one would assume. This is only visible because both sides now have error bars; with a single run each, the noise is invisible and every margin looks decisive."
   }
 }

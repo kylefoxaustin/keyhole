@@ -9,17 +9,24 @@
     "validity_gate": "rows with valid=false did not execute on the GPU \u2014 do not quote",
     "excluded": {
       "efficientsam_decoder": "does not build on TRT 10.3 (IIOneHotLayer cannot compute a shape tensor) \u2014 a TRT VERSION limit, not silicon; builds fine on 10.16."
-    }
+    },
+    "n_independent_runs": 3,
+    "stability": "Orin power is REMARKABLY stable: spread <=1.0% across all six models (3 runs). The RTX 5090's spread on the same corpus is 0.4%-17%. So the uncertainty in the cross-platform perf/W ratio is dominated almost entirely by the GPU side, not the edge side."
   },
   "idle": {
     "n_samples": 95,
     "vdd_gpu_soc_mean_mw": 2665.1,
     "vdd_cpu_cv_mean_mw": 219.1,
     "vin_sys_5v0_mean_mw": 4233.0,
-    "soc_mean_w": 2.884,
+    "soc_mean_w": 3.15,
     "soc_p50_w": 2.906,
     "soc_max_w": 2.908,
-    "gr3d_mean_pct": 0.0
+    "gr3d_mean_pct": 0.0,
+    "runs_w": [
+      2.905,
+      3.15,
+      3.15
+    ]
   },
   "results": [
     {
@@ -33,12 +40,19 @@
         "vdd_gpu_soc_mean_mw": 26007.2,
         "vdd_cpu_cv_mean_mw": 519.4,
         "vin_sys_5v0_mean_mw": 8258.8,
-        "soc_mean_w": 26.527,
+        "soc_mean_w": 26.407,
         "soc_p50_w": 26.409,
         "soc_max_w": 27.104,
-        "gr3d_mean_pct": 96.0
+        "gr3d_mean_pct": 96.0,
+        "soc_runs_w": [
+          26.407,
+          26.171,
+          26.409
+        ],
+        "spread_pct": 0.9,
+        "n_runs": 3
       },
-      "soc_delta_over_idle_w": 23.643
+      "soc_delta_over_idle_w": 23.257
     },
     {
       "model": "clip_vit_b32",
@@ -51,12 +65,19 @@
         "vdd_gpu_soc_mean_mw": 25214.4,
         "vdd_cpu_cv_mean_mw": 300.8,
         "vin_sys_5v0_mean_mw": 9581.3,
-        "soc_mean_w": 25.515,
+        "soc_mean_w": 25.445,
         "soc_p50_w": 25.456,
         "soc_max_w": 26.849,
-        "gr3d_mean_pct": 96.0
+        "gr3d_mean_pct": 96.0,
+        "soc_runs_w": [
+          25.411,
+          25.445,
+          25.503
+        ],
+        "spread_pct": 0.4,
+        "n_runs": 3
       },
-      "soc_delta_over_idle_w": 22.631
+      "soc_delta_over_idle_w": 22.295
     },
     {
       "model": "yolov8n_seg",
@@ -69,12 +90,19 @@
         "vdd_gpu_soc_mean_mw": 26364.6,
         "vdd_cpu_cv_mean_mw": 1197.6,
         "vin_sys_5v0_mean_mw": 7363.7,
-        "soc_mean_w": 27.562,
+        "soc_mean_w": 27.596,
         "soc_p50_w": 27.599,
         "soc_max_w": 28.294,
-        "gr3d_mean_pct": 95.0
+        "gr3d_mean_pct": 95.0,
+        "soc_runs_w": [
+          27.554,
+          27.596,
+          27.835
+        ],
+        "spread_pct": 1.0,
+        "n_runs": 3
       },
-      "soc_delta_over_idle_w": 24.678
+      "soc_delta_over_idle_w": 24.446
     },
     {
       "model": "yolo11s_seg",
@@ -87,12 +115,19 @@
         "vdd_gpu_soc_mean_mw": 30712.6,
         "vdd_cpu_cv_mean_mw": 760.5,
         "vin_sys_5v0_mean_mw": 8119.2,
-        "soc_mean_w": 31.473,
+        "soc_mean_w": 31.62,
         "soc_p50_w": 31.536,
         "soc_max_w": 32.529,
-        "gr3d_mean_pct": 96.0
+        "gr3d_mean_pct": 96.0,
+        "soc_runs_w": [
+          31.491,
+          31.62,
+          31.775
+        ],
+        "spread_pct": 0.9,
+        "n_runs": 3
       },
-      "soc_delta_over_idle_w": 28.589
+      "soc_delta_over_idle_w": 28.47
     },
     {
       "model": "efficientsam_encoder",
@@ -105,12 +140,19 @@
         "vdd_gpu_soc_mean_mw": 40312.3,
         "vdd_cpu_cv_mean_mw": 264.2,
         "vin_sys_5v0_mean_mw": 7360.8,
-        "soc_mean_w": 40.576,
+        "soc_mean_w": 40.77,
         "soc_p50_w": 40.537,
         "soc_max_w": 41.243,
-        "gr3d_mean_pct": 99.0
+        "gr3d_mean_pct": 99.0,
+        "soc_runs_w": [
+          40.641,
+          40.77,
+          40.77
+        ],
+        "spread_pct": 0.3,
+        "n_runs": 3
       },
-      "soc_delta_over_idle_w": 37.692
+      "soc_delta_over_idle_w": 37.62
     },
     {
       "model": "yoloe_26s_seg",
@@ -123,12 +165,19 @@
         "vdd_gpu_soc_mean_mw": 22155.5,
         "vdd_cpu_cv_mean_mw": 266.8,
         "vin_sys_5v0_mean_mw": 7846.1,
-        "soc_mean_w": 22.422,
+        "soc_mean_w": 22.64,
         "soc_p50_w": 22.438,
         "soc_max_w": 22.916,
-        "gr3d_mean_pct": 98.3
+        "gr3d_mean_pct": 98.3,
+        "soc_runs_w": [
+          22.451,
+          22.64,
+          22.669
+        ],
+        "spread_pct": 1.0,
+        "n_runs": 3
       },
-      "soc_delta_over_idle_w": 19.538
+      "soc_delta_over_idle_w": 19.49
     }
   ]
 }
