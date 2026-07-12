@@ -179,9 +179,13 @@
           "e2e_p50_ms": 1.0772,
           "fps": 964.2,
           "engine_size_mb": 51.7,
-          "power_w_nameplate_ceiling": 60.0,
-          "inferences_per_joule_lower_bound": 16.07,
-          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+          "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
+          "power_w_measured_soc": 26.53,
+          "power_w_measured_soc_delta_over_idle": 23.643,
+          "power_w_vin_sys_5v0": 8.26,
+          "power_w_nameplate_for_reference_only": 60.0,
+          "inferences_per_joule": 36.35,
+          "compute_p50_ms_repro_this_pass": 1.05664
         },
         "iq9075": {
           "status": "MEASURED",
@@ -268,9 +272,13 @@
           "e2e_p50_ms": 2.8779,
           "fps": 420.2,
           "engine_size_mb": 9.8,
-          "power_w_nameplate_ceiling": 60.0,
-          "inferences_per_joule_lower_bound": 7.0,
-          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+          "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
+          "power_w_measured_soc": 27.56,
+          "power_w_measured_soc_delta_over_idle": 24.678,
+          "power_w_vin_sys_5v0": 7.36,
+          "power_w_nameplate_for_reference_only": 60.0,
+          "inferences_per_joule": 15.25,
+          "compute_p50_ms_repro_this_pass": 2.32227
         },
         "iq9075": {
           "status": "MEASURED",
@@ -430,9 +438,13 @@
           "e2e_p50_ms": 12.0635,
           "fps": 87.4,
           "engine_size_mb": 17.06,
-          "power_w_nameplate_ceiling": 60.0,
-          "inferences_per_joule_lower_bound": 1.46,
-          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+          "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
+          "power_w_measured_soc": 40.58,
+          "power_w_measured_soc_delta_over_idle": 37.692,
+          "power_w_vin_sys_5v0": 7.36,
+          "power_w_nameplate_for_reference_only": 60.0,
+          "inferences_per_joule": 2.15,
+          "compute_p50_ms_repro_this_pass": 11.4082
         },
         "iq9075": {
           "status": "MEASURED",
@@ -519,9 +531,13 @@
           "e2e_p50_ms": 4.626,
           "fps": 248.2,
           "engine_size_mb": 24.01,
-          "power_w_nameplate_ceiling": 60.0,
-          "inferences_per_joule_lower_bound": 4.14,
-          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+          "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
+          "power_w_measured_soc": 31.47,
+          "power_w_measured_soc_delta_over_idle": 28.589,
+          "power_w_vin_sys_5v0": 8.12,
+          "power_w_nameplate_for_reference_only": 60.0,
+          "inferences_per_joule": 7.89,
+          "compute_p50_ms_repro_this_pass": 3.96973
         },
         "iq9075": {
           "status": "MEASURED",
@@ -592,9 +608,13 @@
           "e2e_p50_ms": 12.6724,
           "fps": 82.5,
           "engine_size_mb": 28.68,
-          "power_w_nameplate_ceiling": 60.0,
-          "inferences_per_joule_lower_bound": 1.38,
-          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+          "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
+          "power_w_measured_soc": 22.42,
+          "power_w_measured_soc_delta_over_idle": 19.538,
+          "power_w_vin_sys_5v0": 7.85,
+          "power_w_nameplate_for_reference_only": 60.0,
+          "inferences_per_joule": 3.68,
+          "compute_p50_ms_repro_this_pass": 12.1919
         },
         "iq9075": {
           "status": "MEASURED",
@@ -665,9 +685,13 @@
           "e2e_p50_ms": 1.8784,
           "fps": 545.2,
           "engine_size_mb": 179.33,
-          "power_w_nameplate_ceiling": 60.0,
-          "inferences_per_joule_lower_bound": 9.09,
-          "perf_per_watt_basis": "UNMEASURED \u2014 nameplate ceiling only; this is a lower bound, not a value"
+          "perf_per_watt_basis": "MEASURED tegrastats under sustained load, MAXN. soc = VDD_GPU_SOC + VDD_CPU_CV (die rails; EXCLUDES LPDDR5 + carrier). VIN_SYS_5V0 recorded separately.",
+          "power_w_measured_soc": 25.52,
+          "power_w_measured_soc_delta_over_idle": 22.631,
+          "power_w_vin_sys_5v0": 9.58,
+          "power_w_nameplate_for_reference_only": 60.0,
+          "inferences_per_joule": 21.37,
+          "compute_p50_ms_repro_this_pass": 1.84082
         },
         "iq9075": {
           "status": "MEASURED",
@@ -733,6 +757,235 @@
           "qnn_built_where_trt_couldnt": false
         }
       }
+    }
+  },
+  "perf_per_watt": {
+    "status": "RESOLVED \u2014 winner is invariant across all three power conventions",
+    "orin_idle_soc_w": 2.884,
+    "rtx5090_idle_board_w": 64.97,
+    "orin_power_mode": "MAXN (nvpmodel mode 0) \u2014 PINNED, stated per the card's rule",
+    "rail_convention": "soc_w = VDD_GPU_SOC + VDD_CPU_CV (GPU+SoC die plus CPU+CV). VIN_SYS_5V0 is the 5V carrier/system input and is recorded separately, NOT folded in. Reproduces the fleet's published idle ~3.2 W.",
+    "why_three_conventions": "The 5090's nvidia-smi figure is WHOLE-BOARD (die + GDDR7 + VRM). The Orin's tegrastats SoC rails are DIE-ONLY: they exclude the LPDDR5 and the carrier. That asymmetry silently FLATTERS THE EDGE PART, which is the fleet's 16-for-16 failure direction. So we bracket rather than pick: A (as-measured) favours the Orin, B (incl. carrier) favours the 5090, C (marginal watts over idle) is the fairest single number. A conclusion is reported only if it survives all three.",
+    "supersedes": "RETIRES the nameplate claim '5090 575 W vs edge ~15-60 W -> perf/W is the edge story'. It was nameplate on BOTH sides. Measured: the 5090 draws 176-554 W (not 575) and the Orin draws 22.4-40.6 W (not 60).",
+    "per_model": [
+      {
+        "model": "resnet50v1",
+        "orin_compute_p50_ms": 1.0371,
+        "rtx5090_compute_p50_ms": 0.3145,
+        "orin_soc_w": 26.53,
+        "rtx5090_board_w": 227.0,
+        "conventions": {
+          "A_as_measured": {
+            "orin_w": 26.53,
+            "rtx5090_w": 227.0,
+            "orin_inf_per_joule": 36.35,
+            "rtx5090_inf_per_joule": 14.01,
+            "orin_advantage_x": 2.6,
+            "winner": "orin-agx"
+          },
+          "B_orin_incl_carrier": {
+            "orin_w": 34.79,
+            "rtx5090_w": 227.0,
+            "orin_inf_per_joule": 27.72,
+            "rtx5090_inf_per_joule": 14.01,
+            "orin_advantage_x": 1.98,
+            "winner": "orin-agx"
+          },
+          "C_delta_over_idle": {
+            "orin_w": 23.64,
+            "rtx5090_w": 162.03,
+            "orin_inf_per_joule": 40.78,
+            "rtx5090_inf_per_joule": 19.62,
+            "orin_advantage_x": 2.08,
+            "winner": "orin-agx"
+          }
+        },
+        "winner_invariant": true,
+        "winner": "orin-agx"
+      },
+      {
+        "model": "clip_vit_b32_visual",
+        "orin_compute_p50_ms": 1.8342,
+        "rtx5090_compute_p50_ms": 0.4856,
+        "orin_soc_w": 25.52,
+        "rtx5090_board_w": 278.0,
+        "conventions": {
+          "A_as_measured": {
+            "orin_w": 25.52,
+            "rtx5090_w": 278.0,
+            "orin_inf_per_joule": 21.37,
+            "rtx5090_inf_per_joule": 7.41,
+            "orin_advantage_x": 2.88,
+            "winner": "orin-agx"
+          },
+          "B_orin_incl_carrier": {
+            "orin_w": 35.1,
+            "rtx5090_w": 278.0,
+            "orin_inf_per_joule": 15.53,
+            "rtx5090_inf_per_joule": 7.41,
+            "orin_advantage_x": 2.1,
+            "winner": "orin-agx"
+          },
+          "C_delta_over_idle": {
+            "orin_w": 22.63,
+            "rtx5090_w": 213.03,
+            "orin_inf_per_joule": 24.09,
+            "rtx5090_inf_per_joule": 9.67,
+            "orin_advantage_x": 2.49,
+            "winner": "orin-agx"
+          }
+        },
+        "winner_invariant": true,
+        "winner": "orin-agx"
+      },
+      {
+        "model": "yolov8n-seg",
+        "orin_compute_p50_ms": 2.3799,
+        "rtx5090_compute_p50_ms": 0.4311,
+        "orin_soc_w": 27.56,
+        "rtx5090_board_w": 252.1,
+        "conventions": {
+          "A_as_measured": {
+            "orin_w": 27.56,
+            "rtx5090_w": 252.1,
+            "orin_inf_per_joule": 15.25,
+            "rtx5090_inf_per_joule": 9.2,
+            "orin_advantage_x": 1.66,
+            "winner": "orin-agx"
+          },
+          "B_orin_incl_carrier": {
+            "orin_w": 34.93,
+            "rtx5090_w": 252.1,
+            "orin_inf_per_joule": 12.03,
+            "rtx5090_inf_per_joule": 9.2,
+            "orin_advantage_x": 1.31,
+            "winner": "orin-agx"
+          },
+          "C_delta_over_idle": {
+            "orin_w": 24.68,
+            "rtx5090_w": 187.13,
+            "orin_inf_per_joule": 17.03,
+            "rtx5090_inf_per_joule": 12.4,
+            "orin_advantage_x": 1.37,
+            "winner": "orin-agx"
+          }
+        },
+        "winner_invariant": true,
+        "winner": "orin-agx"
+      },
+      {
+        "model": "yolo11s-seg",
+        "orin_compute_p50_ms": 4.0283,
+        "rtx5090_compute_p50_ms": 0.5893,
+        "orin_soc_w": 31.47,
+        "rtx5090_board_w": 348.5,
+        "conventions": {
+          "A_as_measured": {
+            "orin_w": 31.47,
+            "rtx5090_w": 348.5,
+            "orin_inf_per_joule": 7.89,
+            "rtx5090_inf_per_joule": 4.87,
+            "orin_advantage_x": 1.62,
+            "winner": "orin-agx"
+          },
+          "B_orin_incl_carrier": {
+            "orin_w": 39.59,
+            "rtx5090_w": 348.5,
+            "orin_inf_per_joule": 6.27,
+            "rtx5090_inf_per_joule": 4.87,
+            "orin_advantage_x": 1.29,
+            "winner": "orin-agx"
+          },
+          "C_delta_over_idle": {
+            "orin_w": 28.59,
+            "rtx5090_w": 283.53,
+            "orin_inf_per_joule": 8.68,
+            "rtx5090_inf_per_joule": 5.99,
+            "orin_advantage_x": 1.45,
+            "winner": "orin-agx"
+          }
+        },
+        "winner_invariant": true,
+        "winner": "orin-agx"
+      },
+      {
+        "model": "efficient_sam_vitt_encoder",
+        "orin_compute_p50_ms": 11.4443,
+        "rtx5090_compute_p50_ms": 1.3426,
+        "orin_soc_w": 40.58,
+        "rtx5090_board_w": 554.1,
+        "conventions": {
+          "A_as_measured": {
+            "orin_w": 40.58,
+            "rtx5090_w": 554.1,
+            "orin_inf_per_joule": 2.15,
+            "rtx5090_inf_per_joule": 1.34,
+            "orin_advantage_x": 1.6,
+            "winner": "orin-agx"
+          },
+          "B_orin_incl_carrier": {
+            "orin_w": 47.94,
+            "rtx5090_w": 554.1,
+            "orin_inf_per_joule": 1.82,
+            "rtx5090_inf_per_joule": 1.34,
+            "orin_advantage_x": 1.36,
+            "winner": "orin-agx"
+          },
+          "C_delta_over_idle": {
+            "orin_w": 37.69,
+            "rtx5090_w": 489.13,
+            "orin_inf_per_joule": 2.32,
+            "rtx5090_inf_per_joule": 1.52,
+            "orin_advantage_x": 1.52,
+            "winner": "orin-agx"
+          }
+        },
+        "winner_invariant": true,
+        "winner": "orin-agx"
+      },
+      {
+        "model": "yoloe-26s-seg-pf",
+        "orin_compute_p50_ms": 12.1201,
+        "rtx5090_compute_p50_ms": 3.1566,
+        "orin_soc_w": 22.42,
+        "rtx5090_board_w": 176.1,
+        "conventions": {
+          "A_as_measured": {
+            "orin_w": 22.42,
+            "rtx5090_w": 176.1,
+            "orin_inf_per_joule": 3.68,
+            "rtx5090_inf_per_joule": 1.8,
+            "orin_advantage_x": 2.05,
+            "winner": "orin-agx"
+          },
+          "B_orin_incl_carrier": {
+            "orin_w": 30.27,
+            "rtx5090_w": 176.1,
+            "orin_inf_per_joule": 2.73,
+            "rtx5090_inf_per_joule": 1.8,
+            "orin_advantage_x": 1.52,
+            "winner": "orin-agx"
+          },
+          "C_delta_over_idle": {
+            "orin_w": 19.54,
+            "rtx5090_w": 111.13,
+            "orin_inf_per_joule": 4.22,
+            "rtx5090_inf_per_joule": 2.85,
+            "orin_advantage_x": 1.48,
+            "winner": "orin-agx"
+          }
+        },
+        "winner_invariant": true,
+        "winner": "orin-agx"
+      }
+    ],
+    "RETRACTION_partial_correction_is_worse_than_none": {
+      "retracted_claim": "'With real 5090 power the 5090 is MORE efficient than the Orin on 3 of 6 models, inverting the nameplate answer.' \u2014 published 2026-07-10. FALSE. Do not requote.",
+      "why_it_was_wrong": "It was a MIXED-BASIS comparison: MEASURED 5090 watts (176-554 W) against the Orin's NAMEPLATE 60 W. We had measured one side of the ratio and left the other on nameplate. The Orin actually draws 22.4-40.6 W, so the 60 W figure inflated its denominator by 1.5-2.7x and handed the win to the 5090 on exactly the three models it 'flipped' (yolov8n-seg 0.76x, yolo11s-seg 0.85x, yoloe-26s-seg 0.76x).",
+      "corrected": "With BOTH sides measured, the Orin wins perf/W on ALL SIX models, under ALL THREE power conventions (1.29x-2.88x). The winner is invariant.",
+      "the_lesson": "HALF-FIXING A NAMEPLATE ERROR IS WORSE THAN NOT FIXING IT AT ALL. A ratio with nameplate on BOTH sides is symmetric \u2014 the errors partially cancel, and everyone knows not to trust it. Measure ONE side and you have replaced a symmetric, visibly-unreliable error with an ASYMMETRIC, confident-looking one: the corrected side now carries authority ('we measured it!') while the stale side silently sets the answer. We spent the effort to measure the 5090, and that effort is precisely what made the conclusion wrong. A partially-corrected comparison is not partially correct.",
+      "note_on_direction": "The fleet's 16-for-16 streak is that every error flatters the accelerator. THIS ONE WENT THE OTHER WAY \u2014 the mixed basis penalised the Orin. Consistent with orb_slam's structural reading: the bias is not affection for accelerators, it is that the stale term is whichever one you did not just work on.",
+      "nameplate_vs_measured_footnote": "Amusingly, the ORIGINAL all-nameplate answer (5090 575 W vs Orin 60 W) got the WINNER right on all six models, within -30%/+22% on magnitude \u2014 because both denominators were inflated ~2x and the errors largely cancelled. It was right for the wrong reason. That is not a defence of nameplate: the per-model magnitudes were still unreliable, and on a different silicon pair (e.g. the iq9, whose nameplate 15-40 W vs measured draw is still UNKNOWN) the cancellation is not guaranteed."
     }
   }
 }

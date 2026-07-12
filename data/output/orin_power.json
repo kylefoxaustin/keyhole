@@ -1,0 +1,134 @@
+{
+  "__meta__": {
+    "board": "Jetson AGX Orin 64GB devkit",
+    "power_mode": "MAXN (nvpmodel mode 0) \u2014 PINNED, stated per the card's rule",
+    "trt": "10.3 (JetPack 6)",
+    "rail_convention": "soc_w = VDD_GPU_SOC + VDD_CPU_CV (GPU+SoC die plus CPU+CV). VIN_SYS_5V0 is the 5V carrier/system input and is recorded separately, NOT folded in. Reproduces the fleet's published idle ~3.2 W.",
+    "window": "30s steady-state, first 6s discarded (DVFS ramp); engine PRELOADED \u2014 build/load excluded from the window",
+    "sample_interval_ms": 100,
+    "validity_gate": "rows with valid=false did not execute on the GPU \u2014 do not quote",
+    "excluded": {
+      "efficientsam_decoder": "does not build on TRT 10.3 (IIOneHotLayer cannot compute a shape tensor) \u2014 a TRT VERSION limit, not silicon; builds fine on 10.16."
+    }
+  },
+  "idle": {
+    "n_samples": 95,
+    "vdd_gpu_soc_mean_mw": 2665.1,
+    "vdd_cpu_cv_mean_mw": 219.1,
+    "vin_sys_5v0_mean_mw": 4233.0,
+    "soc_mean_w": 2.884,
+    "soc_p50_w": 2.906,
+    "soc_max_w": 2.908,
+    "gr3d_mean_pct": 0.0
+  },
+  "results": [
+    {
+      "model": "resnet50",
+      "precision": "fp16",
+      "valid": true,
+      "compute_p50_ms_trtexec": 1.05664,
+      "idle_soc_w": 2.884,
+      "power": {
+        "n_samples": 251,
+        "vdd_gpu_soc_mean_mw": 26007.2,
+        "vdd_cpu_cv_mean_mw": 519.4,
+        "vin_sys_5v0_mean_mw": 8258.8,
+        "soc_mean_w": 26.527,
+        "soc_p50_w": 26.409,
+        "soc_max_w": 27.104,
+        "gr3d_mean_pct": 96.0
+      },
+      "soc_delta_over_idle_w": 23.643
+    },
+    {
+      "model": "clip_vit_b32",
+      "precision": "fp16",
+      "valid": true,
+      "compute_p50_ms_trtexec": 1.84082,
+      "idle_soc_w": 2.884,
+      "power": {
+        "n_samples": 250,
+        "vdd_gpu_soc_mean_mw": 25214.4,
+        "vdd_cpu_cv_mean_mw": 300.8,
+        "vin_sys_5v0_mean_mw": 9581.3,
+        "soc_mean_w": 25.515,
+        "soc_p50_w": 25.456,
+        "soc_max_w": 26.849,
+        "gr3d_mean_pct": 96.0
+      },
+      "soc_delta_over_idle_w": 22.631
+    },
+    {
+      "model": "yolov8n_seg",
+      "precision": "fp16",
+      "valid": true,
+      "compute_p50_ms_trtexec": 2.32227,
+      "idle_soc_w": 2.884,
+      "power": {
+        "n_samples": 249,
+        "vdd_gpu_soc_mean_mw": 26364.6,
+        "vdd_cpu_cv_mean_mw": 1197.6,
+        "vin_sys_5v0_mean_mw": 7363.7,
+        "soc_mean_w": 27.562,
+        "soc_p50_w": 27.599,
+        "soc_max_w": 28.294,
+        "gr3d_mean_pct": 95.0
+      },
+      "soc_delta_over_idle_w": 24.678
+    },
+    {
+      "model": "yolo11s_seg",
+      "precision": "fp16",
+      "valid": true,
+      "compute_p50_ms_trtexec": 3.96973,
+      "idle_soc_w": 2.884,
+      "power": {
+        "n_samples": 250,
+        "vdd_gpu_soc_mean_mw": 30712.6,
+        "vdd_cpu_cv_mean_mw": 760.5,
+        "vin_sys_5v0_mean_mw": 8119.2,
+        "soc_mean_w": 31.473,
+        "soc_p50_w": 31.536,
+        "soc_max_w": 32.529,
+        "gr3d_mean_pct": 96.0
+      },
+      "soc_delta_over_idle_w": 28.589
+    },
+    {
+      "model": "efficientsam_encoder",
+      "precision": "fp16",
+      "valid": true,
+      "compute_p50_ms_trtexec": 11.4082,
+      "idle_soc_w": 2.884,
+      "power": {
+        "n_samples": 250,
+        "vdd_gpu_soc_mean_mw": 40312.3,
+        "vdd_cpu_cv_mean_mw": 264.2,
+        "vin_sys_5v0_mean_mw": 7360.8,
+        "soc_mean_w": 40.576,
+        "soc_p50_w": 40.537,
+        "soc_max_w": 41.243,
+        "gr3d_mean_pct": 99.0
+      },
+      "soc_delta_over_idle_w": 37.692
+    },
+    {
+      "model": "yoloe_26s_seg",
+      "precision": "fp16",
+      "valid": true,
+      "compute_p50_ms_trtexec": 12.1919,
+      "idle_soc_w": 2.884,
+      "power": {
+        "n_samples": 249,
+        "vdd_gpu_soc_mean_mw": 22155.5,
+        "vdd_cpu_cv_mean_mw": 266.8,
+        "vin_sys_5v0_mean_mw": 7846.1,
+        "soc_mean_w": 22.422,
+        "soc_p50_w": 22.438,
+        "soc_max_w": 22.916,
+        "gr3d_mean_pct": 98.3
+      },
+      "soc_delta_over_idle_w": 19.538
+    }
+  ]
+}
