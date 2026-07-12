@@ -58,7 +58,7 @@ POWER_KEY = {
     "efficientsam_decoder": "efficient_sam_vitt_decoder",
 }
 
-RTX_IDLE_W = 64.97
+RTX_IDLE_W = 21.73   # clean card, measured 2026-07-12. The old 64.97 W was a DIRTY-CARD idle.
 
 
 def ips(ms):
@@ -80,6 +80,7 @@ def main():
     mpath = OUT / "vision_corpus_three_platform.json"
     matrix = json.loads(mpath.read_text())
     orin_pwr = json.loads((OUT / "orin_power.json").read_text())
+    rtx_pwr = json.loads((OUT / "rtx5090_power_by_model_v2.json").read_text())
 
     orin_idle = orin_pwr["idle"]["soc_mean_w"]
     orin_by_model = {r["model"]: r for r in orin_pwr["results"]}
@@ -94,7 +95,11 @@ def main():
         rtx, orin = cell["rtx-5090"], cell["orin-agx-64gb"]
 
         rtx_ms, orin_ms = rtx["compute_p50_ms"], orin["compute_p50_ms"]
-        rtx_w = rtx["power_w_measured"]
+        rtx_w = rtx_pwr["models"][key]["power_w_median"]
+        rtx["power_w_measured"] = rtx_w
+        rtx["power_w_measured_runs"] = rtx_pwr["models"][key]["runs_w"]
+        rtx["power_w_spread_pct"] = rtx_pwr["models"][key]["spread_pct"]
+        rtx["power_w_PREVIOUS_dirty_card"] = rtx_pwr["models"][key]["old_dirty_w"]
 
         soc = o["power"]["soc_mean_w"]
         vin = o["power"]["vin_sys_5v0_mean_mw"] / 1000.0
