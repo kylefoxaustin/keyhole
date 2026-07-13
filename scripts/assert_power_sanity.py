@@ -72,6 +72,27 @@ def main():
     rtx = json.loads((OUT / "rtx5090_power_by_model_v2.json").read_text())
     pw = matrix["perf_per_watt"]
 
+    # ---- A0. IS THE EXPECTED SET ITSELF COMPLETE? (91emulator's rung) --------------
+    # rt1180: assert against an expected value. 91emulator, one rung below: YOU CAN ASSERT
+    # AGAINST AN EXPECTED VALUE AND STILL BE MEASURING THE WRONG POPULATION. Our coverage
+    # oracle is the MANIFEST — so the MANIFEST needs its own oracle, and it cannot be itself.
+    # The filesystem is independent of it: add an 8th ONNX and manifest==measured still
+    # passes while the corpus has a hole.
+    print("\nA0. THE ORACLE'S OWN COVERAGE  (is the MANIFEST itself complete?)")
+    onnx_dir = OUT / "onnx_corpus_iq9"
+    on_disk = {f.name for f in onnx_dir.glob("*.onnx")}
+    in_manifest = {m["onnx"] for m in manifest["models"]}
+    check(on_disk == in_manifest,
+          f"MANIFEST ({len(in_manifest)}) matches the ONNX files on disk ({len(on_disk)})",
+          f"on disk but NOT in the manifest: {sorted(on_disk - in_manifest)} | "
+          f"in manifest but MISSING from disk: {sorted(in_manifest - on_disk)} — "
+          f"the expected set is itself incomplete, so every downstream coverage check is "
+          f"measuring the wrong population and will pass anyway (91emulator's rung).")
+    check(bool(manifest.get("gaps_to_export") is not None),
+          "MANIFEST declares its own known gaps (`gaps_to_export`)",
+          "an expected set that does not state what it is MISSING claims a completeness "
+          "it never established")
+
     # ---- A. COVERAGE — the expected set comes from the MANIFEST, not from us -------
     print("\nA. COVERAGE  (expected set = corpus MANIFEST.json, external to these scripts)")
     expected = {m["name"] for m in manifest["models"]}
